@@ -1220,8 +1220,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
   const defaults = { members: [], committee: "all", chamber: "all", ticker: "", timing: "trade", owner: "self",
     feedSide: "all", feedDays: "30", feedKept: false, range: "all", hideBig: true, sp500: true, capMax: "0",
     exclude: "NVDA, AAPL, GOOGL", committeeOnly: true, lateOnly: false, options: true, crypto: true, side: "all", view: "kept",
-    leaderSort: "ret", leaderDir: -1, tradeSort: "d", tradeDir: -1, units: "pct", spikes: true, v: 11,
-    lines: { kept: true, spy: true, inv: true, every: false, big: false } };
+    leaderSort: "ret", leaderDir: -1, tradeSort: "d", tradeDir: -1, units: "pct", spikes: true, v: 12,
+    lines: { kept: true, spy: true, inv: true, every: true, big: true } };
   const postDefaults = { style: "chart", who: "all", trade: "", filing: "", ticker: "", member: "", committee: "", window: "182", sells: true, side: "B", days: "30", sort: "amt", kept: false, theme: "light", pv: 11 };
   let S = { ...defaults }, P = { ...postDefaults };
   try {
@@ -1234,6 +1234,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       Object.assign(S, { owner: "self", capMax: "0", exclude: "NVDA, AAPL, GOOGL", hideBig: true, committeeOnly: true, v: 11 });
       S.members = saved.member && saved.member !== "all" ? [String(saved.member)] : [];
     }
+    // v12: every line on the portfolio chart starts ticked
+    if (!(saved.v >= 12)) { S.lines = { ...defaults.lines }; S.v = 12; }
     delete S.member;
     const savedPost = JSON.parse(localStorage.getItem("ctc-post") || "{}");
     // earlier versions had three post types
