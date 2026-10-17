@@ -880,8 +880,6 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
         <p class="empty" id="postEmpty" hidden></p>
         <div class="post-actions">
           <button type="button" class="btn primary" id="postSave">Download image</button>
-          <button type="button" class="btn" id="postPdf" title="A PDF keeps the site address as a clickable link">Download PDF</button>
-          <button type="button" class="btn" id="postShare" hidden>Share</button>
           <span id="postHint">Click the image to view it full size, or right-click to save it.</span>
         </div>
       </div>
@@ -2463,18 +2461,12 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     ctx.fillStyle = th.muted; ctx.font = `700 22px ${UI}`;
     ctx.fillText(eyebrow.toUpperCase().split("").join(String.fromCharCode(8202)), 64, 92);
   }
-  // the site's address, written at the bottom of every image; its box is kept so the PDF download can
-  // turn it into a real link (a PNG can't hold one)
-  const SITE_URL = "https://harryv12.github.io/congress-trade-check/";
+  // the site's address, written at the bottom of every image
   const SITE_LABEL = "harryv12.github.io/congress-trade-check";
-  let postLink = null;
   function drawSiteLink(ctx, x, y, font, color) {
     ctx.save(); ctx.font = font; ctx.fillStyle = color; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    const w = ctx.measureText(SITE_LABEL).width, m = ctx.measureText("Hg"), h = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
     ctx.fillText(SITE_LABEL, x, y);
-    ctx.fillRect(x, y + 5, w, 1.5);
     ctx.restore();
-    postLink = { x: x - 4, y: y - m.actualBoundingBoxAscent - 4, w: w + 8, h: h + 12 };
   }
   function footer(ctx, W, H, th) {
     ctx.strokeStyle = th.grid; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(64, H - 118); ctx.lineTo(W - 64, H - 118); ctx.stroke();
@@ -5400,7 +5392,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     return null;
   }
 
-  let postBlob = null, postUrl = null, postCanvas = null, drawSeq = 0;
+  let postBlob = null, postUrl = null, drawSeq = 0;
   const DRAW = { terminal: drawTerminal, list: drawRoundup, breaking: drawBreaking, scorecard: drawScorecardPoster,
     leaders: drawLeaders, conflict: drawConflict, frontpage: drawFrontPage, card: drawCard, receipt: drawReceipt, spikes: drawSpikes };
   for (const s of MARKET) DRAW[s] = drawMarket;
@@ -5467,12 +5459,11 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     const ctx = canvas.getContext("2d");
     const th = THEMES[P.theme] || THEMES.light;
     let problem;
-    postLink = null;
     try { problem = !PRICES ? "Daily prices (prices.js) failed to load." : await DRAW[P.style](ctx, W, H, th); }
     catch (e) { console.error(e); problem = "This view cannot be drawn for this selection."; }
     if (seq !== drawSeq) return;
     if (problem) {
-      img.hidden = true; emptyEl.hidden = false; emptyEl.textContent = problem; $("#postSave").disabled = true; $("#postPdf").disabled = true; postBlob = null;
+      img.hidden = true; emptyEl.hidden = false; emptyEl.textContent = problem; $("#postSave").disabled = true; postBlob = null;
       return;
     }
     try {
@@ -5481,8 +5472,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
         postBlob = blob;
         if (postUrl) URL.revokeObjectURL(postUrl);
         postUrl = URL.createObjectURL(blob);
-        img.src = postUrl; img.hidden = false; emptyEl.hidden = true; $("#postSave").disabled = false; $("#postPdf").disabled = false;
-        postCanvas = canvas;
+        img.src = postUrl; img.hidden = false; emptyEl.hidden = true; $("#postSave").disabled = false;
       }, "image/png");
     } catch (e) {
       // opened straight from disk, the browser treats the sharp portrait files as another site's
@@ -5617,36 +5607,6 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   }
-  // a one-page PDF of the image, with a real link over the site address
-  function postPdf() {
-    const c = postCanvas; if (!c) return null;
-    const W = c.width, H = c.height;
-    const bin = atob(c.toDataURL("image/jpeg", 0.92).split(",")[1]);
-    const jpg = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) jpg[i] = bin.charCodeAt(i);
-    const enc = new TextEncoder(), parts = [], offs = [];
-    let len = 0;
-    const put = (x) => { const b = typeof x === "string" ? enc.encode(x) : x; parts.push(b); len += b.length; };
-    const obj = (n, body) => { offs[n] = len; put(`${n} 0 obj\n`); body(); put("\nendobj\n"); };
-    const L = postLink, rect = L ? [L.x, H - L.y - L.h, L.x + L.w, H - L.y].map((v) => v.toFixed(1)).join(" ") : null;
-    const draw = `q ${W} 0 0 ${H} 0 0 cm /Im0 Do Q`;
-    put("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
-    obj(1, () => put("<< /Type /Catalog /Pages 2 0 R >>"));
-    obj(2, () => put("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"));
-    obj(3, () => put(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R${rect ? " /Annots [6 0 R]" : ""} >>`));
-    obj(4, () => { put(`<< /Type /XObject /Subtype /Image /Width ${W} /Height ${H} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`); put(jpg); put("\nendstream"); });
-    obj(5, () => put(`<< /Length ${draw.length} >>\nstream\n${draw}\nendstream`));
-    if (rect) obj(6, () => put(`<< /Type /Annot /Subtype /Link /Rect [${rect}] /Border [0 0 0] /A << /S /URI /URI (${SITE_URL}) >> >>`));
-    const n = rect ? 7 : 6, xref = len;
-    put(`xref\n0 ${n}\n0000000000 65535 f \n` + offs.slice(1, n).map((o) => String(o).padStart(10, "0") + " 00000 n \n").join(""));
-    put(`trailer\n<< /Size ${n} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
-    return new Blob(parts, { type: "application/pdf" });
-  }
-  async function sharePost() {
-    if (!postBlob) return;
-    const file = new File([postBlob], postFileName(), { type: "image/png" });
-    try { await navigator.share({ files: [file], title: "Congress Trade Check", text: `Congress Trade Check: ${SITE_URL}`, url: SITE_URL }); }
-    catch (e) { if (e && e.name !== "AbortError") $("#postHint").textContent = "Sharing isn't available here. Download the image instead."; }
-  }
   function postFileName() {
     const slug = (s) => s.toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^-|-$/g, "");
     const pm = PE.member, who = pm ? slug(pm.name) : "member", tr = selectedTrade();
@@ -5666,7 +5626,6 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     return name;
   }
   async function savePost() { if (postBlob) await saveFile(postFileName(), postBlob); }
-  async function savePostPdf() { const pdf = postPdf(); if (pdf) await saveFile(postFileName().replace(/\.png$/, ".pdf"), pdf); }
   const postSync = {};  // re-highlights a post control's buttons after code changes its value
   function bindPostControls() {
     for (const id of ["pStyleMarket", "pStyleOther"]) $("#" + id).addEventListener("click", (e) => {
@@ -5686,10 +5645,6 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     $("#pTicker").addEventListener("change", (e) => { P.ticker = e.target.value; save(); renderPost(); });
     bindStockSearch();
     $("#postSave").addEventListener("click", savePost);
-    $("#postPdf").addEventListener("click", savePostPdf);
-    $("#postShare").addEventListener("click", sharePost);
-    // Share only where the device can share an image (mostly phones)
-    try { $("#postShare").hidden = !(navigator.canShare && navigator.canShare({ files: [new File([new Uint8Array(1)], "x.png", { type: "image/png" })] })); } catch (e) { $("#postShare").hidden = true; }
     // click (or Enter on) the image to see it full size; click anywhere, the × or Esc to close
     const viewer = $("#imgView"), openViewer = () => {
       if (!postUrl || $("#postImg").hidden) return;
