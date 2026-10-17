@@ -1220,10 +1220,10 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
   });
 
   // ---------- state ----------
-  const defaults = { members: [], committee: "all", chamber: "all", ticker: "", timing: "trade", owner: "self",
+  const defaults = { members: [], committee: "all", chamber: "all", ticker: "", timing: "trade", owner: "all",
     feedSide: "all", feedDays: "30", feedKept: false, range: "all", hideBig: true, sp500: true, capMax: "0",
     exclude: "NVDA, AAPL, GOOGL", committeeOnly: true, lateOnly: false, options: true, crypto: true, side: "all", view: "kept",
-    leaderSort: "ret", leaderDir: -1, tradeSort: "d", tradeDir: -1, units: "pct", spikes: true, v: 12,
+    leaderSort: "ret", leaderDir: -1, tradeSort: "d", tradeDir: -1, units: "pct", spikes: true, v: 13,
     lines: { kept: true, spy: true, inv: true, every: true, big: true } };
   const postDefaults = { style: "chart", who: "all", trade: "", filing: "", ticker: "", member: "", committee: "", window: "182", sells: true, side: "B", days: "30", sort: "amt", kept: false, theme: "light", pv: 11 };
   let S = { ...defaults }, P = { ...postDefaults };
@@ -1239,6 +1239,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     }
     // v12: every line on the portfolio chart starts ticked
     if (!(saved.v >= 12)) { S.lines = { ...defaults.lines }; S.v = 12; }
+    // v13: Account starts on All (own, spouse, children and joint accounts)
+    if (!(saved.v >= 13)) { S.owner = "all"; S.v = 13; }
     delete S.member;
     const savedPost = JSON.parse(localStorage.getItem("ctc-post") || "{}");
     // earlier versions had three post types
