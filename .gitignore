@@ -1,0 +1,6 @@
+# only the files the page loads are published
+data.json
+photos/
+*.tmp
+.DS_Store
+Thumbs.db
