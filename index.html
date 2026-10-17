@@ -389,6 +389,8 @@ td .btn.small { font-size: 12px; padding: 3px 9px; }
 .removed b { color: var(--bad); font-weight: 700; }
 .removed .picked-note { color: var(--ink-2); flex-basis: 100%; }
 .mf-head { display: grid; gap: 2px; margin-bottom: 8px; }
+.mf-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.mf-row .theme-btn { margin-left: auto; padding: 5px 11px; font-size: 12.5px; }
 .mf-title { font-size: 20px; }
 .field.politicians .chips { margin-top: 6px; }
 .ctx { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
@@ -631,7 +633,6 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     <div class="top">
       <h1><span class="logo" aria-hidden="true"></span>Congress Trade Check</h1>
       <span class="stamp pill" id="stamp" hidden></span>
-      <button type="button" class="btn theme-btn" id="themeBtn"></button>
     </div>
     <p class="lede">Stock trades disclosed by Congress, the President, Cabinet officials and corporate insiders, benchmarked against the S&amp;P 500.</p>
   </header>
@@ -667,7 +668,10 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       <button type="button" class="btn primary" id="closeFilters">Show results</button>
     </div>
     <div class="mf-head">
-      <h2 class="mf-title" title="Applies to the whole page, and to Data Visualization when “Apply the Filter” is ticked.">Filter</h2>
+      <div class="mf-row">
+        <h2 class="mf-title" title="Applies to the whole page, and to Data Visualization when “Apply the Filter” is ticked.">Filter</h2>
+        <button type="button" class="btn theme-btn" id="themeBtn"></button>
+      </div>
       <p class="note">Applies to the whole page, and to Data Visualization when “Apply the Filter” is ticked.</p>
     </div>
     <div class="filter-groups">
