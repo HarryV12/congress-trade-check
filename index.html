@@ -233,6 +233,20 @@ details.howto .body b { color: var(--ink); }
 
 /* scorecard */
 .scorecard { display: grid; gap: 16px; }
+/* Democrats versus Republicans: one card per party */
+#party { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 14px; }
+.pcard { display: grid; gap: 10px; padding: 14px 16px 12px; border: 1px solid var(--line); border-top: 4px solid var(--pc); border-radius: var(--radius); background: var(--surface); }
+.pcard-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.pcard-head h3 { font-size: 16px; }
+.pdiff { font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.pdiff.pos { background: var(--good-soft); }
+.pdiff.neg { background: var(--bad-soft); }
+.pcard-nums { display: grid; gap: 1px; }
+.pcard-nums b { font-family: var(--font-mono); font-size: 28px; font-weight: 700; line-height: 1.15; }
+.pcard-nums span { font-size: 12.5px; color: var(--muted); }
+.pbars { display: grid; grid-template-columns: 74px minmax(0, 1fr) 58px; gap: 6px 10px; align-items: center; font-size: 12.5px; color: var(--ink-2); }
+.pbars em { font-style: normal; font-family: var(--font-mono); font-weight: 600; text-align: right; }
+.pcard-foot { margin: 0; font-size: 12px; color: var(--muted); }
 /* scorecard, new design: one verdict, two big numbers, one table for both timings */
 .sc2 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .sc2 > * { min-width: 0; }
@@ -2054,12 +2068,24 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       const list = res.kept.filter((t) => members[t.m].party === p && !noSeat(members[t.m]));
       return { p, s: stats(list), people: new Set(list.filter((t) => t.side === "B").map((t) => t.m)).size };
     }).filter((r) => r.s.n);
-    const max = Math.max(0.01, ...rows.flatMap((r) => [Math.abs(r.s.ret), Math.abs(r.s.spyRet)]));
-    const bar = (v, light) => `<div class="track"><div class="fill" style="background:${v >= 0 ? "var(--good)" : "var(--bad)"};opacity:${light ? 0.45 : 1};${v >= 0 ? `left:50%;width:${Math.abs(v) / max * 50}%` : `right:50%;width:${Math.abs(v) / max * 50}%`}"></div></div>`;
-    $("#party").innerHTML = rows.length ? rows.map((r) => `<div class="card" style="gap:6px">
-        <div class="section-head"><b>${names[r.p]}</b><span class="note">${r.people} member${r.people > 1 ? "s" : ""} · ${r.s.n} buys · <span class="${cls(r.s.diff)}">${pts(r.s.diff)} vs S&amp;P</span></span></div>
-        <div class="dbar"><span>Buys ${pct(r.s.ret)}</span>${bar(r.s.ret)}</div>
-        <div class="dbar"><span>S&amp;P ${pct(r.s.spyRet)}</span>${bar(r.s.spyRet, true)}</div></div>`).join("")
+    // one card per party: their return as the big number, the gap to the S&P 500 as a badge, and both
+    // returns as paired bars on one scale shared by every card (zero marked when anything is negative)
+    const vals = rows.flatMap((r) => [r.s.ret, r.s.spyRet]);
+    const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = hi - lo || 1, z = -lo / span * 100;
+    const bar = (v, color) => {
+      const a = (v - lo) / span * 100, left = Math.min(a, z), w = Math.max(Math.abs(a - z), 0.8);
+      return `<div class="sc2-bar"><i style="left:${left.toFixed(1)}%;width:${w.toFixed(1)}%;background:${color}"></i>${lo < 0 ? `<i class="zero" style="left:${z.toFixed(1)}%"></i>` : ""}</div>`;
+    };
+    const tone = { D: "var(--dem)", R: "var(--rep)", I: "var(--ind)" };
+    $("#party").innerHTML = rows.length ? rows.map((r) => `<div class="pcard" style="--pc:${tone[r.p]}">
+        <div class="pcard-head"><h3>${names[r.p]}</h3><span class="pdiff ${cls(r.s.diff)}">${pts(r.s.diff)} vs S&amp;P</span></div>
+        <div class="pcard-nums"><b class="${cls(r.s.ret)}">${pct(r.s.ret)}</b><span>their buys · S&amp;P 500 ${pct(r.s.spyRet)} on the same days</span></div>
+        <div class="pbars">
+          <span>Their buys</span>${bar(r.s.ret, "var(--series-1)")}<em class="${cls(r.s.ret)}">${pct(r.s.ret)}</em>
+          <span>S&amp;P 500</span>${bar(r.s.spyRet, "var(--series-2)")}<em class="${cls(r.s.spyRet)}">${pct(r.s.spyRet)}</em>
+        </div>
+        <p class="pcard-foot">${plural(r.people, "member")} · ${plural(r.s.n, "buy")} · ${Math.round(r.s.win * r.s.n).toLocaleString()} beat the S&amp;P 500</p>
+      </div>`).join("")
       : '<p class="empty">No buys match the current filters.</p>';
   }
   function renderActive(res) {
@@ -2380,7 +2406,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       <p>Officials' yearly financial disclosures (OGE Form 278e) list what they own, with value ranges, on one day a year. They are shown on each official's card as holdings, kept apart from the trades, so they never change any total, return or chart.</p>
       <p>Each row links to the original filing on the House Clerk's or OGE's site, Quiver or OpenInsider, so any number here can be checked against the source.</p>`;
     $("#mPaper").innerHTML = `<p>Some members, including several of the most active traders, file on paper. The Clerk publishes those reports as images of the signed forms, so they are read automatically here: ${readRows.toLocaleString()} trades from ${paper.length} paper filings. Company names written on the forms are matched to stock tickers by name.</p>
-      <p>${flagged.toLocaleString()} of those trades are marked “check scan” where a date, amount or trade type should be confirmed against the original form, which every row links to. Amounts that need checking count as $0 in the totals rather than a guess.</p>`;
+      <p>${flagged.toLocaleString()} of those trades are marked “check scan” where a date, amount or trade type should be confirmed against the original form, which every row links to. Amounts that need checking count as $0 in the totals rather than a guess.</p>
+      <p>Where the amount mark on a scan can't be read, the amount comes from Quiver Quantitative's hand transcription of the same filing, when it lists exactly one matching trade (same member, stock, buy or sell, and date). Readable amounts are never changed.</p>`;
     // the best estimate, and how it did against real amounts (pipeline/test_estimates.py writes estimate_test.js)
     const small = trades.filter((t) => t.exact && t.lo === 1001 && t.hi === 15000).map((t) => t.exact).sort((a, b) => a - b);
     const typical = small.length ? small[Math.floor(small.length / 2)] : null;
