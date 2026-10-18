@@ -511,6 +511,7 @@ button.btn:disabled { opacity: 0.5; cursor: default; }
 .post-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 12.5px; color: var(--ink-2); }
 @media (max-width: 760px) { .post-grid { grid-template-columns: minmax(0, 1fr); } }
 .post-preview img { cursor: zoom-in; }
+.post-preview img.drawing { width: min(540px, 100%); background: var(--surface); box-shadow: none; cursor: progress; }
 /* full-size view of the image: click it to open, click anywhere or press Esc to close */
 .img-view { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgb(0 0 0 / 0.86); cursor: zoom-out; }
 .img-view[hidden] { display: none; }
@@ -5514,6 +5515,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
   }
 
   let postBlob = null, postUrl = null, drawSeq = 0;
+  // a 3:4 blank (the posters' shape) shown while a new image is being drawn
+  const BLANK_POST = (() => { const c = document.createElement("canvas"); c.width = 3; c.height = 4; return c.toDataURL("image/png"); })();
   const DRAW = { terminal: drawTerminal, list: drawRoundup, breaking: drawBreaking, scorecard: drawScorecardPoster,
     leaders: drawLeaders, conflict: drawConflict, frontpage: drawFrontPage, card: drawCard, receipt: drawReceipt, spikes: drawSpikes };
   for (const s of MARKET) DRAW[s] = drawMarket;
@@ -5568,6 +5571,10 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     document.querySelectorAll("[data-for]").forEach((el) => { el.hidden = !el.dataset.for.split(" ").some((k) => keys.includes(k)); });
     syncPostControls();
     const emptyEl = $("#postEmpty"), img = $("#postImg");
+    // while the new image draws, show a blank of the same shape instead of the previous view's image,
+    // so the old picture can't be copied or downloaded by mistake
+    if (!img.hidden) { img.src = BLANK_POST; img.classList.add("drawing"); }
+    $("#postSave").disabled = true; postBlob = null;
     if (!PHOTOS) PHOTOS = (await loadScript("photos.js") && window.CTC_PHOTOS) || {};
     if (!PRICES) { await loadScript("prices.js"); PRICES = window.CTC_PRICES || null; }
     if (seq !== drawSeq) return;
@@ -5593,7 +5600,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
         postBlob = blob;
         if (postUrl) URL.revokeObjectURL(postUrl);
         postUrl = URL.createObjectURL(blob);
-        img.src = postUrl; img.hidden = false; emptyEl.hidden = true; $("#postSave").disabled = false;
+        img.src = postUrl; img.hidden = false; img.classList.remove("drawing"); emptyEl.hidden = true; $("#postSave").disabled = false;
       }, "image/png");
     } catch (e) {
       // opened straight from disk, the browser treats the sharp portrait files as another site's
