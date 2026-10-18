@@ -913,6 +913,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
         <p class="empty" id="postEmpty" hidden></p>
         <div class="post-actions">
           <button type="button" class="btn primary" id="postSave">Download image</button>
+          <button type="button" class="btn" id="postCopy">Copy image</button>
           <span id="postHint">Click the image to view it full size, or right-click to save it.</span>
         </div>
       </div>
@@ -5515,6 +5516,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
   }
 
   let postBlob = null, postUrl = null, drawSeq = 0;
+  let POST_HINT = "Click the image to view it full size, or right-click to save it.";
   // a 3:4 blank (the posters' shape) shown while a new image is being drawn
   const BLANK_POST = (() => { const c = document.createElement("canvas"); c.width = 3; c.height = 4; return c.toDataURL("image/png"); })();
   const DRAW = { terminal: drawTerminal, list: drawRoundup, breaking: drawBreaking, scorecard: drawScorecardPoster,
@@ -5574,7 +5576,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     // while the new image draws, show a blank of the same shape instead of the previous view's image,
     // so the old picture can't be copied or downloaded by mistake
     if (!img.hidden) { img.src = BLANK_POST; img.classList.add("drawing"); }
-    $("#postSave").disabled = true; postBlob = null;
+    $("#postSave").disabled = true; $("#postCopy").disabled = true; postBlob = null;
+    $("#postHint").textContent = "Drawing the image…";
     if (!PHOTOS) PHOTOS = (await loadScript("photos.js") && window.CTC_PHOTOS) || {};
     if (!PRICES) { await loadScript("prices.js"); PRICES = window.CTC_PRICES || null; }
     if (seq !== drawSeq) return;
@@ -5592,6 +5595,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     if (seq !== drawSeq) return;
     if (problem) {
       img.hidden = true; emptyEl.hidden = false; emptyEl.textContent = problem; $("#postSave").disabled = true; postBlob = null;
+      $("#postHint").textContent = POST_HINT;
       return;
     }
     try {
@@ -5600,7 +5604,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
         postBlob = blob;
         if (postUrl) URL.revokeObjectURL(postUrl);
         postUrl = URL.createObjectURL(blob);
-        img.src = postUrl; img.hidden = false; img.classList.remove("drawing"); emptyEl.hidden = true; $("#postSave").disabled = false;
+        img.src = postUrl; img.hidden = false; img.classList.remove("drawing"); emptyEl.hidden = true; $("#postSave").disabled = false; $("#postCopy").disabled = false;
+        $("#postHint").textContent = POST_HINT;
       }, "image/png");
     } catch (e) {
       // opened straight from disk, the browser treats the sharp portrait files as another site's
@@ -5773,6 +5778,18 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     $("#pTicker").addEventListener("change", (e) => { P.ticker = e.target.value; save(); renderPost(); });
     bindStockSearch();
     $("#postSave").addEventListener("click", savePost);
+    // copy the finished image to the clipboard (enabled only once it's drawn)
+    $("#postCopy").addEventListener("click", async () => {
+      const hint = $("#postHint");
+      if (!postBlob) return;
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": postBlob })]);
+        hint.textContent = "Image copied. Paste it anywhere.";
+      } catch (e) {
+        hint.textContent = "This browser won't copy images here. Right-click the image and choose Copy image, or use Download.";
+      }
+      setTimeout(() => { if (hint.textContent.startsWith("Image copied") || hint.textContent.startsWith("This browser")) hint.textContent = POST_HINT; }, 4000);
+    });
     // click (or Enter on) the image to see it full size; click anywhere, the × or Esc to close
     const viewer = $("#imgView"), openViewer = () => {
       if (!postUrl || $("#postImg").hidden) return;
@@ -5928,7 +5945,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
   buildControls();
   bindPostControls();
   bindPhoneLayout();
-  if (window.matchMedia("(pointer: coarse)").matches) $("#postHint").textContent = "You can also press and hold the image to save it.";
+  if (window.matchMedia("(pointer: coarse)").matches) { POST_HINT = "You can also press and hold the image to save it."; $("#postHint").textContent = POST_HINT; }
   renderMethod();
   // light / dark: light by default (not the system setting); the viewer's pick is remembered
   const darkMQ = window.matchMedia("(prefers-color-scheme: dark)");
