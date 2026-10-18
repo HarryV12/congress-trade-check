@@ -1104,6 +1104,26 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       <div class="body" id="mAccuracy"></div>
     </details>
     <details>
+      <summary>How Public signals are scored</summary>
+      <div class="body">
+        <p>Public signals (in Data Visualization) ranks stocks that members of Congress and officials bought in the last 120 days. Each stock gets a score out of 100 that combines their buying with other public information about the company. Business leaders are left out, since they aren't public officials.</p>
+        <p><b>Net buyers (up to 40 points).</b> Buying and selling are weighed together, so a stock that is mostly being sold doesn't score well just because a few people bought some. Each person gets one vote: what they bought minus what they sold, using the middle of each reported range (a trade with no stated amount counts at that person's usual size). Three steps keep the vote fair:</p>
+        <ul>
+          <li><b>Log scale.</b> Every 10 times more money adds the same amount to a vote, so one very large trader can't outweigh everyone else. An $8,000 net buy is worth about 1, $375,000 about 2.6 and $5 million about 3.7.</li>
+          <li><b>Their usual trade size.</b> Each person's usual size is the middle of all the trades they have reported since 2023. A trade far larger than usual counts up to twice as much; one far smaller counts as little as half.</li>
+          <li><b>Adding up.</b> Buyers' votes count as positive and sellers' as negative. A positive total earns up to 30 points; a negative total takes up to 30 points off. Three or more different people buying within a month adds 10 points, because several people buying close together is a stronger sign than one large trade.</li>
+        </ul>
+        <p>Only people who put in more than they took out count as <b>net buyers</b>. Under that number, the image shows <b>net buying by number of trades</b> (grey) and <b>by dollars</b> (blue): (buys − sells) ÷ (buys + sells), from −100% (all selling) to +100% (all buying). This measure, the net purchase ratio, is widely used in research on company insiders' trading. The two can disagree: many small sales against a few large buys gives a negative trades figure and a positive dollars figure.</p>
+        <p><b>Committee (up to 20).</b> 10 points for each net buyer whose committee covers the company's industry (see “Which industries each committee oversees”).</p>
+        <p><b>Contracts (up to 15).</b> Federal contract money awarded to the company in the last 90 days, from USAspending.gov.</p>
+        <p><b>Lobbying (up to 15).</b> What the company reported spending on lobbying in the latest House lobbying disclosures, with its most frequent lobbying topic.</p>
+        <p><b>Hearings (up to 10).</b> House committee hearings and markups in the next 28 days that name the company (10 points) or cover its industry (2 points), from the House committee calendar.</p>
+        <p><b>Trump (up to 10).</b> 5 points for each of President Trump's Truth Social posts in the last 30 days that name the company or its ticker. Company names that are also everyday words, such as Apple or Target, count only when the ticker is used.</p>
+        <p><b>Insiders (up to 10).</b> The company's own executives, directors and large shareholders buying its stock on the open market in the last 90 days (SEC Form 4 filings). Only people whose purchases add up to at least $25,000 count, which leaves out small automatic employee share-plan purchases.</p>
+        <p>Points from every column are added and the total is capped at 100. The score shows where several public signals point the same way. It is not a prediction or investment advice.</p>
+      </div>
+    </details>
+    <details>
       <summary>Photo credits</summary>
       <div class="body" id="mPhotos"></div>
     </details>
@@ -4798,13 +4818,19 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       ["TRUMP", 796, 74, 10, (r) => r.points.trump || 0, (r) => (r.trump || []).length ? String(r.trump.length) : "–", (r) => (r.trump || []).length ? "posts" : ""],
       ["INSIDERS", 876, 86, 10, (r) => r.points.insiders || 0, (r) => r.insiders ? String(r.insiders) : "–", (r) => r.insiders ? short(r.insider_value) : ""],
     ];
-    const top = 236, rowH = 84, X0 = 48;
+    const top = 230, rowH = 84, X0 = 48, R0 = top + 36;  // R0: first row, below the labels and the net-buying legend
     ctx.fillStyle = th.muted; ctx.font = `700 12px ${UI}`; ctx.letterSpacing = "1px";
     ctx.fillText("STOCK", 64, top + 8);
     for (const [label, x] of cols) ctx.fillText(label, x + 8, top + 8);
+    // legend for the two figures under each net-buyer count
+    const NB = cols[0][1], DX = 54;
+    ctx.letterSpacing = "0px"; ctx.font = `600 12px ${UI}`;
+    ctx.fillStyle = th.ink2; ctx.fillText("trades", NB + 8, top + 24);
+    ctx.fillStyle = th.line; ctx.fillText("dollars", NB + 8 + DX, top + 24);
+    ctx.fillStyle = th.muted; ctx.font = `700 12px ${UI}`; ctx.letterSpacing = "1px";
     ctx.textAlign = "right"; ctx.fillText("SCORE", W - 64, top + 8); ctx.textAlign = "left"; ctx.letterSpacing = "0px";
     rows.forEach((r, k) => {
-      const y = top + 22 + k * rowH;
+      const y = R0 + k * rowH;
       ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(X0, y, W - 2 * X0, rowH - 10, 14); ctx.fill();
       ctx.fillStyle = th.ink; ctx.font = `800 24px ${MONO}`; ctx.fillText(r.t, 64, y + 34);
       ctx.fillStyle = th.ink2; let nm = cleanName(r.name); ctx.font = `500 15px ${UI}`;
@@ -4814,6 +4840,12 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
         const f = Math.max(0, Math.min(1, pts(r) / max));
         ctx.save(); ctx.fillStyle = th.line; ctx.globalAlpha = f ? 0.1 + 0.32 * f : 0; ctx.beginPath(); ctx.roundRect(x, y + 8, w, rowH - 26, 9); ctx.fill(); ctx.restore();
         ctx.fillStyle = f ? th.ink : th.muted; ctx.font = `700 21px ${MONO}`; ctx.fillText(fitText(ctx, val(r), w - 16), x + 8, y + 34);
+        if (x === NB) {  // net buying by trades (grey) and by dollars (blue), as in the legend
+          ctx.font = `700 12px ${UI}`;
+          ctx.fillStyle = th.ink2; ctx.fillText(pct(r.npr_trades), x + 8, y + 54);
+          ctx.fillStyle = th.line; ctx.fillText(pct(r.npr_dollars), x + 8 + DX, y + 54);
+          continue;
+        }
         ctx.fillStyle = th.muted; fitSize(ctx, sub(r), (z) => `500 ${z}px ${UI}`, 13, w - 16, 11); ctx.fillText(fitText(ctx, sub(r), w - 16), x + 8, y + 54);
       }
       // the score: a bar and the number
@@ -4838,7 +4870,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     // the hearings behind the scores, soonest first
     const ids = [...new Set(rows.flatMap((r) => [...r.hearings_named, ...r.hearings_sector]))];
     const hs = ids.map((i) => sig.hearings[i]).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
-    let y = top + 22 + rows.length * rowH + 18;
+    let y = R0 + rows.length * rowH + 18;
     if (hs.length) {
       ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1.2px"; ctx.fillText("UPCOMING HOUSE HEARINGS", 64, y); ctx.letterSpacing = "0px";
       hs.forEach((h, k) => {
@@ -4865,7 +4897,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     // what the score counts
     ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
     ctx.fillText(fitText(ctx, "Net buyers: each person's buys minus sells, on a log scale and against their usual trade size, up to 40 (or 30 off).", W - 128), 64, H - 162);
-    ctx.fillText(fitText(ctx, "Small line: net buying by number of trades, then by dollars (−100% all selling, +100% all buying). Out of 100.", W - 128), 64, H - 140);
+    ctx.fillText(fitText(ctx, "Trades and dollars: net buying by number of trades and by money (−100% all selling, +100% all buying). Out of 100.", W - 128), 64, H - 140);
     footer(ctx, W, H, th);
     return null;
   }
