@@ -1243,7 +1243,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     ["Jared Moskowitz", /Moskowitz/]];
 
   // portraits and daily prices load after the page is drawn
-  let PHOTOS = window.CTC_PHOTOS || null, PRICES = window.CTC_PRICES || null;
+  let PHOTOS = window.CTC_PHOTOS || null, PRICES = window.CTC_PRICES || null, DESC = null;  // DESC: what each company does (descriptions.js)
   const loadScript = (src) => new Promise((resolve) => {
     const s = document.createElement("script");
     s.src = src; s.onload = () => resolve(true); s.onerror = () => resolve(false);
@@ -3326,6 +3326,23 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       ctx.fillStyle = good; ctx.font = `700 ${fitSize(ctx, value, (s) => `700 ${s}px ${MONO}`, 30, w, 18)}px ${MONO}`; ctx.fillText(fitText(ctx, value, w), x, sy + 80);
       ctx.fillStyle = th.muted; ctx.font = `500 ${fitSize(ctx, sub, (z) => `500 ${z}px ${UI}`, 16, w, 13)}px ${UI}`; ctx.fillText(fitText(ctx, sub, w), x, sy + 108);
     });
+    // what the company does, in the space above the footer (sector and industry when there's no summary)
+    const st = stocks[M.tk] || [];
+    const about = (DESC || {})[M.tk] || [st[2], st[1]].filter(Boolean).join(" · ");
+    if (about || st[4]) {
+      // market cap on the right of the heading: grey label, bold value
+      let capW = 0;
+      if (st[4]) {
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 19px ${MONO}`; ctx.fillText(usd(st[4]), W - 64, sy + 143);
+        const vw = ctx.measureText(usd(st[4])).width;
+        ctx.fillStyle = th.muted; ctx.font = `700 14px ${UI}`; ctx.letterSpacing = "1.5px"; ctx.fillText("MARKET CAP", W - 64 - vw - 12, sy + 142); ctx.letterSpacing = "0px";
+        capW = vw + 12 + ctx.measureText("MARKET CAP").width + 32; ctx.textAlign = "left";
+      }
+      ctx.fillStyle = th.muted; ctx.font = `700 14px ${UI}`; ctx.letterSpacing = "1.5px";
+      ctx.fillText(fitText(ctx, "ABOUT " + cleanName(st[0] || tk).toUpperCase(), W - 128 - capW), 64, sy + 142); ctx.letterSpacing = "0px";
+      ctx.fillStyle = th.ink2; ctx.font = `500 18px ${UI}`;
+      drawWrapped(ctx, about, 64, sy + 168, W - 128, 24, 2);
+    }
     footer(ctx, W, H, th, MK_SOURCE);
   }
   async function lookClassic(ctx, W, H, M) {
@@ -5579,6 +5596,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     $("#postSave").disabled = true; $("#postCopy").disabled = true; postBlob = null;
     $("#postHint").textContent = "Drawing the image…";
     if (!PHOTOS) PHOTOS = (await loadScript("photos.js") && window.CTC_PHOTOS) || {};
+    if (!DESC) DESC = (await loadScript("descriptions.js") && window.CTC_DESC) || {};
     if (!PRICES) { await loadScript("prices.js"); PRICES = window.CTC_PRICES || null; }
     if (seq !== drawSeq) return;
     resolvePicks();
