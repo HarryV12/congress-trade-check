@@ -332,6 +332,8 @@ details.howto .body b { color: var(--ink); }
 .holding .n { text-align: right; font-family: var(--font-mono); white-space: nowrap; }
 .holding.annual { grid-template-columns: minmax(0, 1fr) auto; }
 .holding.annual .co { white-space: nowrap; }
+/* industries in the trades table wrap rather than being cut off */
+td.wrap .co { white-space: normal; overflow: visible; text-overflow: clip; }
 .more-holdings summary { cursor: pointer; font-size: 13px; color: var(--accent); padding: 6px 0; }
 #stockCard { order: -1; }
 
@@ -1704,7 +1706,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
   const byFirstName = (a, b) => a.name.localeCompare(b.name);
   function memberOptions() {
     const list = members.filter((m) => onCommittee(m) || (S.chamber === "all" && S.committee === "all" && isBiz(m))).sort(byFirstName);
-    const label = S.members.length ? "Add another person…" : `All ${S.committee === "all" ? chamberName[S.chamber] : cname(S.committee)} (${members.filter(onCommittee).length}) · add a person…`;
+    const label = S.members.length ? "Add another person" : `All ${S.committee === "all" ? chamberName[S.chamber] : cname(S.committee)} (${members.filter(onCommittee).length})`;
     $("#member").innerHTML = `<option value="">${esc(label)}</option>` + list.map((m) => {
       const n = tradeCount.get(m.i) || 0;
       return `<option value="${m.i}" ${S.members.includes(String(m.i)) ? "disabled" : ""}>${esc(m.name)} (${esc(isBiz(m) ? "business" : party(m))}) · ${esc(prefix(m))}${m.former ? " · former" : ""} · ${n ? n.toLocaleString() + " trades" : "no trades reported"}</option>`;
@@ -1922,7 +1924,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       }
       const hs = [...held.values()].sort((a, b) => b.amt - a.amt).slice(0, 5);
       if (hs.length) holdings = `<div><div class="eyebrow" title="Buys with no full sale reported, at the best estimate of their reported ranges, with the gain since each buy">Estimated holdings from these buys</div><div class="holdings">
-        ${hs.map((h) => `<div class="holding"><span class="tk">${esc(h.t)}</span><span class="co">${esc(h.st[0])}</span><span class="n">${sumSpan(h.amt, h.v)}</span><span class="n ${cls(h.gain)}">${pct(h.gain / h.amt)}</span></div>`).join("")}
+        ${hs.map((h) => `<div class="holding"><span class="tk">${esc(h.t)}</span><span class="co" title="${esc(h.st[0])}">${esc(cleanName(h.st[0]))}</span><span class="n">${sumSpan(h.amt, h.v)}</span><span class="n ${cls(h.gain)}">${pct(h.gain / h.amt)}</span></div>`).join("")}
         </div><p class="note">Buys with no full sale reported · gain since each buy</p></div>`;
     }
     const annual = annualHoldings(m);
@@ -2034,7 +2036,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     const rows = [...by.values()].sort((a, b) => b.members.size - a.members.size || b.amt - a.amt).slice(0, 7);
     $("#hot").innerHTML = rows.length ? rows.map((g) => `<div class="rank-row" data-post="${esc(g.t)}" tabindex="0" role="button" aria-label="Chart ${esc(g.t)} in Data Visualization">
         <span class="tk">${esc(g.t)}</span>
-        <div style="min-width:0"><div class="co">${esc(g.st[0])}</div><div class="meta">${g.members.size} member${g.members.size > 1 ? "s" : ""} · ${g.n} buy${g.n > 1 ? "s" : ""} · ${sumSpan(g.amt, g.v)}</div></div>
+        <div style="min-width:0"><div class="co" title="${esc(g.st[0])}">${esc(cleanName(g.st[0]))}</div><div class="meta">${g.members.size} member${g.members.size > 1 ? "s" : ""} · ${g.n} buy${g.n > 1 ? "s" : ""} · ${sumSpan(g.amt, g.v)}</div></div>
         <span class="faces">${[...g.members].slice(0, 5).map((mi) => face(members[mi], "sm")).join("")}</span></div>`).join("")
       : '<p class="empty">No buys dated in the last 30 days for this selection. Members can take up to 45 days to report, so the newest trades appear late.</p>';
   }
@@ -2130,7 +2132,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     const rows = [...by.values()].sort((a, b) => b.last.time - a.last.time).slice(0, 8);
     $("#spikeList").innerHTML = rows.length ? rows.map((g) => `<div class="rank-row" data-post="${esc(g.t)}" tabindex="0" role="button" aria-label="Chart ${esc(g.t)} in Data Visualization">
         <span class="tk">${esc(g.t)}</span>
-        <div style="min-width:0"><div class="co">${esc(g.st[0])}${g.st[5] ? " · S&amp;P 500" : ""}</div>
+        <div style="min-width:0"><div class="co" title="${esc(g.st[0])}">${esc(cleanName(g.st[0]))}${g.st[5] ? " · S&amp;P 500" : ""}</div>
         <div class="meta">${g.s.k} members around ${fmtDate(g.last.d, { month: "short", year: "numeric" })} · usually ${g.s.usual < 1 ? "under 1" : g.s.usual.toFixed(1)} a month</div></div>
         <span class="faces">${[...g.members].slice(0, 5).map((mi) => face(members[mi], "sm")).join("")}</span></div>`).join("")
       : '<p class="empty">No buying spikes in this period.</p>';
@@ -2283,7 +2285,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       return `<tr><td class="num" data-label="Filed">${fmtDate(t.fd, { month: "short", day: "numeric" })}</td>
         <td class="who full"><span class="person">${face(m, "sm")}<span>${esc(m.name)} <span class="stamp">${esc(party(m))}</span>${t.own ? `<span class="co">${OWNER[t.own] || t.own}</span>` : ""}</span></span></td>
         <td data-label="Trade"><span class="type ${t.k}">${TYPE[t.k] || t.k}</span>${t.cls === "option" ? `<span class="co">${t.opt === "P" ? "Put" : t.opt === "C" ? "Call" : "Option"}</span>` : ""}</td>
-        <td class="lead full"><span class="tk">${esc(t.t)}</span><span class="co">${esc(t.st[0])}</span></td>
+        <td class="lead full"><span class="tk">${esc(t.t)}</span><span class="co" title="${esc(t.st[0])}">${esc(cleanName(t.st[0]))}</span></td>
         <td class="r num" data-label="Amount">${amountCell(t, false)}</td>
         <td class="num" data-label="Traded">${fmtDate(t.d, { month: "short", day: "numeric" })}<span class="co">${t.delay} days to report</span></td>
         <td class="r num" data-label="Price that day">${price(t.T.ep)}</td>
@@ -2391,7 +2393,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       return `<tr>
         <td class="num" data-label="Traded">${fmtDate(t.d)}</td>
         ${all ? `<td class="who full"><span class="person">${face(m, "sm")}<span>${esc(m.name)} <span class="stamp">${esc(party(m))}</span></span></span></td>` : ""}
-        <td class="lead full">${t.t ? `<span class="tk">${esc(t.t)}</span>` : ""}<span class="co" title="${esc(t.a)}">${esc(st ? st[0] : t.a)}</span>${t.spike ? `<span class="chip spike" title="${esc(spikeText(t.spike))}">Buying spike</span>` : ""}</td>
+        <td class="lead full">${t.t ? `<span class="tk">${esc(t.t)}</span>` : ""}<span class="co" title="${esc(st ? st[0] : t.a)}">${esc(st ? cleanName(st[0]) : t.a)}</span>${t.spike ? `<span class="chip spike" title="${esc(spikeText(t.spike))}">Buying spike</span>` : ""}</td>
         <td data-label="Trade"><span class="type ${t.k}">${TYPE[t.k] || t.k}</span>${optLabel}${t.own ? `<span class="co" title="${OWNER[t.own] || ""}">${OWNER[t.own] || esc(t.own)}</span>` : ""}${flags}</td>
         <td class="r num" data-label="Amount">${amountCell(t)}</td>
         <td class="r num" data-label="${S.timing === "public" ? "Price when public" : "Price that day"}">${t.ep ? price(t.ep) : "–"}</td>
@@ -4030,9 +4032,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
         if (fits(shown)) added = true; else shown[i]--;
       }
     }
-    const order = "newest disclosures first · biggest trades first";
     ctx.fillStyle = th.ink2; ctx.font = `500 23px ${UI}`;
-    ctx.fillText(fitText(ctx, `${plural(list.length, noun1)} by ${plural(groups.length, "politician")} · ${order}${groups.length > G ? ` · top ${G} shown` : ""}`, W - 128), 64, 204);
+    ctx.fillText(fitText(ctx, `${plural(list.length, noun1)} by ${plural(groups.length, "politician")}${groups.length > G ? ` · ${G} shown` : ""}`, W - 128), 64, 204);
 
     const X0 = 48, CW = W - 2 * X0, C = { stock: 68, trade: 236, amt: 330, dates: 482, px: 628, since: 744, meta: 860 }, R = W - 68;
     const imgs = await Promise.all(groups.slice(0, G).map((g) => photoImage(g.m)));
@@ -4114,7 +4115,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     do {
       prev = out;
       out = out.replace(/\s*\([^)]*\)\s*$/, "")
-        .replace(/[\s,-]+(Common Stock|Common Shares|Ordinary Shares|Class [A-C](\s+(Common Stock|Common Shares|Ordinary Shares|Shares))?|American Depositary Shares?|Depositary Shares?|ADS|ADR)$/i, "")
+        .replace(/[\s,-]+(Common Stock|Common Shares|Ordinary Shares|Class [A-C](\s+(Common Stock|Common Shares|Ordinary Shares|Shares))?|American Depositary Shares?|Depositary Shares?|New York Registry Shares|Registry Shares|Sponsored ADR|Units?|Warrants?|ADS|ADR)$/i, "")
         .replace(/[\s,-]+(Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?|Ltd\.?|Limited|plc|N\.V\.|S\.A\.)$/i, "").trim();
     } while (out !== prev);
     return out || String(s || "");
@@ -4376,7 +4377,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       if (k % 2) { ctx.fillStyle = C.panel; ctx.fillRect(28, ry, W - 56, rowH); }
       if (g.col) { ctx.fillStyle = g.col; ctx.beginPath(); ctx.roundRect(40, ry + 13, 14, 14, 3); ctx.fill(); }
       ctx.font = `600 18px ${UI}`; ctx.fillStyle = C.text;
-      ctx.fillText(fitText(ctx, `${shortName(g.m)} · ${party(g.m)}`, 404 - 62 - 14), 62, bl);
+      { const full = `${shortName(g.m)} · ${party(g.m)}`; ctx.fillText(fitText(ctx, ctx.measureText(full).width <= 404 - 62 - 14 ? full : shortName(g.m), 404 - 62 - 14), 62, bl); }
       ctx.font = `600 18px ${M}`;
       ctx.fillStyle = g.buys.length ? C.green : C.label; ctx.fillText(String(g.buys.length), 404, bl);
       ctx.fillText(fitText(ctx, g.buys.length ? listSpan(g.buys) : "–", 628 - 456 - 10), 456, bl);
@@ -4707,7 +4708,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     });
     yr += tRows.length * z(34) + z(6);
     ctx.fillStyle = th.muted; ctx.font = `500 ${z(13)}px ${UI}`;
-    ctx.fillText(fitText(ctx, `Buys made in each period, valued to today or their sale. Since ${D.start.slice(0, 4)} = since ${START_SHORT}.`, colR), xR, yr + z(16));
+    ctx.fillText(fitText(ctx, "Buys made in each period, valued to today or their sale.", colR), xR, yr + z(16));
     yr += z(40);
     // right: grouped bars for the same table, when there's room
     const chartH = bottom - yr > z(500) ? z(190) : 0;
@@ -4741,9 +4742,10 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       big.slice(0, nBig).forEach((t, i) => {
         const yy = yr + z(30) + i * z(36), v = eff(t, t.T.r);
         ctx.fillStyle = th.ink; ctx.font = `700 ${z(16)}px ${MONO}`; ctx.fillText(t.t, xR, yy);
-        ctx.fillStyle = th.ink2; ctx.font = `500 ${z(15)}px ${UI}`;
         const kind = t.cls === "option" ? (t.opt === "P" ? " (puts)" : t.opt === "C" ? " (calls)" : " (options)") : "";
-        ctx.fillText(fitText(ctx, cleanName(t.st[0]) + kind, colR - z(70) - z(210)), xR + z(70), yy);
+        const nm = cleanName(t.st[0]) + kind, nw = colR - z(70) - z(200);
+        ctx.fillStyle = th.ink2; ctx.font = `500 ${fitSize(ctx, nm, (q) => `500 ${q}px ${UI}`, z(15), nw, z(12))}px ${UI}`;
+        ctx.fillText(fitText(ctx, nm, nw), xR + z(70), yy);
         ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `500 ${z(15)}px ${MONO}`; ctx.fillText(amountShort(t), xR + colR - z(84), yy);
         ctx.fillStyle = v >= 0 ? th.up : th.down; ctx.font = `700 ${z(15)}px ${MONO}`; ctx.fillText(pct(v, 0), xR + colR, yy); ctx.textAlign = "left";
         ctx.fillStyle = th.grid; ctx.fillRect(xR, yy + z(12), colR, 1);
@@ -4799,7 +4801,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     header(ctx, W, th, `Unusual buying spikes · ${periodLong()}`);
     ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`; ctx.fillText("Unusual congressional buying", 64, 160);
     ctx.fillStyle = th.ink2; ctx.font = `500 22px ${UI}`;
-    ctx.fillText(fitText(ctx, `${plural(rows.length, "stock")} where ${SPIKE_MIN} or more members bought within about a month, more than chance would explain`, W - 128), 64, 200);
+
 
     // the spike window: a shaded band on the price line, the buys as dots
     const chart = (g, x, y, w, h, big) => {
@@ -4859,8 +4861,6 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       }
       ctx.textBaseline = "alphabetic";
     };
-    const facts = (g) => `${g.ms.length} members bought within a month around ${fmtDate(g.last.d, { month: "short", year: "numeric" })} · usually ${g.s.usual < 1 ? "under 1" : g.s.usual.toFixed(1)} a month${g.avg != null ? ` · avg buy ${price(g.avg)}` : ""}`;
-    const sinceLine = (g) => g.since == null ? "" : `Their buys ${pct(g.since)} since${g.spy != null ? ` · S&P 500 ${pct(g.spy)}` : ""}`;
 
     // the featured spike
     const f = rows[0], fy = 236;
@@ -4870,7 +4870,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     ctx.fillStyle = th.ink2; ctx.font = `600 22px ${UI}`; ctx.fillText(fitText(ctx, cleanName(f.st[0]) + (f.st[5] ? " · S&P 500" : ""), W - 96 - 60 - tw - 200), 76 + tw + 18, fy + 54);
     if (f.since != null) { ctx.textAlign = "right"; ctx.fillStyle = f.since >= 0 ? th.up : th.down; ctx.font = `800 34px ${MONO}`; ctx.fillText(pct(f.since), W - 76, fy + 56); ctx.textAlign = "left"; }
     ctx.fillStyle = th.ink; ctx.font = `800 26px ${MONO}`; ctx.fillText(`Bought ${estText(f.est)}`, 76, fy + 94);
-    ctx.fillStyle = th.muted; ctx.font = `500 18px ${UI}`; ctx.fillText(fitText(ctx, `${facts(f)}${f.since != null ? " · " + sinceLine(f) : ""}`, W - 152), 76, fy + 124);
+    ctx.fillStyle = th.muted; ctx.font = `500 18px ${UI}`; ctx.fillText(fitText(ctx, `Usually ${f.s.usual < 1 ? "under 1 member" : f.s.usual.toFixed(1) + " members"} a month${f.spy != null ? ` · S&P 500 ${pct(f.spy)} over the same days` : ""}`, W - 152), 76, fy + 124);
     chart(f, 76, fy + 132, W - 152, 290, true);
     const fimgs = await Promise.all(f.ms.slice(0, 9).map((mi) => photoImage(members[mi])));
     const fr = 26, fw = (W - 152) / Math.min(9, Math.max(1, f.ms.length));
@@ -5000,7 +5000,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       drawFace(ctx, await photoHD(m), m, 64 + r + 5, cy, r, th);
       ctx.fillStyle = th.ink; ctx.font = `700 30px ${UI}`; ctx.fillText(fitText(ctx, plainName(m), W - 64 - nx), nx, cy - 4);
       ctx.fillStyle = th.muted; ctx.font = `500 20px ${UI}`;
-      ctx.fillText(fitText(ctx, `${tagline(m)} · ${isBiz(m) ? "trades reported on SEC Form 4" : (m.committees || []).length ? "sits on " + m.committees.map(cname).join(", ") : "no committee seats listed"}`, W - 64 - nx), nx, cy + 26);
+      ctx.fillText(fitText(ctx, `${tagline(m)}${isBiz(m) ? " · trades reported on SEC Form 4" : (m.committees || []).length ? "" : " · no committee seats listed"}`, W - 64 - nx), nx, cy + 26);
       y = cy + r + 22;
     }
     const share = `${Math.round(hot / total * 100)}%`;
