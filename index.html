@@ -4786,11 +4786,12 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`; ctx.fillText("Public signals", 64, 160);
     ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
     ctx.fillText(fitText(ctx, "Stocks members are net buying, scored with contracts, lobbying, hearings and more", W - 128), 64, 200);
+    const pct = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.round(Math.abs(v) * 100) + "%";
     const rows = sig.stocks.slice(0, 9), short = (v) => v >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : v >= 1e8 ? "$" + Math.round(v / 1e6) + "M" : v >= 1e6 ? "$" + (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? "$" + Math.round(v / 1e3) + "K" : "$" + Math.round(v);
     // columns: label, x, width, max points, the row's points, its text, a second line
     const cols = [
-      ["NET BUYERS", 276, 94, 40, (r) => r.points.congress + r.points.cluster + (r.points.dollars || 0), (r) => String(r.members), (r) => `${short(r.bought)} in`],
-      ["COMMITTEE", 376, 98, 20, (r) => r.points.committee, (r) => r.committee ? String(r.committee) : "–", () => ""],
+      ["NET BUYERS", 262, 112, 40, (r) => r.points.congress + r.points.cluster, (r) => String(r.members), (r) => `${pct(r.npr_trades)}  ${pct(r.npr_dollars)}`],
+      ["COMMITTEE", 380, 94, 20, (r) => r.points.committee, (r) => r.committee ? String(r.committee) : "–", () => ""],
       ["CONTRACTS", 480, 104, 15, (r) => r.points.contracts, (r) => r.contracts ? short(r.contracts) : "–", () => ""],
       ["LOBBYING", 590, 104, 15, (r) => r.points.lobbying, (r) => r.lobbying ? short(r.lobbying) : "–", (r) => (r.issues || [])[0] || ""],
       ["HEARINGS", 700, 90, 10, (r) => r.points.hearings, (r) => r.hearings_named.length + r.hearings_sector.length ? String(r.hearings_named.length + r.hearings_sector.length) : "–", (r) => r.hearings_named.length ? "names it" : r.hearings_sector.length ? "its industry" : ""],
@@ -4806,7 +4807,9 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       const y = top + 22 + k * rowH;
       ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(X0, y, W - 2 * X0, rowH - 10, 14); ctx.fill();
       ctx.fillStyle = th.ink; ctx.font = `800 24px ${MONO}`; ctx.fillText(r.t, 64, y + 34);
-      ctx.fillStyle = th.ink2; const nm = cleanName(r.name); fitSize(ctx, nm, (z) => `500 ${z}px ${UI}`, 15, 200, 12); ctx.fillText(fitText(ctx, nm, 200), 64, y + 58);
+      ctx.fillStyle = th.ink2; let nm = cleanName(r.name); ctx.font = `500 15px ${UI}`;
+      while (nm.includes(" ") && ctx.measureText(nm).width > 190) nm = nm.slice(0, nm.lastIndexOf(" "));  // drop whole words, never cut one
+      ctx.fillText(fitText(ctx, nm, 190), 64, y + 58);
       for (const [, x, w, max, pts, val, sub] of cols) {
         const f = Math.max(0, Math.min(1, pts(r) / max));
         ctx.save(); ctx.fillStyle = th.line; ctx.globalAlpha = f ? 0.1 + 0.32 * f : 0; ctx.beginPath(); ctx.roundRect(x, y + 8, w, rowH - 26, 9); ctx.fill(); ctx.restore();
@@ -4824,8 +4827,10 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     // SEC filings list people as "Last First Middle": show "First Last" (firms stay as they are)
     const insiderName = (n) => { const p = n.replace(/\s*\(.*$/, "").split(" "); return p.length > 1 && !/(Inc|LLC|LP|L\.P\.|Ltd|Fund|Corp|Trust|Partners|Capital|Holdings)/i.test(n) ? `${p[1]} ${p[0]}` : p.join(" "); };
     for (const r of rows.slice(0, 3)) {
+      const big = new Map((r.unusual || []).map(([id, x]) => [id, x]));  // net buys far above the person's usual trade
+      const tag = (m) => big.has(m.id) ? `${shortName(m)} (${big.get(m.id) >= 10 ? Math.round(big.get(m.id)) : big.get(m.id).toFixed(1)}× usual size)` : shortName(m);
       const ms = (r.who || []).map((i) => byId.get(i)).filter((m) => m && !isBiz(m)).slice(0, 4);
-      if (ms.length) notes.push([r.t, `bought by ${ms.map(shortName).join(", ")}${r.members > ms.length ? ` and ${r.members - ms.length} more` : ""}`]);
+      if (ms.length) notes.push([r.t, `bought by ${ms.map(tag).join(", ")}${r.members > ms.length ? ` and ${r.members - ms.length} more` : ""}`]);
     }
     for (const r of rows) if (r.insiders) notes.push([r.t, `${r.insider_names.map(insiderName).join(", ")}${r.insiders > r.insider_names.length ? ` and ${r.insiders - r.insider_names.length} more` : ""} (company insiders) bought ${short(r.insider_value)}`]);
     for (const r of rows) if (r.sold >= r.bought * 0.5 && r.sold > 0) notes.push([r.t, `also sold: ${short(r.sold)} by ${r.sellers} ${r.sellers === 1 ? "person" : "people"}, against ${short(r.bought)} bought`]);
@@ -4850,7 +4855,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     if (notes.length) {
       y += hs.length ? 30 + hs.length * 28 + 30 : 46;
       ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1.2px"; ctx.fillText("BEHIND THE SCORES", 64, y); ctx.letterSpacing = "0px";
-      const room = Math.max(0, Math.floor((H - 180 - (y + 30)) / 30) + 1);
+      const room = Math.max(0, Math.floor((H - 200 - (y + 30)) / 30) + 1);
       notes.slice(0, Math.min(7, room)).forEach(([t, text], k) => {
         const yy = y + 30 + k * 30;
         ctx.fillStyle = th.line; ctx.font = `700 16px ${MONO}`; ctx.fillText(t, 64, yy);
@@ -4859,7 +4864,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     }
     // what the score counts
     ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
-    ctx.fillText(fitText(ctx, "Score out of 100: net buyers 40, committee 20, contracts 15, lobbying 15, hearings, Trump, insiders 10 each; up to 30 off for net selling.", W - 128), 64, H - 140);
+    ctx.fillText(fitText(ctx, "Net buyers: each person's buys minus sells, on a log scale and against their usual trade size, up to 40 (or 30 off).", W - 128), 64, H - 162);
+    ctx.fillText(fitText(ctx, "Small line: net buying by number of trades, then by dollars (−100% all selling, +100% all buying). Out of 100.", W - 128), 64, H - 140);
     footer(ctx, W, H, th);
     return null;
   }
