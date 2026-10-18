@@ -4874,7 +4874,20 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       ctx.fillStyle = th.ink; ctx.font = `700 16px ${MONO}`; ctx.textAlign = "right"; ctx.fillText(`Bought ${estText(g.est)}`, x + tw2 - 20, y + 62); ctx.textAlign = "left";
       const aw = ctx.measureText(`Bought ${estText(g.est)}`).width;
       ctx.fillStyle = th.ink2; ctx.font = `500 15px ${UI}`; ctx.fillText(fitText(ctx, cleanName(g.st[0]), tw2 - 56 - aw), x + 20, y + 62);
-      ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; ctx.fillText(fitText(ctx, `${g.ms.length} members · ${fmtDate(g.last.d, { month: "short", year: "numeric" })}${g.avg != null ? ` · avg buy ${price(g.avg)}` : ""} · now ${price(PRICES.px[g.t][lastIdx(PRICES.px[g.t])])}`, tw2 - 40), x + 20, y + 84);
+      ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; // the average buy and today's price as two pills on the right, styled like the main chart's tags
+      const nowPx = PRICES.px[g.t][lastIdx(PRICES.px[g.t])];
+      const pills = [g.avg != null && { text: "Avg " + price(g.avg), fill: th.card, ink: th.ink, stroke: th.ink2 }, { text: "Now " + price(nowPx), fill: th.line, ink: th.card }].filter(Boolean);
+      ctx.font = `700 13px ${MONO}`;
+      let px = x + tw2 - 20;
+      for (const pl of [...pills].reverse()) {
+        const pw2 = ctx.measureText(pl.text).width + 14; px -= pw2;
+        ctx.fillStyle = pl.fill; ctx.beginPath(); ctx.roundRect(px, y + 70, pw2, 20, 5); ctx.fill();
+        if (pl.stroke) { ctx.strokeStyle = pl.stroke; ctx.lineWidth = 1.2; ctx.stroke(); }
+        ctx.fillStyle = pl.ink; ctx.textBaseline = "middle"; ctx.fillText(pl.text, px + 7, y + 80.5); ctx.textBaseline = "alphabetic";
+        px -= 6;
+      }
+      ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
+      ctx.fillText(fitText(ctx, `${g.ms.length} members · ${fmtDate(g.last.d, { month: "short", year: "numeric" })}`, px - (x + 20) - 6), x + 20, y + 84);
       chart(g, x + 20, y + 96, tw2 - 40, th2 - 96 - 58, false);
       g.ms.slice(0, 5).forEach((mi, j) => drawFace(ctx, imgs[k][j], members[mi], x + 38 + j * 44, y + th2 - 30, 17, th));
       if (g.ms.length > 5) { ctx.fillStyle = th.muted; ctx.font = `600 14px ${UI}`; ctx.fillText(`+${g.ms.length - 5}`, x + 38 + 5 * 44 - 10, y + th2 - 25); }
