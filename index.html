@@ -4696,7 +4696,7 @@ if (location.hostname === "harryv12.github.io") {
     const secRows = [...sec.entries()].sort((a, b) => b[1] - a[1]), secTot = sumAmt(pool) || 1;
     const nSec = Math.min(secRows.length, 7, Math.floor((bottom - yl - z(40)) / z(40)));
     if (nSec >= 2) {
-      yl = head(xL, yl + z(14), colL, `SECTOR MIX OF BUYS · ${perName}`);
+      yl = head(xL, yl + z(14), colL, `SECTORS BOUGHT · ${perName}`);
       secRows.slice(0, nSec).forEach(([name, amt], i) => {
         const yy = yl + z(28) + i * z(40), share = amt / secTot;
         ctx.fillStyle = th.ink2; ctx.font = `500 ${z(15)}px ${UI}`; ctx.fillText(fitText(ctx, name, colL - z(60)), xL, yy);
@@ -4721,27 +4721,40 @@ if (location.hostname === "harryv12.github.io") {
     });
     ctx.letterSpacing = "0px"; ctx.textAlign = "left";
     yr += z(36);
-    const tRows = [["Their buys", (p) => p.s.n ? pct(p.s.ret) : "–", () => th.ink],
+    // two groups: measured from the trade date (their own timing) and from the disclosure date (copying the filing)
+    const diffCol = (d) => d >= 0 ? th.up : th.down;
+    const tRows = [["FROM TRADE DATE"],
+      ["Their buys", (p) => p.s.n ? pct(p.s.ret) : "–", () => th.ink],
       ["S&P 500, same days", (p) => p.s.n ? pct(p.s.spyRet) : "–", () => th.muted],
-      ["Difference", (p) => p.s.n ? pts(p.s.diff).replace(" pts", "") : "–", (p) => p.s.diff >= 0 ? th.up : th.down],
-      ["Copying at disclosure", (p) => p.c.n ? pts(p.c.diff).replace(" pts", "") : "–", (p) => p.c.diff >= 0 ? th.up : th.down],
+      ["Difference", (p) => p.s.n ? pts(p.s.diff).replace(" pts", "") : "–", (p) => diffCol(p.s.diff), true],
+      ["FROM DISCLOSURE DATE"],
+      ["Their buys", (p) => p.c.n ? pct(p.c.ret) : "–", () => th.ink],
+      ["S&P 500, same days", (p) => p.c.n ? pct(p.c.spyRet) : "–", () => th.muted],
+      ["Difference", (p) => p.c.n ? pts(p.c.diff).replace(" pts", "") : "–", (p) => diffCol(p.c.diff), true],
+      [null],
       ["Buys counted", (p) => p.n.toLocaleString(), () => th.muted]];
-    tRows.forEach(([label, val, col], i) => {
-      const yy = yr + i * z(34);
-      if (i % 2 === 0) { ctx.fillStyle = th.card; ctx.fillRect(xR, yy, colR, z(34)); }
-      ctx.fillStyle = i === 2 ? th.ink : th.ink2; ctx.font = `${i === 2 ? 700 : 500} ${z(16)}px ${UI}`; ctx.fillText(label, xR + z(8), yy + z(23));
-      ctx.textAlign = "right"; ctx.font = `${i === 2 ? 700 : 600} ${z(16)}px ${MONO}`;
-      periods.forEach((p, j) => { ctx.fillStyle = p.s.n ? col(p) : th.muted; ctx.fillText(val(p), xR + c0 + (j + 1) * cw4, yy + z(23)); });
+    let band = 0;
+    for (const [label, val, col, bold] of tRows) {
+      if (label === null) { yr += z(8); continue; }
+      if (!val) {  // group label
+        capsText(ctx, label, xR + z(8), yr + z(22), z(12), th.muted, 800, 1.2);
+        yr += z(30); band = 0; continue;
+      }
+      if (band++ % 2 === 0) { ctx.fillStyle = th.card; ctx.fillRect(xR, yr, colR, z(32)); }
+      ctx.fillStyle = bold ? th.ink : th.ink2; ctx.font = `${bold ? 700 : 500} ${z(16)}px ${UI}`; ctx.fillText(label, xR + z(8), yr + z(22));
+      ctx.textAlign = "right"; ctx.font = `${bold ? 700 : 600} ${z(16)}px ${MONO}`;
+      periods.forEach((p, j) => { ctx.fillStyle = (val === tRows[9][1] ? p.n : p.s.n) ? col(p) : th.muted; ctx.fillText(val(p), xR + c0 + (j + 1) * cw4, yr + z(22)); });
       ctx.textAlign = "left";
-    });
-    yr += tRows.length * z(34) + z(6);
+      yr += z(32);
+    }
+    yr += z(6);
     ctx.fillStyle = th.muted; ctx.font = `500 ${z(13)}px ${UI}`;
     ctx.fillText(fitText(ctx, "Buys made in each period, valued to today or their sale.", colR), xR, yr + z(16));
-    yr += z(40);
+    yr += z(58);
     // right: grouped bars for the same table, when there's room
-    const chartH = bottom - yr > z(500) ? z(190) : 0;
+    const chartH = bottom - yr > z(420) ? z(190) : 0;
     if (chartH) {
-      yr = head(xR, yr, colR, "THEIR BUYS (GREEN) VS THE S&P 500 (BLUE)");
+      yr = head(xR, yr, colR, "TRADE DATE: BUYS (GREEN) VS S&P 500 (BLUE)");
       const vals = periods.flatMap((p) => p.s.n ? [p.s.ret, p.s.spyRet] : []);
       const vmin = Math.min(0, ...vals), vmax = Math.max(vmin + 0.02, 0, ...vals);
       const Yb = (v) => yr + z(36) + (vmax - v) / (vmax - vmin) * (chartH - z(70));
