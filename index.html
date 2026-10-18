@@ -1113,7 +1113,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
           <li><b>Their usual trade size.</b> Each person's usual size is the middle of all the trades they have reported since 2023. A trade far larger than usual counts up to twice as much; one far smaller counts as little as half.</li>
           <li><b>Adding up.</b> Buyers' votes count as positive and sellers' as negative. A positive total earns up to 30 points; a negative total takes up to 30 points off. Three or more different people buying within a month adds 10 points, because several people buying close together is a stronger sign than one large trade.</li>
         </ul>
-        <p>Only people who put in more than they took out count as <b>net buyers</b>. Under that number, the image shows <b>net buying by number of trades</b> (grey) and <b>by dollars</b> (blue): (buys − sells) ÷ (buys + sells), from −100% (all selling) to +100% (all buying). This measure, the net purchase ratio, is widely used in research on company insiders' trading. The two can disagree: many small sales against a few large buys gives a negative trades figure and a positive dollars figure.</p>
+        <p>Only people who put in more than they took out count as <b>net buyers</b>. Under that number, the image shows <b>net buying by number of trades</b> (left) and <b>by dollars</b> (right), each labelled at the top of the column: (buys − sells) ÷ (buys + sells), from −100% (all selling) to +100% (all buying), in green when buying outweighs selling and red when selling does. This measure, the net purchase ratio, is widely used in research on company insiders' trading. The two can disagree: many small sales against a few large buys gives a negative trades figure and a positive dollars figure.</p>
         <p><b>Committee (up to 20).</b> 10 points for each net buyer whose committee covers the company's industry (see “Which industries each committee oversees”).</p>
         <p><b>Contracts (up to 15).</b> Federal contract money awarded to the company in the last 90 days, from USAspending.gov.</p>
         <p><b>Lobbying (up to 15).</b> What the company reported spending on lobbying in the latest House lobbying disclosures, with its most frequent lobbying topic.</p>
@@ -4826,7 +4826,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     const NB = cols[0][1], DX = 54;
     ctx.letterSpacing = "0px"; ctx.font = `600 12px ${UI}`;
     ctx.fillStyle = th.ink2; ctx.fillText("trades", NB + 8, top + 24);
-    ctx.fillStyle = th.line; ctx.fillText("dollars", NB + 8 + DX, top + 24);
+    ctx.fillText("dollars", NB + 8 + DX, top + 24);
     ctx.fillStyle = th.muted; ctx.font = `700 12px ${UI}`; ctx.letterSpacing = "1px";
     ctx.textAlign = "right"; ctx.fillText("SCORE", W - 64, top + 8); ctx.textAlign = "left"; ctx.letterSpacing = "0px";
     rows.forEach((r, k) => {
@@ -4840,10 +4840,11 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
         const f = Math.max(0, Math.min(1, pts(r) / max));
         ctx.save(); ctx.fillStyle = th.line; ctx.globalAlpha = f ? 0.1 + 0.32 * f : 0; ctx.beginPath(); ctx.roundRect(x, y + 8, w, rowH - 26, 9); ctx.fill(); ctx.restore();
         ctx.fillStyle = f ? th.ink : th.muted; ctx.font = `700 21px ${MONO}`; ctx.fillText(fitText(ctx, val(r), w - 16), x + 8, y + 34);
-        if (x === NB) {  // net buying by trades (grey) and by dollars (blue), as in the legend
+        if (x === NB) {  // net buying by trades, then by dollars, as in the legend: green when buying wins, red when selling does
+          const sign = (v) => v > 0 ? th.up : v < 0 ? th.down : th.ink2;
           ctx.font = `700 12px ${UI}`;
-          ctx.fillStyle = th.ink2; ctx.fillText(pct(r.npr_trades), x + 8, y + 54);
-          ctx.fillStyle = th.line; ctx.fillText(pct(r.npr_dollars), x + 8 + DX, y + 54);
+          ctx.fillStyle = sign(r.npr_trades); ctx.fillText(pct(r.npr_trades), x + 8, y + 54);
+          ctx.fillStyle = sign(r.npr_dollars); ctx.fillText(pct(r.npr_dollars), x + 8 + DX, y + 54);
           continue;
         }
         ctx.fillStyle = th.muted; fitSize(ctx, sub(r), (z) => `500 ${z}px ${UI}`, 13, w - 16, 11); ctx.fillText(fitText(ctx, sub(r), w - 16), x + 8, y + 54);
@@ -4897,7 +4898,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     // what the score counts
     ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
     ctx.fillText(fitText(ctx, "Net buyers: each person's buys minus sells, on a log scale and against their usual trade size, up to 40 (or 30 off).", W - 128), 64, H - 162);
-    ctx.fillText(fitText(ctx, "Trades and dollars: net buying by number of trades and by money (−100% all selling, +100% all buying). Out of 100.", W - 128), 64, H - 140);
+    ctx.fillText(fitText(ctx, "Trades and dollars: net buying by number of trades and by money, green when buying wins, red when selling does. Out of 100.", W - 128), 64, H - 140);
     footer(ctx, W, H, th);
     return null;
   }
