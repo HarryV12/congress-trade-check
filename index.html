@@ -909,6 +909,7 @@ if (location.hostname === "harryv12.github.io") {
           </div>
         </div>
         <label class="check" data-for="market terminal list" for="pKept" title="Uses the Filter's “Which trades count” settings (large caps, committee sectors, late disclosures, options)"><input type="checkbox" id="pKept"> Apply the Filter</label>
+        <label class="check" data-for="scorecard" for="pNoBig" title="Leaves out S&amp;P 500 companies, companies above the Filter's market-cap limit, tickers on its exclusion list, and funds and ETFs"><input type="checkbox" id="pNoBig"> Exclude large caps and funds</label>
         <div class="field">
           <span class="label">Look</span>
           <div class="seg" id="pTheme" role="group" aria-label="Look">
@@ -1286,7 +1287,7 @@ if (location.hostname === "harryv12.github.io") {
     exclude: "NVDA, AAPL, GOOGL", committeeOnly: true, lateOnly: false, options: true, crypto: true, side: "all", view: "kept",
     leaderSort: "ret", leaderDir: -1, tradeSort: "d", tradeDir: -1, units: "pct", spikes: true, v: 13,
     lines: { kept: true, spy: true, inv: true, every: true, big: true } };
-  const postDefaults = { style: "chart", who: "all", trade: "", filing: "", ticker: "", member: "", committee: "", window: "182", sells: true, side: "B", days: "30", sort: "amt", kept: false, theme: "light", pv: 11 };
+  const postDefaults = { style: "chart", who: "all", trade: "", filing: "", ticker: "", member: "", committee: "", window: "182", sells: true, side: "B", days: "30", sort: "amt", kept: false, noBig: false, theme: "light", pv: 11 };
   let S = { ...defaults }, P = { ...postDefaults };
   try {
     const saved = JSON.parse(localStorage.getItem("ctc-state") || "{}");
@@ -4625,9 +4626,10 @@ if (location.hostname === "harryv12.github.io") {
   async function drawScorecardPoster(ctx, W, H, th) {
     const m = PE.member;
     if (!m) return "Pick a politician.";
-    const all = trades.filter((t) => t.m === m.i && t.st && (isSec(t) || (t.cls === "option" && S.options)) && t.side !== "O");
+    // "Exclude large caps and funds": isBig covers S&P 500 companies, the market-cap limit, the exclusion list and funds
+    const all = trades.filter((t) => t.m === m.i && t.st && (isSec(t) || (t.cls === "option" && S.options)) && t.side !== "O" && !(P.noBig && isBig(t)));
     const buysAll = all.filter((t) => t.side === "B" && t.T.r != null && t.T.sr != null);
-    if (!buysAll.length) return `No priced stock buys by ${m.name} yet.`;
+    if (!buysAll.length) return P.noBig ? `No priced buys by ${m.name} outside large caps and funds. Untick “Exclude large caps and funds”.` : `No priced stock buys by ${m.name} yet.`;
     const since = windowStart(), buysWin = buysAll.filter((t) => t.time >= since), pool = buysWin.length ? buysWin : buysAll;
     const perName = buysWin.length && P.window !== "all" ? `LAST ${windowLabel().toUpperCase()}` : `SINCE ${START_SHORT.toUpperCase()}`;
     const k = H > 1500 ? 1.4 : H > 1400 ? 1.24 : H > 1200 ? 1.12 : 1, z = (v) => Math.round(v * k);
@@ -4636,7 +4638,7 @@ if (location.hostname === "harryv12.github.io") {
     // title band, like the top of a fund factsheet
     const bandH = z(178);
     ctx.fillStyle = NAVY; ctx.fillRect(0, 0, W, bandH); ctx.fillStyle = th.grid; ctx.fillRect(0, bandH - 2, W, 2);
-    capsText(ctx, "STOCK TRADING FACTSHEET", 56, z(54), z(16), th.muted, 700, 2);
+    capsText(ctx, P.noBig ? "FACTSHEET · EXCLUDING LARGE CAPS AND FUNDS" : "STOCK TRADING FACTSHEET", 56, z(54), z(P.noBig ? 15 : 16), th.muted, 700, P.noBig ? 1.5 : 2);
     const r = z(52), fcx = W - 56 - r, fcy = bandH / 2 + z(4);
     drawFace(ctx, await photoHD(m), m, fcx, fcy, r, { ...th, card: NAVY });
     const tw = fcx - r - 40 - 56;
@@ -4776,7 +4778,9 @@ if (location.hostname === "harryv12.github.io") {
       yr += chartH + z(30);
     }
     // right: their largest buys
-    const big = [...pool].sort((a, b) => b.amt - a.amt || b.time - a.time);
+    // one row per stock: its largest buy, with how many buys of it there were
+    const nOf = new Map(); for (const t of pool) nOf.set(t.t, (nOf.get(t.t) || 0) + 1);
+    const big = [...pool].sort((a, b) => b.amt - a.amt || b.time - a.time).filter((t, i, arr) => arr.findIndex((u) => u.t === t.t) === i);
     const nBig = Math.min(big.length, 6, Math.floor((bottom - yr - z(44)) / z(36)));
     if (nBig >= 1) {
       yr = head(xR, yr, colR, `LARGEST BUYS · ${perName}`);
@@ -4784,8 +4788,13 @@ if (location.hostname === "harryv12.github.io") {
         const yy = yr + z(30) + i * z(36), v = eff(t, t.T.r);
         ctx.fillStyle = th.ink; ctx.font = `700 ${z(16)}px ${MONO}`; ctx.fillText(t.t, xR, yy);
         const kind = t.cls === "option" ? (t.opt === "P" ? " (puts)" : t.opt === "C" ? " (calls)" : " (options)") : "";
-        const nm = cleanName(t.st[0]) + kind, nw = colR - z(70) - z(200);
-        ctx.fillStyle = th.ink2; ctx.font = `500 ${fitSize(ctx, nm, (q) => `500 ${q}px ${UI}`, z(15), nw, z(12))}px ${UI}`;
+        const many = nOf.get(t.t) > 1 ? ` (${nOf.get(t.t)} buys)` : "", nw = colR - z(70) - z(200);
+        let nm = cleanName(t.st[0]).replace(/[,.]?\s+(Inc|Corp|Co|Ltd|Plc|Group Inc|N\.?V|S\.?A)\.?$/i, "") + kind;
+        // the full name comes first: the buy count is added only when it still fits
+        ctx.font = `500 ${z(13)}px ${UI}`;
+        if (ctx.measureText(nm + many).width <= nw) nm += many;
+        else { ctx.font = `500 ${z(15)}px ${UI}`; while (nm.includes(" ") && ctx.measureText(nm).width > nw) nm = nm.slice(0, nm.lastIndexOf(" ")); }  // drop whole words, never cut one
+        ctx.fillStyle = th.ink2; ctx.font = `500 ${fitSize(ctx, nm, (q) => `500 ${q}px ${UI}`, z(15), nw, z(13))}px ${UI}`;
         ctx.fillText(fitText(ctx, nm, nw), xR + z(70), yy);
         ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `500 ${z(15)}px ${MONO}`; ctx.fillText(amountShort(t), xR + colR - z(84), yy);
         ctx.fillStyle = v >= 0 ? th.up : th.down; ctx.font = `700 ${z(15)}px ${MONO}`; ctx.fillText(pct(v, 0), xR + colR, yy); ctx.textAlign = "left";
@@ -5730,7 +5739,7 @@ if (location.hostname === "harryv12.github.io") {
   function syncPostControls() {
     for (const id of ["pStyleMarket", "pStyleOther"]) $("#" + id).querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === P.style)));
     for (const f of Object.values(postSync)) f();
-    $("#pSells").checked = !!P.sells; $("#pKept").checked = !!P.kept;
+    $("#pSells").checked = !!P.sells; $("#pKept").checked = !!P.kept; $("#pNoBig").checked = !!P.noBig;
   }
   async function renderPost() {
     const seq = ++drawSeq;
@@ -5945,7 +5954,7 @@ if (location.hostname === "harryv12.github.io") {
     $('#pWindow button[data-v="all"]').textContent = `Since ${START_SHORT}`;
     $("#pTradeSel").addEventListener("change", (e) => { P.trade = e.target.value; save(); renderPost(); });
     $("#pFilingSel").addEventListener("change", (e) => { P.filing = e.target.value; save(); renderPost(); });
-    for (const [id, key] of [["pSells", "sells"], ["pKept", "kept"]]) $("#" + id).addEventListener("change", (e) => { P[key] = e.target.checked; save(); renderPost(); });
+    for (const [id, key] of [["pSells", "sells"], ["pKept", "kept"], ["pNoBig", "noBig"]]) $("#" + id).addEventListener("change", (e) => { P[key] = e.target.checked; save(); renderPost(); });
     $("#pTicker").addEventListener("change", (e) => { P.ticker = e.target.value; save(); renderPost(); });
     bindStockSearch();
     $("#postSave").addEventListener("click", savePost);
