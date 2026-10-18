@@ -4785,11 +4785,11 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     header(ctx, W, th, `Public signals · stocks bought in the last ${sig.buy_days} days`);
     ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`; ctx.fillText("Public signals", 64, 160);
     ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
-    ctx.fillText(fitText(ctx, "Congress buying scored with contracts, lobbying, hearings, Trump's posts and insider buys", W - 128), 64, 200);
+    ctx.fillText(fitText(ctx, "Stocks members are net buying, scored with contracts, lobbying, hearings and more", W - 128), 64, 200);
     const rows = sig.stocks.slice(0, 9), short = (v) => v >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : v >= 1e8 ? "$" + Math.round(v / 1e6) + "M" : v >= 1e6 ? "$" + (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? "$" + Math.round(v / 1e3) + "K" : "$" + Math.round(v);
     // columns: label, x, width, max points, the row's points, its text, a second line
     const cols = [
-      ["MEMBERS", 276, 94, 40, (r) => r.points.congress + r.points.cluster, (r) => String(r.members), (r) => `${r.buys} buys`],
+      ["NET BUYERS", 276, 94, 40, (r) => r.points.congress + r.points.cluster + (r.points.dollars || 0), (r) => String(r.members), (r) => `${short(r.bought)} in`],
       ["COMMITTEE", 376, 98, 20, (r) => r.points.committee, (r) => r.committee ? String(r.committee) : "–", () => ""],
       ["CONTRACTS", 480, 104, 15, (r) => r.points.contracts, (r) => r.contracts ? short(r.contracts) : "–", () => ""],
       ["LOBBYING", 590, 104, 15, (r) => r.points.lobbying, (r) => r.lobbying ? short(r.lobbying) : "–", (r) => (r.issues || [])[0] || ""],
@@ -4828,6 +4828,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       if (ms.length) notes.push([r.t, `bought by ${ms.map(shortName).join(", ")}${r.members > ms.length ? ` and ${r.members - ms.length} more` : ""}`]);
     }
     for (const r of rows) if (r.insiders) notes.push([r.t, `${r.insider_names.map(insiderName).join(", ")}${r.insiders > r.insider_names.length ? ` and ${r.insiders - r.insider_names.length} more` : ""} (company insiders) bought ${short(r.insider_value)}`]);
+    for (const r of rows) if (r.sold >= r.bought * 0.5 && r.sold > 0) notes.push([r.t, `also sold: ${short(r.sold)} by ${r.sellers} ${r.sellers === 1 ? "person" : "people"}, against ${short(r.bought)} bought`]);
     for (const r of rows) for (const p of (r.trump || []).slice(0, 1)) notes.push([r.t, `Trump, ${fmtDate(p.date, { day: "numeric", month: "short" })}: “${p.text}”`]);
     // the hearings behind the scores, soonest first
     const ids = [...new Set(rows.flatMap((r) => [...r.hearings_named, ...r.hearings_sector]))];
@@ -4858,7 +4859,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     }
     // what the score counts
     ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
-    ctx.fillText(fitText(ctx, "Score out of 100: members up to 40, committee 20, contracts 15, lobbying 15, hearings, Trump and insiders 10 each.", W - 128), 64, H - 140);
+    ctx.fillText(fitText(ctx, "Score out of 100: net buyers 40, committee 20, contracts 15, lobbying 15, hearings, Trump, insiders 10 each; up to 30 off for net selling.", W - 128), 64, H - 140);
     footer(ctx, W, H, th);
     return null;
   }
