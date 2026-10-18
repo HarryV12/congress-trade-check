@@ -116,6 +116,17 @@ select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px s
 .toggle-block .pick-note { margin: 6px 0 0 30px; font-size: 13px; color: var(--ink-2); }
 .check { display: flex; gap: 7px; align-items: center; font-size: 13.5px; cursor: pointer; }
 .check input { accent-color: var(--accent); width: 15px; height: 15px; }
+/* checkboxes drawn by the page, so they look the same whatever the browser or system theme:
+   white with a grey border when off, the accent colour with a white tick when on */
+input[type="checkbox"] { appearance: none; -webkit-appearance: none; margin: 0; flex: none; display: inline-grid; place-content: center;
+  width: 17px; height: 17px; border: 1.5px solid var(--line-strong); border-radius: 4px; background: var(--surface); cursor: pointer; vertical-align: -3px; }
+.check input[type="checkbox"] { width: 15px; height: 15px; }
+input[type="checkbox"]::before { content: ""; width: 9px; height: 9px; transform: scale(0); transition: transform 0.1s ease-out;
+  background: var(--surface); clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%); }
+input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]:checked::before { transform: scale(1); }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type="checkbox"]:disabled { opacity: 0.5; cursor: default; }
 .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line-strong); border-radius: 5px; overflow: hidden; }
 .seg button { white-space: nowrap; font: inherit; font-size: 13px; padding: 6px 11px; border: 0; background: var(--surface); color: var(--ink-2); cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--line-strong); }
@@ -4151,7 +4162,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     }
     if (opts.fill) { const a = new Path2D(path); a.lineTo(lastX, y + h); a.lineTo(x, y + h); a.closePath(); ctx.fillStyle = opts.fill; ctx.fill(a); }
     ctx.strokeStyle = color; ctx.lineWidth = opts.width || 3; ctx.lineJoin = "round"; ctx.stroke(path);
-    return { X, Y };
+    return { X, Y, lo, hi };
   }
   const tradeKey = (t) => [t.doc, t.m, t.t, t.d, t.k, t.lo].join("|");
   const selectedTrade = () => trades.find((t) => tradeKey(t) === P.trade) || null;
@@ -4305,6 +4316,17 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     ctx.fillStyle = C.green; ctx.fillRect(40, by, (W - 80) * bAmt / tot, 10);
     ctx.fillStyle = C.label; ctx.font = `500 15px ${M}`;
     ctx.fillText(`NET ${bAmt >= sAmt ? "BUYING" : "SELLING"} ${sumSpan(Math.abs(bAmt - sAmt), bsV)} · ${Math.round(bAmt / tot * 100)}% OF DOLLARS BOUGHT`, 40, by + 32);
+    // everyone's average buy price (total dollars ÷ total shares) against today's price
+    const priced = buys.filter((t) => t.amt > 0 && t.T.ep), shares = priced.reduce((a, t) => a + t.amt / t.T.ep, 0);
+    if (shares > 0) {
+      const avgAll = priced.reduce((a, t) => a + t.amt, 0) / shares, ch = last / avgAll - 1;
+      ctx.textAlign = "right"; ctx.font = `700 16px ${M}`;
+      const chText = `${ch >= 0 ? "+" : "−"}${Math.abs(ch * 100).toFixed(1)}%`;
+      ctx.fillStyle = ch >= 0 ? C.green : C.red; ctx.fillText(chText, W - 40, by + 32);
+      const cw = ctx.measureText(chText).width + 14;
+      ctx.fillStyle = C.text || th.ink; ctx.fillText(`AVG BUY ${price(avgAll)} · NOW ${price(last)}`, W - 40 - cw, by + 32);
+      ctx.textAlign = "left";
+    }
     // each politician's trades in the period, added up, biggest money first
     const chartH = H > 1500 ? 330 : H > 1200 ? 260 : 170, gy = H - 64 - chartH;
     const PAL = th === THEMES.dark ? ["#6ea8ff", "#c38bff", "#ffa25c", "#4fd1e0", "#ff7ad9", "#e8c24a"] : ["#1f5fd6", "#7c3aed", "#d9480f", "#0e8a9c", "#c0268f", "#a07500"];
@@ -4398,8 +4420,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       ctx.fillStyle = th.line; ctx.beginPath(); ctx.roundRect(40 + gw + 4, ty - 14, 96, 28, 6); ctx.fill();
       ctx.fillStyle = th.card; ctx.font = `700 15px ${M}`; ctx.fillText(price(last), 40 + gw + 10, ty + 5);
     }
-    ctx.fillStyle = C.label; ctx.font = `500 16px ${UI}`;
-    ctx.fillText(fitText(ctx, "Source: House, Senate and OGE trade filings. PX = close on the trade date · CHG = since then.", W - 56 - 260), 28, H - 22);
+    drawSiteLink(ctx, 28, H - 22, `600 18px ${UI}`, th.line || th.ink2);
     ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `800 19px ${UI}`; ctx.fillText("Congress Trade Check", W - 28, H - 22); ctx.textAlign = "left";
     return null;
   }
@@ -4750,6 +4771,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       g.est = estOf(g.buys); g.by = new Map(g.ms.map((mi) => [mi, estOf(g.buys.filter((t) => t.m === mi))]));
       g.ms.sort((a, b) => g.by.get(b).best - g.by.get(a).best);  // biggest buyers first
       g.since = weighted(g.buys, (t) => eff(t, t.T.r)); g.spy = weighted(g.buys, (t) => t.T.sr);
+      const pb = g.buys.filter((t) => t.amt > 0 && t.T.ep), sh = pb.reduce((a, t) => a + t.amt / t.T.ep, 0);
+      g.avg = sh > 0 ? pb.reduce((a, t) => a + t.amt, 0) / sh : null;
     }
     const rows = [...by.values()].sort((a, b) => b.last.time - a.last.time);
     const fi = rows.findIndex((g) => g.t === P.ticker);  // a spike picked from the list comes first
@@ -4763,17 +4786,61 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     const chart = (g, x, y, w, h, big) => {
       const s = PRICES.px[g.t], c = idxOfDate(g.last.d), e = lastIdx(s);
       const i0 = Math.max(0, c - (big ? 130 : 90)), i1 = Math.min(e, c + (big ? 170 : 120));
-      const sp = sparkline(ctx, s, i0, i1, x, y, w, h, th.line, { width: big ? 3 : 2, fill: th.area });
+      const RA = big ? 96 : 0, BA = big ? 28 : 0, pw = w - RA, ph = h - BA;  // room for the price scale and dates
+      const sp = sparkline(ctx, s, i0, i1, x, y, pw, ph, th.line, { width: big ? 3 : 2, fill: th.area });
       if (!sp) return;
       const a = sp.X(Math.max(i0, idxOfDate(new Date(g.last.time - SPIKE_HALF).toISOString().slice(0, 10)))), b = sp.X(Math.min(i1, idxOfDate(new Date(g.last.time + SPIKE_HALF).toISOString().slice(0, 10))));
-      ctx.fillStyle = th.up; ctx.globalAlpha = 0.12; ctx.fillRect(a, y, Math.max(4, b - a), h); ctx.globalAlpha = 1;
+      ctx.fillStyle = th.up; ctx.globalAlpha = 0.12; ctx.fillRect(a, y, Math.max(4, b - a), ph); ctx.globalAlpha = 1;
+      const tags = [];
+      const now = s[e] ?? s[i1], avg = g.avg != null && g.avg >= sp.lo && g.avg <= sp.hi ? g.avg : null;
+      if (big) {
+        // price scale on the right: light gridlines and labels, a frame line, and month labels below
+        const raw = (sp.hi - sp.lo) / 4, p10 = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 2.5, 5, 10].map((k) => k * p10).find((v) => v >= raw);
+        const ticks = [];
+        for (let v = Math.ceil(sp.lo / step) * step; v <= sp.hi; v += step) ticks.push(v);
+        ctx.strokeStyle = th.grid; ctx.lineWidth = 1;
+        for (const v of ticks) { ctx.beginPath(); ctx.moveTo(x, sp.Y(v)); ctx.lineTo(x + pw, sp.Y(v)); ctx.stroke(); }
+        ctx.strokeStyle = th.ink2; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(x + pw, y); ctx.lineTo(x + pw, y + ph); ctx.lineTo(x, y + ph); ctx.stroke(); ctx.globalAlpha = 1;
+        const nowY = sp.Y(now), avgY = avg != null ? sp.Y(avg) : null;
+        ctx.font = `600 14px ${MONO}`; ctx.fillStyle = th.muted; ctx.textBaseline = "middle";
+        for (const v of ticks) { const ty = sp.Y(v); if (Math.abs(ty - nowY) < 16 || (avgY != null && Math.abs(ty - avgY) < 16)) continue; ctx.fillText(price(v), x + pw + 10, ty); }
+        ctx.textBaseline = "alphabetic";
+        let lastMonth = "", lastX = -1e9;
+        ctx.font = `500 14px ${UI}`; ctx.fillStyle = th.ink2; ctx.textAlign = "center";
+        for (let k = i0 + 1; k <= i1; k++) {
+          const m = PRICES.dates[k].slice(0, 7);
+          if (m === PRICES.dates[k - 1].slice(0, 7)) continue;
+          const mx = sp.X(k); if (mx - lastX < 50 || mx > x + pw - 16) continue;
+          ctx.strokeStyle = th.ink2; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(mx, y + ph); ctx.lineTo(mx, y + ph + 5); ctx.stroke(); ctx.globalAlpha = 1;
+          ctx.fillText(fmtDate(PRICES.dates[k], { month: "short" }) + (m.endsWith("-01") || lastMonth === "" ? " " + m.slice(2, 4) : ""), mx, y + ph + 21);
+          lastMonth = m; lastX = mx;
+        }
+        ctx.textAlign = "left";
+        tags.push({ y: nowY, text: price(now), fill: th.line, ink: th.card });
+        if (avgY != null) tags.push({ y: avgY, text: "Avg " + price(avg), fill: th.card, ink: th.ink, stroke: th.ink2 });
+      }
+      // the spike buyers' average buy price, dashed across the chart
+      if (avg != null) {
+        ctx.save(); ctx.strokeStyle = th.ink2; ctx.globalAlpha = 0.7; ctx.lineWidth = big ? 1.5 : 1.2; ctx.setLineDash(big ? [7, 6] : [5, 5]);
+        ctx.beginPath(); ctx.moveTo(x, sp.Y(avg)); ctx.lineTo(x + pw, sp.Y(avg)); ctx.stroke(); ctx.restore();
+      }
       for (const t of g.buys) {
-        const i = idxOfDate(t.d); if (i < i0 || i > i1) continue;
-        ctx.beginPath(); ctx.arc(sp.X(i), sp.Y(s[i] ?? t.T.ep), big ? 7 : 5, 0, Math.PI * 2); ctx.fillStyle = th.up; ctx.fill();
+        const k = idxOfDate(t.d); if (k < i0 || k > i1) continue;
+        ctx.beginPath(); ctx.arc(sp.X(k), sp.Y(s[k] ?? t.T.ep), big ? 7 : 5, 0, Math.PI * 2); ctx.fillStyle = th.up; ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = th.card; ctx.stroke();
       }
+      // tags on the price scale: today's close and the average buy (kept apart when they're close)
+      if (tags.length === 2 && Math.abs(tags[0].y - tags[1].y) < 28) { const up = tags[1].y < tags[0].y; tags[1].y = tags[0].y + (up ? -28 : 28); }
+      ctx.font = `700 14px ${MONO}`; ctx.textBaseline = "middle";
+      for (const t of tags) {
+        const tw = Math.max(80, ctx.measureText(t.text).width + 16);
+        ctx.fillStyle = t.fill; ctx.beginPath(); ctx.roundRect(x + pw + 4, t.y - 12, tw, 24, 5); ctx.fill();
+        if (t.stroke) { ctx.strokeStyle = t.stroke; ctx.lineWidth = 1.5; ctx.stroke(); }
+        ctx.fillStyle = t.ink; ctx.fillText(t.text, x + pw + 12, t.y + 1);
+      }
+      ctx.textBaseline = "alphabetic";
     };
-    const facts = (g) => `${g.ms.length} members bought within a month around ${fmtDate(g.last.d, { month: "short", year: "numeric" })} · usually ${g.s.usual < 1 ? "under 1" : g.s.usual.toFixed(1)} a month`;
+    const facts = (g) => `${g.ms.length} members bought within a month around ${fmtDate(g.last.d, { month: "short", year: "numeric" })} · usually ${g.s.usual < 1 ? "under 1" : g.s.usual.toFixed(1)} a month${g.avg != null ? ` · avg buy ${price(g.avg)}` : ""}`;
     const sinceLine = (g) => g.since == null ? "" : `Their buys ${pct(g.since)} since${g.spy != null ? ` · S&P 500 ${pct(g.spy)}` : ""}`;
 
     // the featured spike
@@ -4785,7 +4852,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     if (f.since != null) { ctx.textAlign = "right"; ctx.fillStyle = f.since >= 0 ? th.up : th.down; ctx.font = `800 34px ${MONO}`; ctx.fillText(pct(f.since), W - 76, fy + 56); ctx.textAlign = "left"; }
     ctx.fillStyle = th.ink; ctx.font = `800 26px ${MONO}`; ctx.fillText(`Bought ${estText(f.est)}`, 76, fy + 94);
     ctx.fillStyle = th.muted; ctx.font = `500 18px ${UI}`; ctx.fillText(fitText(ctx, `${facts(f)}${f.since != null ? " · " + sinceLine(f) : ""}`, W - 152), 76, fy + 124);
-    chart(f, 76, fy + 140, W - 152, 272, true);
+    chart(f, 76, fy + 132, W - 152, 290, true);
     const fimgs = await Promise.all(f.ms.slice(0, 9).map((mi) => photoImage(members[mi])));
     const fr = 26, fw = (W - 152) / Math.min(9, Math.max(1, f.ms.length));
     f.ms.slice(0, 9).forEach((mi, k) => {
@@ -4807,13 +4874,13 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       ctx.fillStyle = th.ink; ctx.font = `700 16px ${MONO}`; ctx.textAlign = "right"; ctx.fillText(`Bought ${estText(g.est)}`, x + tw2 - 20, y + 62); ctx.textAlign = "left";
       const aw = ctx.measureText(`Bought ${estText(g.est)}`).width;
       ctx.fillStyle = th.ink2; ctx.font = `500 15px ${UI}`; ctx.fillText(fitText(ctx, cleanName(g.st[0]), tw2 - 56 - aw), x + 20, y + 62);
-      ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; ctx.fillText(fitText(ctx, `${g.ms.length} members · ${fmtDate(g.last.d, { month: "short", year: "numeric" })} · usually ${g.s.usual < 1 ? "under 1" : g.s.usual.toFixed(1)}/month`, tw2 - 40), x + 20, y + 84);
+      ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; ctx.fillText(fitText(ctx, `${g.ms.length} members · ${fmtDate(g.last.d, { month: "short", year: "numeric" })}${g.avg != null ? ` · avg buy ${price(g.avg)}` : ""} · now ${price(PRICES.px[g.t][lastIdx(PRICES.px[g.t])])}`, tw2 - 40), x + 20, y + 84);
       chart(g, x + 20, y + 96, tw2 - 40, th2 - 96 - 58, false);
       g.ms.slice(0, 5).forEach((mi, j) => drawFace(ctx, imgs[k][j], members[mi], x + 38 + j * 44, y + th2 - 30, 17, th));
       if (g.ms.length > 5) { ctx.fillStyle = th.muted; ctx.font = `600 14px ${UI}`; ctx.fillText(`+${g.ms.length - 5}`, x + 38 + 5 * 44 - 10, y + th2 - 25); }
     });
     footer(ctx, W, H, th, ["A spike: 3+ members buying within about a month, when that many would happen by chance less than 1 time in 20.",
-      "Shaded = the spike's month; dots = their buys. Since = the stocks' move from each buy. Not financial advice."]);
+      "Shaded = the spike's month; dots = their buys; dashed = their average buy price."]);
     return null;
   }
 
