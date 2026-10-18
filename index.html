@@ -1118,7 +1118,8 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
         <p><b>Contracts (up to 15).</b> Federal contract money awarded to the company in the last 90 days, from USAspending.gov.</p>
         <p><b>Lobbying (up to 15).</b> What the company reported spending on lobbying in the latest House lobbying disclosures, with its most frequent lobbying topic.</p>
         <p><b>Hearings (up to 10).</b> House committee hearings and markups in the next 28 days that name the company (10 points) or cover its industry (2 points), from the House committee calendar.</p>
-        <p><b>Trump (up to 10).</b> 5 points for each of President Trump's Truth Social posts in the last 30 days that name the company or its ticker. Company names that are also everyday words, such as Apple or Target, count only when the ticker is used.</p>
+        <p><b>Leaders (up to 10).</b> Posts in the last 30 days by well-known political figures that name the company or its ticker: 4 points for each person, plus 1 for each further post. The big number is how many people; the small one is how many posts. A mention counts whether it praises or criticises the company, since either can move a stock. Company names that are also everyday words, such as Apple or Target, count only when the ticker is used.</p>
+        <p>Only personal accounts are read, not government-office or campaign accounts, and a post doesn't count when the person runs, owns or works for the company (for example, the Trump family or Devin Nunes posting about Trump Media). The people followed are Donald Trump, Donald Trump Jr., Eric Trump, Devin Nunes, Pete Hegseth, Marco Rubio and Tulsi Gabbard on Truth Social, and Alexandria Ocasio-Cortez, Elizabeth Warren, Chris Murphy, Hakeem Jeffries, Pete Buttigieg, Barack Obama, Gavin Newsom, JB Pritzker, Jasmine Crockett and Mark Cuban on Bluesky (verified accounts). Posts on X (Twitter), such as Elon Musk's, aren't included because X charges for access.</p>
         <p><b>Insiders (up to 10).</b> The company's own executives, directors and large shareholders buying its stock on the open market in the last 90 days (SEC Form 4 filings). Only people whose purchases add up to at least $25,000 count, which leaves out small automatic employee share-plan purchases.</p>
         <p>Points from every column are added and the total is capped at 100. The score shows where several public signals point the same way. It is not a prediction or investment advice.</p>
       </div>
@@ -4815,7 +4816,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       ["CONTRACTS", 480, 104, 15, (r) => r.points.contracts, (r) => r.contracts ? short(r.contracts) : "–", () => ""],
       ["LOBBYING", 590, 104, 15, (r) => r.points.lobbying, (r) => r.lobbying ? short(r.lobbying) : "–", (r) => (r.issues || [])[0] || ""],
       ["HEARINGS", 700, 90, 10, (r) => r.points.hearings, (r) => r.hearings_named.length + r.hearings_sector.length ? String(r.hearings_named.length + r.hearings_sector.length) : "–", (r) => r.hearings_named.length ? "names it" : r.hearings_sector.length ? "its industry" : ""],
-      ["TRUMP", 796, 74, 10, (r) => r.points.trump || 0, (r) => (r.trump || []).length ? String(r.trump.length) : "–", (r) => (r.trump || []).length ? "posts" : ""],
+      ["LEADERS", 796, 74, 10, (r) => r.points.leaders || 0, (r) => (r.leaders || []).length ? String(new Set(r.leaders.map((p) => p.who)).size) : "–", (r) => (r.leaders || []).length ? r.leaders[0].who.replace(/ Jr\.$/, "").split(" ").pop() + (new Set(r.leaders.map((p) => p.who)).size > 1 ? " +" : "") : ""],
       ["INSIDERS", 876, 86, 10, (r) => r.points.insiders || 0, (r) => r.insiders ? String(r.insiders) : "–", (r) => r.insiders ? short(r.insider_value) : ""],
     ];
     const top = 230, rowH = 84, X0 = 48, R0 = top + 36;  // R0: first row, below the labels and the net-buying legend
@@ -4855,7 +4856,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       ctx.fillStyle = th.line; ctx.beginPath(); ctx.roundRect(bx, y + 46, Math.max(4, bw * r.score / 100), 8, 4); ctx.fill();
       ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `800 26px ${MONO}`; ctx.fillText(String(Math.round(r.score)), W - 64, y + 34); ctx.textAlign = "left";
     });
-    // who is behind the top scores: the members buying, company insiders buying, Trump's posts naming it
+    // who is behind the top scores: the members buying, well-known figures posting about it, company insiders buying
     const byId = new Map(members.map((m) => [m.id, m])), notes = [];
     // SEC filings list people as "Last First Middle": show "First Last" (firms stay as they are)
     const insiderName = (n) => { const p = n.replace(/\s*\(.*$/, "").split(" "); return p.length > 1 && !/(Inc|LLC|LP|L\.P\.|Ltd|Fund|Corp|Trust|Partners|Capital|Holdings)/i.test(n) ? `${p[1]} ${p[0]}` : p.join(" "); };
@@ -4865,9 +4866,12 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       const ms = (r.who || []).map((i) => byId.get(i)).filter((m) => m && !isBiz(m)).slice(0, 4);
       if (ms.length) notes.push([r.t, `bought by ${ms.map(tag).join(", ")}${r.members > ms.length ? ` and ${r.members - ms.length} more` : ""}`]);
     }
+    for (const r of rows) {
+      const ls = r.leaders || [], who = [...new Set(ls.map((p) => p.who))];
+      if (ls.length) notes.push([r.t, `${who.slice(0, 3).join(", ")} named ${cleanName(r.name)} in ${ls.length === 1 ? `a post on ${fmtDate(ls[0].date, { day: "numeric", month: "short" })}` : `${ls.length} posts in the last ${sig.leader_days} days`}`]);
+    }
     for (const r of rows) if (r.insiders) notes.push([r.t, `${r.insider_names.map(insiderName).join(", ")}${r.insiders > r.insider_names.length ? ` and ${r.insiders - r.insider_names.length} more` : ""} (company insiders) bought ${short(r.insider_value)}`]);
     for (const r of rows) if (r.sold >= r.bought * 0.5 && r.sold > 0) notes.push([r.t, `also sold: ${short(r.sold)} by ${r.sellers} ${r.sellers === 1 ? "person" : "people"}, against ${short(r.bought)} bought`]);
-    for (const r of rows) for (const p of (r.trump || []).slice(0, 1)) notes.push([r.t, `Trump, ${fmtDate(p.date, { day: "numeric", month: "short" })}: “${p.text}”`]);
     // the hearings behind the scores, soonest first
     const ids = [...new Set(rows.flatMap((r) => [...r.hearings_named, ...r.hearings_sector]))];
     const hs = ids.map((i) => sig.hearings[i]).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
