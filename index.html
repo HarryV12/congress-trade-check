@@ -832,6 +832,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
             <button type="button" data-v="leaders"><b>Copy-trading leaderboard</b><span>Members ranked by copy-trading score for the period</span></button>
             <button type="button" data-v="conflict"><b>Committee overlap</b><span>Share of trading in sectors their committees oversee</span></button>
             <button type="button" data-v="spikes"><b>Buying spikes</b><span>Stocks several members bought within a month, with amounts</span></button>
+            <button type="button" data-v="signals"><b>Public signals</b><span>Congress buying scored with contracts, lobbying, hearings and insider buys</span></button>
           </div>
         </div>
         <div class="field" data-for="market list">
@@ -1245,7 +1246,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     ["Jared Moskowitz", /Moskowitz/]];
 
   // portraits and daily prices load after the page is drawn
-  let PHOTOS = window.CTC_PHOTOS || null, PRICES = window.CTC_PRICES || null, DESC = null;  // DESC: what each company does (descriptions.js)
+  let PHOTOS = window.CTC_PHOTOS || null, PRICES = window.CTC_PRICES || null, DESC = null, SIGNALS = null;  // SIGNALS: signals.js (Public signals view)  // DESC: what each company does (descriptions.js)
   const loadScript = (src) => new Promise((resolve) => {
     const s = document.createElement("script");
     s.src = src; s.onload = () => resolve(true); s.onerror = () => resolve(false);
@@ -4775,6 +4776,93 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     return null;
   }
 
+  // --- Public signals: stocks Congress bought, scored with contracts, lobbying and upcoming hearings ---
+  // data from signals.js (pipeline/fetch_signals.py); each column is one signal, its cell shaded by the
+  // points it earned; the score adds them up (0-100)
+  async function drawSignals(ctx, W, H, th) {
+    const sig = SIGNALS;
+    if (!sig || !sig.stocks || !sig.stocks.length) return "Public signals aren't available yet.";
+    header(ctx, W, th, `Public signals · stocks bought in the last ${sig.buy_days} days`);
+    ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`; ctx.fillText("Public signals", 64, 160);
+    ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
+    ctx.fillText(fitText(ctx, "Congress buying scored with contracts, lobbying, hearings, Trump's posts and insider buys", W - 128), 64, 200);
+    const rows = sig.stocks.slice(0, 9), short = (v) => v >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : v >= 1e8 ? "$" + Math.round(v / 1e6) + "M" : v >= 1e6 ? "$" + (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? "$" + Math.round(v / 1e3) + "K" : "$" + Math.round(v);
+    // columns: label, x, width, max points, the row's points, its text, a second line
+    const cols = [
+      ["MEMBERS", 276, 94, 40, (r) => r.points.congress + r.points.cluster, (r) => String(r.members), (r) => `${r.buys} buys`],
+      ["COMMITTEE", 376, 98, 20, (r) => r.points.committee, (r) => r.committee ? String(r.committee) : "–", () => ""],
+      ["CONTRACTS", 480, 104, 15, (r) => r.points.contracts, (r) => r.contracts ? short(r.contracts) : "–", () => ""],
+      ["LOBBYING", 590, 104, 15, (r) => r.points.lobbying, (r) => r.lobbying ? short(r.lobbying) : "–", (r) => (r.issues || [])[0] || ""],
+      ["HEARINGS", 700, 90, 10, (r) => r.points.hearings, (r) => r.hearings_named.length + r.hearings_sector.length ? String(r.hearings_named.length + r.hearings_sector.length) : "–", (r) => r.hearings_named.length ? "names it" : r.hearings_sector.length ? "its industry" : ""],
+      ["TRUMP", 796, 74, 10, (r) => r.points.trump || 0, (r) => (r.trump || []).length ? String(r.trump.length) : "–", (r) => (r.trump || []).length ? "posts" : ""],
+      ["INSIDERS", 876, 86, 10, (r) => r.points.insiders || 0, (r) => r.insiders ? String(r.insiders) : "–", (r) => r.insiders ? short(r.insider_value) : ""],
+    ];
+    const top = 236, rowH = 84, X0 = 48;
+    ctx.fillStyle = th.muted; ctx.font = `700 12px ${UI}`; ctx.letterSpacing = "1px";
+    ctx.fillText("STOCK", 64, top + 8);
+    for (const [label, x] of cols) ctx.fillText(label, x + 8, top + 8);
+    ctx.textAlign = "right"; ctx.fillText("SCORE", W - 64, top + 8); ctx.textAlign = "left"; ctx.letterSpacing = "0px";
+    rows.forEach((r, k) => {
+      const y = top + 22 + k * rowH;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(X0, y, W - 2 * X0, rowH - 10, 14); ctx.fill();
+      ctx.fillStyle = th.ink; ctx.font = `800 24px ${MONO}`; ctx.fillText(r.t, 64, y + 34);
+      ctx.fillStyle = th.ink2; const nm = cleanName(r.name); fitSize(ctx, nm, (z) => `500 ${z}px ${UI}`, 15, 200, 12); ctx.fillText(fitText(ctx, nm, 200), 64, y + 58);
+      for (const [, x, w, max, pts, val, sub] of cols) {
+        const f = Math.max(0, Math.min(1, pts(r) / max));
+        ctx.save(); ctx.fillStyle = th.line; ctx.globalAlpha = f ? 0.1 + 0.32 * f : 0; ctx.beginPath(); ctx.roundRect(x, y + 8, w, rowH - 26, 9); ctx.fill(); ctx.restore();
+        ctx.fillStyle = f ? th.ink : th.muted; ctx.font = `700 21px ${MONO}`; ctx.fillText(fitText(ctx, val(r), w - 16), x + 8, y + 34);
+        ctx.fillStyle = th.muted; fitSize(ctx, sub(r), (z) => `500 ${z}px ${UI}`, 13, w - 16, 11); ctx.fillText(fitText(ctx, sub(r), w - 16), x + 8, y + 54);
+      }
+      // the score: a bar and the number
+      const bx = 970, bw = W - 64 - bx;
+      ctx.fillStyle = th.chip || th.grid; ctx.beginPath(); ctx.roundRect(bx, y + 46, bw, 8, 4); ctx.fill();
+      ctx.fillStyle = th.line; ctx.beginPath(); ctx.roundRect(bx, y + 46, Math.max(4, bw * r.score / 100), 8, 4); ctx.fill();
+      ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `800 26px ${MONO}`; ctx.fillText(String(Math.round(r.score)), W - 64, y + 34); ctx.textAlign = "left";
+    });
+    // who is behind the top scores: the members buying, company insiders buying, Trump's posts naming it
+    const byId = new Map(members.map((m) => [m.id, m])), notes = [];
+    // SEC filings list people as "Last First Middle": show "First Last" (firms stay as they are)
+    const insiderName = (n) => { const p = n.replace(/\s*\(.*$/, "").split(" "); return p.length > 1 && !/(Inc|LLC|LP|L\.P\.|Ltd|Fund|Corp|Trust|Partners|Capital|Holdings)/i.test(n) ? `${p[1]} ${p[0]}` : p.join(" "); };
+    for (const r of rows.slice(0, 3)) {
+      const ms = (r.who || []).map((i) => byId.get(i)).filter((m) => m && !isBiz(m)).slice(0, 4);
+      if (ms.length) notes.push([r.t, `bought by ${ms.map(shortName).join(", ")}${r.members > ms.length ? ` and ${r.members - ms.length} more` : ""}`]);
+    }
+    for (const r of rows) if (r.insiders) notes.push([r.t, `${r.insider_names.map(insiderName).join(", ")}${r.insiders > r.insider_names.length ? ` and ${r.insiders - r.insider_names.length} more` : ""} (company insiders) bought ${short(r.insider_value)}`]);
+    for (const r of rows) for (const p of (r.trump || []).slice(0, 1)) notes.push([r.t, `Trump, ${fmtDate(p.date, { day: "numeric", month: "short" })}: “${p.text}”`]);
+    // the hearings behind the scores, soonest first
+    const ids = [...new Set(rows.flatMap((r) => [...r.hearings_named, ...r.hearings_sector]))];
+    const hs = ids.map((i) => sig.hearings[i]).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
+    let y = top + 22 + rows.length * rowH + 18;
+    if (hs.length) {
+      ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1.2px"; ctx.fillText("UPCOMING HOUSE HEARINGS", 64, y); ctx.letterSpacing = "0px";
+      hs.forEach((h, k) => {
+        const yy = y + 30 + k * 28, tks = rows.filter((r) => r.hearings_named.includes(h.id) || r.hearings_sector.includes(h.id)).map((r) => r.t).slice(0, 3).join(", ");
+        ctx.fillStyle = th.ink; ctx.font = `700 16px ${MONO}`; ctx.fillText(fmtDate(h.date, { day: "numeric", month: "short" }), 64, yy);
+        ctx.fillStyle = th.ink2; ctx.font = `500 16px ${UI}`;
+        ctx.fillText(fitText(ctx, `${h.title} · ${h.committee.replace(/^(Subcommittee on|Committee on)\s*/, "")}`, W - 128 - 90 - 150), 154, yy);
+        ctx.textAlign = "right"; ctx.fillStyle = th.line; ctx.font = `700 15px ${MONO}`; ctx.fillText(tks, W - 64, yy); ctx.textAlign = "left";
+      });
+    } else {
+      ctx.fillStyle = th.muted; ctx.font = `500 16px ${UI}`;
+      ctx.fillText(`No House hearings in the next ${sig.hearing_days} days touch these stocks (${sig.hearing_count} scheduled in all).`, 64, y + 4);
+    }
+    if (notes.length) {
+      y += hs.length ? 30 + hs.length * 28 + 30 : 46;
+      ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1.2px"; ctx.fillText("BEHIND THE SCORES", 64, y); ctx.letterSpacing = "0px";
+      const room = Math.max(0, Math.floor((H - 180 - (y + 30)) / 30) + 1);
+      notes.slice(0, Math.min(7, room)).forEach(([t, text], k) => {
+        const yy = y + 30 + k * 30;
+        ctx.fillStyle = th.line; ctx.font = `700 16px ${MONO}`; ctx.fillText(t, 64, yy);
+        ctx.fillStyle = th.ink2; ctx.font = `500 16px ${UI}`; ctx.fillText(fitText(ctx, text, W - 128 - 80), 144, yy);
+      });
+    }
+    // what the score counts
+    ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
+    ctx.fillText(fitText(ctx, "Score out of 100: members up to 40, committee 20, contracts 15, lobbying 15, hearings, Trump and insiders 10 each.", W - 128), 64, H - 140);
+    footer(ctx, W, H, th);
+    return null;
+  }
+
   // --- Buying spikes: stocks several members suddenly bought within a month, far more than usual ---
   async function drawSpikes(ctx, W, H, th) {
     const since = windowStart(), seat = (t) => !isBiz(members[t.m]);
@@ -5537,7 +5625,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
   // a 3:4 blank (the posters' shape) shown while a new image is being drawn
   const BLANK_POST = (() => { const c = document.createElement("canvas"); c.width = 3; c.height = 4; return c.toDataURL("image/png"); })();
   const DRAW = { terminal: drawTerminal, list: drawRoundup, breaking: drawBreaking, scorecard: drawScorecardPoster,
-    leaders: drawLeaders, conflict: drawConflict, frontpage: drawFrontPage, card: drawCard, receipt: drawReceipt, spikes: drawSpikes };
+    leaders: drawLeaders, conflict: drawConflict, frontpage: drawFrontPage, card: drawCard, receipt: drawReceipt, spikes: drawSpikes, signals: drawSignals };
   for (const s of MARKET) DRAW[s] = drawMarket;
   const POSTER_FONTS = ['800 64px "Public Sans"', '700 26px "Public Sans"', '600 20px "Public Sans"', '500 19px "Public Sans"',
     '400 20px "IBM Plex Mono"', '500 20px "IBM Plex Mono"', '600 26px "IBM Plex Mono"', '700 26px "IBM Plex Mono"',
@@ -5597,6 +5685,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
     $("#postHint").textContent = "Drawing the image…";
     if (!PHOTOS) PHOTOS = (await loadScript("photos.js") && window.CTC_PHOTOS) || {};
     if (!DESC) DESC = (await loadScript("descriptions.js") && window.CTC_DESC) || {};
+    if (P.style === "signals" && !SIGNALS) SIGNALS = (await loadScript("signals.js") && window.CTC_SIGNALS) || { stocks: [] };
     if (!PRICES) { await loadScript("prices.js"); PRICES = window.CTC_PRICES || null; }
     if (seq !== drawSeq) return;
     resolvePicks();
@@ -5770,6 +5859,7 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
       scorecard: `scorecard-${who}`,
       leaders: "congress-best-to-follow",
       conflict: PE.memberKey === "all" ? "committee-map-congress" : `committee-map-${who}`,
+      signals: "public-signals",
       frontpage: `front-page-${one}`,
       card: `card-${who}`,
       receipt: (() => { const f = selectedFiling(); return f ? `receipt-${slug(members[f[0].m].name)}-${P.filing}` : "receipt"; })(),
