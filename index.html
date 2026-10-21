@@ -5356,9 +5356,11 @@ if (location.hostname === "harryv12.github.io") {
     const inP = P.window === "all" ? `since ${START_SHORT}` : P.window === "ytd" ? `in ${YEAR} so far` : `in ${periodLong()}`;
     const stName = byStock ? cleanName(stocks[tk][0]) : "";
     header(ctx, W, th, byStock ? `${tk} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}` : `${titleOf(m)} ${shortName(m)} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
-    ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`;
+    ctx.fillStyle = th.ink;
+    // a long company name: a smaller title first; only then whole words off the end, keeping at least two of the name's
     let ttl = byStock ? `Who bought ${stName}` : `${lastName(m)}’s biggest buys`;
-    while (byStock && ttl.split(" ").length > 3 && ctx.measureText(ttl).width > W - 128) ttl = ttl.slice(0, ttl.lastIndexOf(" "));  // drop whole words
+    fitSize(ctx, ttl, (z) => `800 ${z}px ${UI}`, 58, W - 128, 38);
+    while (byStock && ttl.split(" ").length > 4 && ctx.measureText(ttl).width > W - 128) ttl = ttl.slice(0, ttl.lastIndexOf(" "));
     ctx.fillText(fitText(ctx, ttl, W - 128), 64, 160);
     ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
     ctx.fillText(fitText(ctx, byStock ? `The ${top.length === 1 ? "buyer" : `${top.length} biggest buyers`} ${inP}, and how much each also sold`
