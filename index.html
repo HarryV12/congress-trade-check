@@ -239,6 +239,10 @@ details.howto .body b { color: var(--ink); }
 .combo li .sub { font-size: 12px; color: var(--muted); }
 .combo li .cnt { font-size: 12px; color: var(--ink-2); font-family: var(--font-mono); }
 .combo li .tkbox { font-family: var(--font-mono); font-weight: 600; font-size: 13px; background: var(--chip); border-radius: 5px; padding: 3px 7px; }
+/* dropdowns turned into search boxes: the list is one column of option labels */
+.gsel { width: 100%; }
+.gsel li { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.gsel li .nm { white-space: normal; }
 .chip.filter { display: inline-flex; gap: 6px; align-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 600; font-size: 12.5px; }
 .chip.filter button { all: unset; cursor: pointer; font-weight: 700; padding: 0 2px; }
 
@@ -4310,6 +4314,26 @@ if (location.hostname === "harryv12.github.io") {
     return { n: list.length, b: b.length, s: list.length - b.length, vol: sumAmt(list), vv: list.reduce((a, t) => a + t.amtSd ** 2, 0), win: s2.n ? s2.win : null, diff: s2.n ? s2.diff : null, days: dl.length ? median(dl) : null };
   };
 
+  // shares of one stock a person still holds, estimated from every filing since the data starts: each buy adds
+  // its best-estimate dollars ÷ that day's close, each sale takes them away, per account (own, spouse, child,
+  // joint). A House or Senate full sale ("S", as opposed to "S (partial)") empties that account; officials'
+  // forms don't mark partial sales, so theirs only subtract. Shares held before the data starts are unknown.
+  function sharesLeft(m, tk, s) {
+    const acct = new Map();
+    let any = false, bought = false, lastFull = false;
+    for (const t of trades.filter((t) => t.m === m.i && t.t === tk && t.side !== "O" && t.cls !== "option" && t.amt > 0).sort((a, b) => a.time - b.time)) {
+      const px = s[idxOfDate(t.d)] ?? t.T.ep;
+      if (!px) continue;
+      const o = t.own || "self", h = acct.get(o) || 0;
+      any = true;
+      if (t.side === "B") { acct.set(o, h + t.amt / px); bought = true; lastFull = false; }
+      else { lastFull = t.k === "S" && !isExec(m); acct.set(o, lastFull ? 0 : Math.max(0, h - t.amt / px)); }
+    }
+    // only sales on file: they bought before the data starts, so what's left is unknown unless a full sale emptied it
+    if (!bought) return lastFull ? 0 : null;
+    return any ? [...acct.values()].reduce((a, v) => a + v, 0) : null;
+  }
+
   // --- Terminal: one stock as a trading-desk screen ---
   async function drawTerminal(ctx, W, H, th) {
     const tk = PE.ticker, s = PRICES.px[tk];
@@ -4394,16 +4418,17 @@ if (location.hostname === "harryv12.github.io") {
     for (const g of people) {
       const pb = g.buys.filter((t) => t.T.ep), dol = pb.reduce((acc, t) => acc + (t.amt || 1), 0);
       g.avg = pb.length ? dol / pb.reduce((acc, t) => acc + (t.amt || 1) / t.T.ep, 0) : null;  // cost per share
+      g.left = sharesLeft(g.m, tk, s);
     }
     y = by + 50;
-    const cols = [["MEMBER", 40], ["BUYS", 404], ["BOUGHT", 456], ["SELLS", 628], ["SOLD", 680], ["AVG BUY", 850], ["SINCE", W - 40]];
+    const cols = [["MEMBER", 40], ["BOUGHT", 330], ["SOLD", 506], ["AVG BUY", 676], ["CHANGE", 800], ["LEFT NOW", W - 40]];
     ctx.fillStyle = C.bar; ctx.beginPath(); ctx.roundRect(28, y, W - 56, 34, 8); ctx.fill();
     ctx.fillStyle = C.yellow; ctx.font = `700 15px ${M}`;
     cols.forEach(([l, x], i) => { ctx.textAlign = i === cols.length - 1 ? "right" : "left"; ctx.fillText(l, x, y + 23); });
     ctx.textAlign = "left";
-    const rowH = 40, avail = gy - 58 - (y + 34);
+    const rowH = 40, avail = gy - 58 - (y + 34) - 44;  // 44: the two-line note under the table
     let nRows = Math.max(1, Math.floor(avail / rowH));
-    if (people.length > nRows) nRows = Math.max(1, Math.floor((avail - 26) / rowH));
+    if (people.length > nRows) nRows = Math.max(1, Math.floor((avail - 22) / rowH));
     const shown = people.slice(0, nRows);
     let ci = 0;  // colours go to the first six politicians with an average buy
     for (const g of shown) g.col = g.avg && ci < PAL.length ? PAL[ci++] : null;
@@ -4412,21 +4437,26 @@ if (location.hostname === "harryv12.github.io") {
       if (k % 2) { ctx.fillStyle = C.panel; ctx.fillRect(28, ry, W - 56, rowH); }
       if (g.col) { ctx.fillStyle = g.col; ctx.beginPath(); ctx.roundRect(40, ry + 13, 14, 14, 3); ctx.fill(); }
       ctx.font = `600 18px ${UI}`; ctx.fillStyle = C.text;
-      { const full = `${shortName(g.m)} · ${party(g.m)}`; ctx.fillText(fitText(ctx, ctx.measureText(full).width <= 404 - 62 - 14 ? full : shortName(g.m), 404 - 62 - 14), 62, bl); }
-      ctx.font = `600 18px ${M}`;
-      ctx.fillStyle = g.buys.length ? C.green : C.label; ctx.fillText(String(g.buys.length), 404, bl);
-      ctx.fillText(fitText(ctx, g.buys.length ? listSpan(g.buys) : "–", 628 - 456 - 10), 456, bl);
-      ctx.fillStyle = g.sells.length ? C.red : C.label; ctx.fillText(String(g.sells.length), 628, bl);
-      ctx.fillText(fitText(ctx, g.sells.length ? listSpan(g.sells) : "–", 850 - 680 - 10), 680, bl);
-      ctx.fillStyle = g.col || C.amber; ctx.fillText(g.avg ? price(g.avg) : "–", 850, bl);
+      { const full = `${shortName(g.m)} · ${party(g.m)}`, w = 330 - 62 - 12; ctx.fillText(fitText(ctx, ctx.measureText(full).width <= w ? full : shortName(g.m), w), 62, bl); }
+      ctx.font = `600 17px ${M}`;
+      ctx.fillStyle = g.buys.length ? C.green : C.label; ctx.fillText(fitText(ctx, g.buys.length ? `${estOf(g.buys).best ? usdEst(estOf(g.buys).best) : "–"} ×${g.buys.length}` : "–", 506 - 330 - 10), 330, bl);
+      ctx.fillStyle = g.sells.length ? C.red : C.label; ctx.fillText(fitText(ctx, g.sells.length ? `${estOf(g.sells).best ? usdEst(estOf(g.sells).best) : "?"} ×${g.sells.length}` : "–", 676 - 506 - 10), 506, bl);
+      ctx.fillStyle = g.col || C.amber; ctx.fillText(g.avg ? price(g.avg) : "–", 676, bl);
       const r = g.avg ? last / g.avg - 1 : null;
-      ctx.textAlign = "right"; ctx.fillStyle = r == null ? C.label : r >= 0 ? C.green : C.red;
-      ctx.fillText(r == null ? "–" : pct(r), W - 40, bl); ctx.textAlign = "left";
+      ctx.fillStyle = r == null ? C.label : r >= 0 ? C.green : C.red; ctx.fillText(r == null ? "–" : pct(r), 800, bl);
+      // what they still hold: today's value of the estimated shares left, or "sold out"
+      ctx.textAlign = "right";
+      const v = g.left == null ? null : g.left * last;
+      ctx.fillStyle = v == null ? C.label : v < 1000 ? C.red : C.text;
+      ctx.fillText(v == null ? "unknown" : v < 1000 ? "sold out" : `≈${usdEst(v)}`, W - 40, bl); ctx.textAlign = "left";
     });
+    let ny = y + 34 + shown.length * rowH + 22;
     if (people.length > nRows) {
       ctx.fillStyle = C.label; ctx.font = `500 15px ${M}`;
-      ctx.fillText(`+${people.length - nRows} MORE MEMBERS AND OFFICIALS TRADED ${tk} IN THIS PERIOD`, 40, y + 34 + nRows * rowH + 22);
+      ctx.fillText(`+${people.length - nRows} MORE MEMBERS AND OFFICIALS TRADED ${tk} IN THIS PERIOD`, 40, ny); ny += 22;
     }
+    ctx.fillStyle = C.label; ctx.font = `500 13px ${UI}`;
+    drawWrapped(ctx, `Bought and sold: best estimates in the period (×trades; ? = amount unreadable). Change: today's price against their average buy. Left now: estimated shares still held from all their filings since ${START_SHORT} (buys minus sales), at today's price; unknown when they only sold shares bought earlier.`, 40, ny, W - 80, 18, 2);
     // the price, white on black with a gridded scale, buys and sells marked
     bar(`PRICE · ${periodLong().toUpperCase()}`, gy - 50, "▲ BUY   ▼ SELL   - - AVERAGE BUY");
     const [i0, i1] = priceRange(s, windowDays());
@@ -6057,6 +6087,51 @@ if (location.hostname === "harryv12.github.io") {
     ul.addEventListener("mousedown", (e) => { const li = e.target.closest("li[data-v]"); if (li) { e.preventDefault(); pick(li.dataset.v); } });
     box.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== box) { close(); fillPostStocks(); } }, 120));
   }
+  // every dropdown becomes a search box: type to narrow its options, arrows and Enter to pick. The <select>
+  // stays (hidden) as the source of truth, so the code that fills it and listens to it is unchanged.
+  let gselN = 0;
+  function searchableSelect(sel) {
+    const n = ++gselN, wrap = document.createElement("div"), box = document.createElement("input"), ul = document.createElement("ul");
+    wrap.className = "combo pcombo gsel";
+    box.type = "text"; box.id = `gsel${n}`; box.autocomplete = "off"; box.spellcheck = false;
+    box.setAttribute("role", "combobox"); box.setAttribute("aria-expanded", "false"); box.setAttribute("aria-controls", `gselList${n}`); box.setAttribute("aria-autocomplete", "list");
+    ul.id = `gselList${n}`; ul.setAttribute("role", "listbox"); ul.hidden = true;
+    wrap.append(box, ul); sel.after(wrap); sel.hidden = true;
+    const label = document.querySelector(`label[for="${sel.id}"]`);
+    if (label) label.htmlFor = box.id; else box.setAttribute("aria-label", sel.getAttribute("aria-label") || "Search");
+    let items = [], at = -1;
+    const current = () => sel.options[sel.selectedIndex]?.textContent || "";
+    const sync = () => { if (document.activeElement !== box && box.value !== current()) box.value = current(); };
+    const close = () => { ul.hidden = true; box.setAttribute("aria-expanded", "false"); at = -1; };
+    const show = () => {
+      const words = box.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      items = [...sel.options].filter((o) => !o.disabled && words.every((w) => o.textContent.toLowerCase().includes(w))).slice(0, 300);
+      ul.innerHTML = items.length ? items.map((o, k) => {
+        const [main, ...rest] = o.textContent.split(" · ");
+        return `<li role="option" id="gsel${n}o${k}" aria-selected="${k === at}"><span class="nm">${esc(main)}${rest.length ? `<span class="sub"> · ${esc(rest.join(" · "))}</span>` : ""}</span></li>`;
+      }).join("") : '<li class="head"><span class="sub">Nothing matches.</span></li>';
+      ul.hidden = false; box.setAttribute("aria-expanded", "true");
+    };
+    const pick = (o) => { close(); box.blur(); if (o && (o.value !== sel.value || sel.id === "member")) { sel.value = o.value; sel.dispatchEvent(new Event("change", { bubbles: true })); } sync(); };
+    box.addEventListener("focus", () => { box.value = ""; show(); });
+    box.addEventListener("input", () => { at = -1; show(); });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); if (ul.hidden) show();
+        at = Math.max(0, Math.min(items.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)));
+        [...ul.querySelectorAll("li[role=option]")].forEach((li, k) => li.setAttribute("aria-selected", String(k === at)));
+        ul.querySelector(`#gsel${n}o${at}`)?.scrollIntoView({ block: "nearest" }); box.setAttribute("aria-activedescendant", `gsel${n}o${at}`);
+      } else if (e.key === "Enter") { e.preventDefault(); pick(items[at >= 0 ? at : 0]); }
+      else if (e.key === "Escape") { close(); box.blur(); sync(); }
+    });
+    ul.addEventListener("mousedown", (e) => { const li = e.target.closest("li[role=option]"); if (li) { e.preventDefault(); pick(items[+li.id.split("o").pop()]); } });
+    box.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== box) { close(); sync(); } }, 120));
+    // the page fills and sets the <select> in many places: keep the box showing its current choice
+    new MutationObserver(sync).observe(sel, { childList: true, subtree: true, attributes: true });
+    sel.addEventListener("change", sync);
+    setInterval(sync, 400);
+    sync();
+  }
   // trades to pick from for one-trade posters: the newest disclosures (the picked member's, when one is picked above)
   function fillTrades() {
     const sel = $("#pTradeSel");
@@ -6145,6 +6220,7 @@ if (location.hostname === "harryv12.github.io") {
     for (const [id, key] of [["pSells", "sells"], ["pKept", "kept"], ["pNoBig", "noBig"]]) $("#" + id).addEventListener("change", (e) => { P[key] = e.target.checked; save(); renderPost(); });
     $("#pTicker").addEventListener("change", (e) => { P.ticker = e.target.value; save(); renderPost(); });
     bindStockSearch();
+    for (const sel of document.querySelectorAll("select:not([hidden])")) searchableSelect(sel);
     $("#postSave").addEventListener("click", savePost);
     // copy the finished image to the clipboard (enabled only once it's drawn)
     $("#postCopy").addEventListener("click", async () => {
