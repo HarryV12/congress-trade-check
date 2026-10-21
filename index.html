@@ -891,6 +891,17 @@ if (location.hostname === "harryv12.github.io") {
           </div>
         </div>
         <label class="check" data-for="market" for="pSells"><input type="checkbox" id="pSells"> Mark sells too</label>
+        <div class="field" data-for="bonds">
+          <span class="label">Type of debt</span>
+          <div class="seg" id="pDebt" role="group" aria-label="Type of debt">
+            <button type="button" data-v="all">All</button>
+            <button type="button" data-v="treasury">U.S. Treasury</button>
+            <button type="button" data-v="muni">Municipal</button>
+            <button type="button" data-v="corp">Corporate</button>
+            <button type="button" data-v="bank">Bank notes &amp; CDs</button>
+            <button type="button" data-v="fund">Bond funds</button>
+          </div>
+        </div>
         <div class="field" data-for="list">
           <span class="label">Show</span>
           <div class="seg" id="pSide" role="group" aria-label="Buys or sells">
@@ -1297,7 +1308,7 @@ if (location.hostname === "harryv12.github.io") {
     exclude: "NVDA, AAPL, GOOGL", committeeOnly: true, lateOnly: false, options: true, crypto: true, side: "all", view: "kept",
     leaderSort: "ret", leaderDir: -1, tradeSort: "d", tradeDir: -1, units: "pct", spikes: true, v: 13,
     lines: { kept: true, spy: true, inv: true, every: true, big: true } };
-  const postDefaults = { style: "chart", who: "all", trade: "", filing: "", ticker: "", member: "", committee: "", window: "182", sells: true, side: "B", days: "30", sort: "amt", kept: false, noBig: false, theme: "light", pv: 11 };
+  const postDefaults = { style: "chart", who: "all", trade: "", filing: "", ticker: "", member: "", committee: "", window: "182", sells: true, side: "B", days: "30", sort: "amt", kept: false, noBig: false, debt: "all", theme: "light", pv: 11 };
   let S = { ...defaults }, P = { ...postDefaults };
   try {
     const saved = JSON.parse(localStorage.getItem("ctc-state") || "{}");
@@ -5057,16 +5068,21 @@ if (location.hostname === "harryv12.github.io") {
     const since = windowStart(), KC = { treasury: th.line, muni: "#1baf7a", corp: "#eb6834", bank: "#6f4cc3", fund: "#8e96a3" };
     const all = PE.memberKey === "all";
     const m = PE.member;
-    const pool = trades.filter((t) => t.time >= since && t.lo && isDebt(t) && !isBiz(members[t.m]) && (all || t.m === m.i));
+    const poolAll = trades.filter((t) => t.time >= since && t.lo && isDebt(t) && !isBiz(members[t.m]) && (all || t.m === m.i));
+    for (const t of poolAll) t.debt = t.debt || debtInfo(t);
+    // "Type of debt": one kind only, or all of them
+    const DT = DEBT_KINDS.some(([k]) => k === P.debt) ? P.debt : "all";
+    const WHAT = { all: "bonds and debt", treasury: "U.S. Treasuries", muni: "municipal bonds", corp: "corporate bonds", bank: "bank notes and CDs", fund: "bond funds" }[DT];
+    const pool = DT === "all" ? poolAll : poolAll.filter((t) => t.debt.kind === DT);
     const buys = pool.filter((t) => t.side === "B"), sells = pool.filter((t) => t.side === "S");
-    if (!buys.length) return all ? `No bond or debt purchases in ${periodLong()}.` : `No bond or debt purchases by ${m.name} in ${periodLong()}. Pick a longer period or "Everyone".`;
-    for (const t of pool) t.debt = t.debt || debtInfo(t);
+    if (!buys.length) return all ? `No purchases of ${WHAT} in ${periodLong()}.` : `No purchases of ${WHAT} by ${m.name} in ${periodLong()}. Pick a longer period, another type, or "All of Congress".`;
     const per = (all ? "everyone" : null), eb = estOf(buys), es = estOf(sells);
-    header(ctx, W, th, all ? `Members and officials · bonds and debt · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}` : `${titleOf(m)} ${shortName(m)} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
+    header(ctx, W, th, all ? `Members and officials · ${WHAT} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}` : `${titleOf(m)} ${shortName(m)} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
     ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`;
-    ctx.fillText(fitText(ctx, all ? "Who buys bonds and debt" : `${lastName(m)}’s bonds and debt`, W - 128 - (all ? 0 : 150)), 64, 160);
+    ctx.fillText(fitText(ctx, all ? `Who buys ${WHAT}` : `${lastName(m)}’s ${WHAT}`, W - 128 - (all ? 0 : 150)), 64, 160);
     ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
-    ctx.fillText(fitText(ctx, all ? "U.S. Treasuries, municipal and corporate bonds, bank notes and bond funds they bought" : "Treasuries, municipal and corporate bonds, bank notes and bond funds", W - 128 - (all ? 0 : 150)), 64, 200);
+    ctx.fillText(fitText(ctx, DT !== "all" ? `Only ${WHAT}; the bar below shows all their debt for comparison`
+      : all ? "U.S. Treasuries, municipal and corporate bonds, bank notes and bond funds they bought" : "Treasuries, municipal and corporate bonds, bank notes and bond funds", W - 128 - (all ? 0 : 150)), 64, 200);
     if (!all) drawFace(ctx, await photoHD(m), m, W - 64 - 60, 140, 60, th);
     // facts
     const fy = 236, fw = (W - 128 - 2 * 20) / 3;
@@ -5074,8 +5090,8 @@ if (location.hostname === "harryv12.github.io") {
     const facts = [
       [th.line, usdEst(eb.best), "Bought", `${plural(buys.length, "purchase")}${eb.exact ? "" : `, likely ${spanText(eb.lo, eb.hi)}`}.`],
       [th.down, sells.length ? usdEst(es.best) : "$0", "Sold or redeemed", sells.length ? `${plural(sells.length, "sale")}${es.exact ? "" : `, likely ${spanText(es.lo, es.hi)}`}.` : "None in this period."],
-      all ? [th.ink, String(new Set(buys.map((t) => t.m)).size), "People", "members and officials who bought bonds or debt in this period."]
-        : [th.ink, `${Math.round(eb.best / (estOf(theirAll).best || 1) * 100)}%`, "Of all their buying", "went into bonds and debt rather than stocks or funds."],
+      all ? [th.ink, String(new Set(buys.map((t) => t.m)).size), "People", `members and officials who bought ${WHAT} in this period.`]
+        : [th.ink, `${Math.round(eb.best / (estOf(theirAll).best || 1) * 100)}%`, "Of all their buying", `went into ${WHAT}${DT === "all" ? " rather than stocks or funds" : ""}.`],
     ];
     facts.forEach(([c, big, head, body], i) => {
       const x = 64 + i * (fw + 20);
@@ -5087,19 +5103,20 @@ if (location.hostname === "harryv12.github.io") {
     // split by kind: one stacked bar with its legend
     let y = fy + 170;
     const byKind = new Map(DEBT_KINDS.map(([k]) => [k, 0]));
-    for (const t of buys) byKind.set(t.debt.kind, byKind.get(t.debt.kind) + t.amt);
+    for (const t of poolAll) if (t.side === "B") byKind.set(t.debt.kind, byKind.get(t.debt.kind) + t.amt);
     const tot = [...byKind.values()].reduce((a, v) => a + v, 0) || 1;
     capsText(ctx, "WHAT KIND OF DEBT", 64, y, 14, th.muted, 700, 1.5);
     y += 16; let bx = 64;
-    for (const [k] of DEBT_KINDS) { const w = (W - 128) * byKind.get(k) / tot; if (w > 0) { ctx.fillStyle = KC[k]; ctx.fillRect(bx, y, Math.max(2, w - 2), 22); bx += w; } }
+    for (const [k] of DEBT_KINDS) { const w = (W - 128) * byKind.get(k) / tot; if (w > 0) { ctx.globalAlpha = DT === "all" || DT === k ? 1 : 0.25; ctx.fillStyle = KC[k]; ctx.fillRect(bx, y, Math.max(2, w - 2), 22); ctx.globalAlpha = 1; bx += w; } }
     y += 50; let lx = 64;
     ctx.font = `600 15px ${UI}`;
     for (const [k, label] of DEBT_KINDS) {
       const v = byKind.get(k); if (!v) continue;
       const t = `${label} ${usdEst(v)} · ${Math.round(v / tot * 100)}%`;
       if (lx + 24 + ctx.measureText(t).width > W - 64) { lx = 64; y += 28; }
+      ctx.globalAlpha = DT === "all" || DT === k ? 1 : 0.4;
       ctx.fillStyle = KC[k]; ctx.beginPath(); ctx.roundRect(lx, y - 12, 14, 14, 3); ctx.fill();
-      ctx.fillStyle = th.ink2; ctx.fillText(t, lx + 22, y); lx += 22 + ctx.measureText(t).width + 28;
+      ctx.fillStyle = th.ink2; ctx.font = `${DT === k ? 700 : 600} 15px ${UI}`; ctx.fillText(t, lx + 22, y); ctx.globalAlpha = 1; lx += 22 + ctx.measureText(t).width + 28;
     }
     y += 44;
     if (all) {
@@ -5115,7 +5132,7 @@ if (location.hostname === "harryv12.github.io") {
         drawFace(ctx, await photoImage(e.m), e.m, 84, cyy, 18, th);
         ctx.fillStyle = th.ink; ctx.font = `600 17px ${UI}`; ctx.fillText(fitText(ctx, `${shortName(e.m)} · ${party(e.m)}`, 300), 114, cyy - 2);
         const topK = [...e.kinds.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`; ctx.fillText(`${plural(e.list.length, "purchase")} · mostly ${{ treasury: "U.S. Treasuries", muni: "municipal bonds", corp: "corporate bonds", bank: "bank notes and CDs", fund: "bond funds" }[topK]}`, 114, cyy + 17);
+        ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`; ctx.fillText(`${plural(e.list.length, "purchase")}${DT === "all" ? ` · mostly ${{ treasury: "U.S. Treasuries", muni: "municipal bonds", corp: "corporate bonds", bank: "bank notes and CDs", fund: "bond funds" }[topK]}` : ""}`, 114, cyy + 17);
         const bx0 = 440, bw = W - 64 - 200 - bx0; let x = bx0;
         for (const [k] of DEBT_KINDS) { const w = bw * (e.kinds.get(k) || 0) / maxV; if (w > 0) { ctx.fillStyle = KC[k]; ctx.fillRect(x, cyy - 8, w, 16); x += w; } }
         ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 17px ${MONO}`; ctx.fillText(usdEst(e.est.best), W - 64, cyy + 5); ctx.textAlign = "left";
@@ -6491,7 +6508,7 @@ if (location.hostname === "harryv12.github.io") {
       scorecard: `scorecard-${who}`,
       holdings: `biggest-buys-${who}-${P.window}`,
       parties: `democrats-vs-republicans-${slug(PE.ticker)}-${P.window}`,
-      bonds: PE.memberKey === "all" ? `bonds-everyone-${P.window}` : `bonds-${who}-${P.window}`,
+      bonds: `${PE.memberKey === "all" ? "bonds-everyone" : `bonds-${who}`}${P.debt && P.debt !== "all" ? `-${P.debt}` : ""}-${P.window}`,
       leaders: "congress-best-to-follow",
       conflict: PE.memberKey === "all" ? "committee-map-congress" : `committee-map-${who}`,
       signals: "public-signals",
@@ -6508,7 +6525,7 @@ if (location.hostname === "harryv12.github.io") {
       const b = e.target.closest("button"); if (!b) return;
       P.style = b.dataset.v; save(); renderPost();
     });
-    const segs = { pWindow: "window", pSide: "side", pDays: "days", pSort: "sort", pTheme: "theme" };
+    const segs = { pWindow: "window", pSide: "side", pDays: "days", pSort: "sort", pTheme: "theme", pDebt: "debt" };
     for (const [id, key] of Object.entries(segs)) postSync[id] = bindSeg(id, () => P[key], (v) => { P[key] = v; save(); renderPost(); });
     // a new "trades by" choice starts from all of that selection's stocks
     postSync.pWho = bindSeg("pWho", () => P.who, (v) => { if (v !== P.who && isMarket()) P.ticker = ""; P.who = v; save(); renderPost(); });
