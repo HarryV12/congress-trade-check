@@ -4329,7 +4329,8 @@ if (location.hostname === "harryv12.github.io") {
     if (base) {
       const px0 = s[idxOfDate(base.as_of)];
       if (px0) {
-        acct.set("self", base.stocks[tk].reduce((a, [lo, hi]) => a + bandStats(lo, hi).mean, 0) / px0);
+        // "None (or less than $1,001)" rows (stored as 0–1,000) mean they had sold out by then: they count as nothing
+        acct.set("self", base.stocks[tk].reduce((a, [lo, hi]) => a + (lo ? bandStats(lo, hi).mean : 0), 0) / px0);
         from = Date.parse(base.as_of + "T23:59:59Z"); any = bought = true;
       }
     }
