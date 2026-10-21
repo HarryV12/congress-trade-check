@@ -1284,7 +1284,7 @@ if (location.hostname === "harryv12.github.io") {
     ["Jared Moskowitz", /Moskowitz/]];
 
   // portraits and daily prices load after the page is drawn
-  let PHOTOS = window.CTC_PHOTOS || null, PRICES = window.CTC_PRICES || null, DESC = null, SIGNALS = null, HOLD0 = null;  // HOLD0: holdings_start.js (year-end holdings from annual reports)  // SIGNALS: signals.js (Public signals view)  // DESC: what each company does (descriptions.js)
+  let PHOTOS = window.CTC_PHOTOS || null, PRICES = window.CTC_PRICES || null, DESC = null, SIGNALS = null, HOLD0 = null, MATURITY = null;  // MATURITY: bond_maturity.js  // HOLD0: holdings_start.js (year-end holdings from annual reports)  // SIGNALS: signals.js (Public signals view)  // DESC: what each company does (descriptions.js)
   const loadScript = (src) => new Promise((resolve) => {
     const s = document.createElement("script");
     s.src = src; s.onload = () => resolve(true); s.onerror = () => resolve(false);
@@ -4988,21 +4988,19 @@ if (location.hostname === "harryv12.github.io") {
   const DEBT_KINDS = [["treasury", "U.S. Treasury"], ["muni", "Municipal"], ["corp", "Corporate"], ["bank", "Bank notes & CDs"], ["fund", "Bond funds"]];
   function debtInfo(t) {
     const a = (t.st ? t.st[0] : t.a || "").replace(/\s+/g, " ").trim(), up = a.toUpperCase();
-    const kind = /\b(ETF|FUND|FD|INDEX|SWEEP|MONEY MARKET|TRUST)\b/.test(up) || (t.st && true) ? "fund"
+    // bank notes first: "linked to S&P 500 Index" notes are bank IOUs, not index funds
+    const kind = !t.st && /\bLINKED\b|STRUCTURED|\bCDS?\b|CERTIFICATE OF DEPOSIT|\bBANK\b.*\bNOTE/.test(up) ? "bank"
+      : /\b(ETF|FUND|FD|INDEX|SWEEP|MONEY MARKET|TRUST)\b/.test(up) || (t.st && true) ? "fund"
       : /TREAS|T-BILL|\bU\.?S\.? (GOVT|GOVERNMENT)\b|UNITED STATES/.test(up) ? "treasury"
-      : /\bLINKED\b|STRUCTURED|\bCDS?\b|CERTIFICATE OF DEPOSIT|\bBANK\b.*\bNOTE/.test(up) ? "bank"
       : /\b(ST|STATE|CNTY|COUNTY|CITY|AUTH|DIST|SCH|SCHOOL|REV|GO|HOSP|HSG|WTR|TRANSIT|TURNPIKE|PORT|UNIV|PUB|MUNI|MUN|TWP|BORO|COMMONWEALTH|AIRPORT|AVIATION|TOLL|UTIL)\b/.test(up) ? "muni" : "corp";
     const cm = up.match(/(\d{1,2}(?:\.\d{1,5})?)\s?%/), coupon = cm && +cm[1] > 0 && +cm[1] < 20 ? +cm[1] : null;
-    let year = null, m;
-    if ((m = up.match(/DUE\s+[A-Z]{3}\.?\s+\d{1,2},?\s+(\d{4})/))) year = +m[1];
-    else if ((m = up.match(/\b\d{1,2}\/\d{1,2}\/(\d{2,4})\b/))) year = m[1].length === 2 ? 2000 + +m[1] : +m[1];
-    else if ((m = up.match(/DUE\s+\d{2}\d{2}(\d{2})\b/))) year = 2000 + +m[1];
-    else if ((m = up.match(/\b(20[2-7]\d)\b/))) year = +m[1];
+    // maturity from bond_maturity.js: a CUSIP lookup, the filing's "due" date, or a likely date after the coupon
+    const mt = MATURITY && MATURITY[t.a], mdate = mt ? mt[0] : null, msrc = mt ? mt[1] : null, year = mdate ? +mdate.slice(0, 4) : null;
     // a readable name: the issuer, before the coupon, series and maturity details
     let name = a.replace(/\s+(B\/E|BE\/R|SER(IES)?\b|RFDG|DUE\b|DTD\b|FC\b|PTC\b).*$/i, "").replace(/\s*\d{1,2}(\.\d+)?\s?%.*$/, "").replace(/\s+\d{1,2}\/\d{1,2}\/\d{2,4}.*$/, "").trim();
     if (kind === "treasury") name = /BILL/.test(up) ? "U.S. Treasury bills" : /BOND/.test(up) && !/NOTE/.test(up) ? "U.S. Treasury bonds" : "U.S. Treasury notes";
     name = name.length > 4 && name === name.toUpperCase() ? titleCase(name) : name;
-    return { kind, coupon, year, name: name || a };
+    return { kind, coupon, year, mdate, msrc, name: name || a };
   }
   async function drawBonds(ctx, W, H, th) {
     const since = windowStart(), KC = { treasury: th.line, muni: "#1baf7a", corp: "#eb6834", bank: "#6f4cc3", fund: "#8e96a3" };
@@ -5075,7 +5073,7 @@ if (location.hostname === "harryv12.github.io") {
       // their bonds: one row per issue, biggest first
       const gs = new Map();
       for (const t of buys) {
-        const d = t.debt, k = `${d.name}|${d.coupon}|${d.year}`;
+        const d = t.debt, k = `${d.name}|${d.coupon}|${d.mdate}`;
         const g = gs.get(k) || { d, list: [] }; g.list.push(t); gs.set(k, g);
       }
       const rows = [...gs.values()].map((g) => ({ ...g, est: estOf(g.list) })).sort((a, b) => b.est.best - a.est.best);
@@ -5095,14 +5093,15 @@ if (location.hostname === "harryv12.github.io") {
         ctx.fillStyle = th.ink2; ctx.font = `500 14px ${UI}`; ctx.fillText(DEBT_KINDS.find(([k]) => k === g.d.kind)[1].replace(" & CDs", ""), 560, bl);
         ctx.font = `600 15px ${MONO}`; ctx.fillStyle = th.ink2;
         ctx.fillText(g.d.coupon != null ? `${+g.d.coupon.toFixed(3)}%` : "–", 700, bl);
-        ctx.fillText(g.d.year ? String(g.d.year) : "–", 800, bl);
+        ctx.fillStyle = g.d.msrc === "likely" ? th.muted : th.ink2;  // grey: likely rather than stated or looked up
+        ctx.fillText(g.d.mdate ? fmtDate(g.d.mdate, { month: "short", year: "numeric" }) : "–", 800, bl);
         ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 15px ${MONO}`;
         ctx.fillText(`${g.list.length === 1 ? amountShort(g.list[0]) : usdEst(g.est.best)}${g.list.length > 1 ? ` ×${g.list.length}` : ""}`, W - 64, bl); ctx.textAlign = "left";
       }
       if (rows.length > n) { ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; ctx.fillText(`+${rows.length - n} more issues`, 64, y + 30 + n * rowH + 22); }
     }
     ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`;
-    ctx.fillText(fitText(ctx, "Best estimates of the reported ranges; one purchase shows its likely range. Coupon and maturity come from the filing's description.", W - 128), 64, H - 140);
+    ctx.fillText(fitText(ctx, "Best estimates of the ranges. Maturity: from the filing or a CUSIP lookup (OpenFIGI); grey = likely; – = not given.", W - 128), 64, H - 140);
     footer(ctx, W, H, th);
     return null;
   }
@@ -6220,6 +6219,7 @@ if (location.hostname === "harryv12.github.io") {
     $("#postHint").textContent = "Drawing the image…";
     if (!PHOTOS) PHOTOS = (await loadScript("photos.js") && window.CTC_PHOTOS) || {};
     if (!DESC) DESC = (await loadScript("descriptions.js") && window.CTC_DESC) || {};
+    if (P.style === "bonds" && !MATURITY) MATURITY = (await loadScript("bond_maturity.js") && window.CTC_MATURITY) || {};
     if (P.style === "terminal" && !HOLD0) HOLD0 = (await loadScript("holdings_start.js") && window.CTC_HOLDINGS) || {};
     if (P.style === "signals" && !SIGNALS) SIGNALS = (await loadScript("signals.js") && window.CTC_SIGNALS) || { stocks: [] };
     if (!PRICES) { await loadScript("prices.js"); PRICES = window.CTC_PRICES || null; }
