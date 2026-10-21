@@ -835,6 +835,7 @@ if (location.hostname === "harryv12.github.io") {
           <div class="styles" id="pStyleOther" role="group" aria-label="More info">
             <button type="button" data-v="terminal"><b>Stock breakdown</b><span>One stock's price, with each member's buys, sells and average buy price</span></button>
             <button type="button" data-v="list"><b>Latest disclosures</b><span>The most recent filers and their largest trades</span></button>
+            <button type="button" data-v="holdings"><b>Biggest buys</b><span>One member's 15 largest buys in the period, and how much of each they also sold</span></button>
             <button type="button" data-v="scorecard"><b>Member factsheet</b><span>One member's return vs the S&amp;P 500, largest buys and sector mix</span></button>
             <button type="button" data-v="leaders"><b>Copy-trading leaderboard</b><span>Members ranked by copy-trading score for the period</span></button>
             <button type="button" data-v="conflict"><b>Committee overlap</b><span>Share of trading in sectors their committees oversee</span></button>
@@ -849,7 +850,7 @@ if (location.hostname === "harryv12.github.io") {
             <button type="button" data-v="committee">One committee</button>
           </div>
         </div>
-        <div class="field" data-for="market:one list:one scorecard conflict card">
+        <div class="field" data-for="market:one list:one scorecard conflict card holdings">
           <label for="pMemberSel">Politician</label>
           <select id="pMemberSel"></select>
         </div>
@@ -873,11 +874,12 @@ if (location.hostname === "harryv12.github.io") {
           </div>
           <select id="pTicker" hidden></select>
         </div>
-        <div class="field" data-for="market terminal scorecard conflict leaders spikes">
+        <div class="field" data-for="market terminal scorecard conflict leaders spikes holdings">
           <span class="label">Period</span>
           <div class="seg" id="pWindow" role="group" aria-label="Chart period">
             <button type="button" data-v="90">3 months</button>
             <button type="button" data-v="182">6 months</button>
+            <button type="button" data-v="ytd">This year</button>
             <button type="button" data-v="365">1 year</button>
             <button type="button" data-v="all">Since the start</button>
           </div>
@@ -1236,6 +1238,8 @@ if (location.hostname === "harryv12.github.io") {
   const trades = D.trades.filter((row) => !cryptoRow(row)).map((row) => {
     const t = {};
     for (const f of D.fields) t[f] = row[F[f]];
+    // a scanned line misread as "$50,000,001 – $5,000,000" (top below bottom) keeps the bracket its top belongs to
+    if (t.hi && t.lo > t.hi) t.lo = [1001, 15001, 50001, 100001, 250001, 500001, 1000001, 5000001, 25000001].filter((x) => x < t.hi).pop() || t.lo;
     const lo = t.lo || 0, hi = t.hi || lo;
     // ex: [dollars, shares, price per share, source] where the filing gave a share count and the
     // dollars fell inside the reported range; it replaces the range's estimate everywhere
@@ -2565,8 +2569,10 @@ if (location.hostname === "harryv12.github.io") {
     return trades.filter((t) => sc.test(t) && t.st && (isSec(t) || t.cls === "option") && (kind === "any" || t.side === kind) && (!P.kept || !removalReason(t)));
   }
 
-  const windowDays = () => P.window === "all" ? Math.round((today - Date.parse(D.start + "T00:00:00Z")) / DAY) : +P.window;
-  const windowLabel = () => ({ 90: "3 months", 182: "6 months", 365: "1 year" }[P.window] || `since ${START_SHORT}`);
+  const YEAR = today.getUTCFullYear();
+  const windowDays = () => P.window === "all" ? Math.round((today - Date.parse(D.start + "T00:00:00Z")) / DAY)
+    : P.window === "ytd" ? Math.round((today - Date.UTC(YEAR, 0, 1)) / DAY) : +P.window;
+  const windowLabel = () => ({ 90: "3 months", 182: "6 months", 365: "1 year", ytd: `${YEAR} so far` }[P.window] || `since ${START_SHORT}`);
   // ======================================================================
   // Market chart posters: a stock's price with the trades marked, or every
   // stock a selection bought. One set of information, drawn in ten looks.
@@ -4150,7 +4156,7 @@ if (location.hostname === "harryv12.github.io") {
     return out || String(s || "");
   };
   const windowStart = () => today - windowDays() * DAY;
-  const periodLong = () => ({ 90: "the last 3 months", 182: "the last 6 months", 365: "the last 12 months" }[P.window] || `${START_SHORT} to today`);
+  const periodLong = () => ({ 90: "the last 3 months", 182: "the last 6 months", 365: "the last 12 months", ytd: `${YEAR} so far` }[P.window] || `${START_SHORT} to today`);
   const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
   // a single bound ending in 1 ($1,000,001) is the form's open top bracket ("over $1,000,000"); others are exact amounts
   const amountShort = (t) => t.exact ? `${usdExact(t.exact)} exact` : !t.lo ? "–" : t.lo === t.hi ? (t.lo % 1000 === 1 ? `Over ${usd(t.lo - 1)}` : usd(t.lo)) : tradeRange(t);
@@ -4631,7 +4637,7 @@ if (location.hostname === "harryv12.github.io") {
     const buysAll = all.filter((t) => t.side === "B" && t.T.r != null && t.T.sr != null);
     if (!buysAll.length) return P.noBig ? `No priced buys by ${m.name} outside large caps and funds. Untick “Exclude large caps and funds”.` : `No priced stock buys by ${m.name} yet.`;
     const since = windowStart(), buysWin = buysAll.filter((t) => t.time >= since), pool = buysWin.length ? buysWin : buysAll;
-    const perName = buysWin.length && P.window !== "all" ? `LAST ${windowLabel().toUpperCase()}` : `SINCE ${START_SHORT.toUpperCase()}`;
+    const perName = buysWin.length && P.window === "ytd" ? `${YEAR} SO FAR` : buysWin.length && P.window !== "all" ? `LAST ${windowLabel().toUpperCase()}` : `SINCE ${START_SHORT.toUpperCase()}`;
     const k = H > 1500 ? 1.4 : H > 1400 ? 1.24 : H > 1200 ? 1.12 : 1, z = (v) => Math.round(v * k);
     const NAVY = th.card, ACC = th.line;
     ctx.fillStyle = th.bg; ctx.fillRect(0, 0, W, H);
@@ -4822,6 +4828,187 @@ if (location.hostname === "harryv12.github.io") {
     }
     footer(ctx, W, H, th, ["Buys held until a full sale is reported.",
       "Past results don't predict future returns. Not financial advice."]);
+    return null;
+  }
+
+  // --- Biggest buys: one person's largest buys in the period as a ring, each with what they also sold ---
+  // Amounts are the best estimates; the totals also show their likely range (7 times in 10). Logos come from
+  // Simple Icons where it has the brand; everything else gets a letter badge in the brand's colour.
+  // BRAND: ticker -> [colour, Simple Icons slug (or "ms" for Microsoft's squares), dark badge background, badge letters]
+  const BRAND = {
+    META: ["#0866FF", "meta"], MSFT: ["#7FBA00", "ms"], AMZN: ["#FF9900", "amazon", "#232F3E"], AAPL: ["#1D1D1F", "apple"],
+    NVDA: ["#76B900", "nvidia", "#111111"], GOOGL: ["#4285F4", "google"], GOOG: ["#4285F4", "google"], AVGO: ["#CC092F", "broadcom"],
+    TSLA: ["#CC0000", "tesla"], NFLX: ["#E50914", "netflix"], ADBE: ["#FA0F00", "adobe"], ORCL: ["#C74634", "oracle"],
+    INTC: ["#0071C5", "intel"], AMD: ["#ED1C24", "amd"], CSCO: ["#1BA0D7", "cisco"], IBM: ["#1F70C1", "ibm"], CRM: ["#00A1E0", "salesforce"],
+    PLTR: ["#101113", "palantir"], QCOM: ["#3253DC", "qualcomm"], UBER: ["#000000", "uber"], PYPL: ["#003087", "paypal"],
+    V: ["#1A1F71", "visa"], MA: ["#EB001B", "mastercard"], SHOP: ["#7AB55C", "shopify"], SPOT: ["#1DB954", "spotify"],
+    DIS: ["#113CCF", null, null, "D"], SBUX: ["#006241", "starbucks"], MCD: ["#DA291C", "mcdonalds"], KO: ["#F40009", "cocacola"],
+    PEP: ["#2151A1", "pepsi"], NKE: ["#111111", "nike"], WMT: ["#0071CE", "walmart"], TGT: ["#CC0000", "target"],
+    COST: ["#E31837", null, null, "C"], HD: ["#F96302", null, null, "HD"], LOW: ["#004990", null, null, "L"],
+    CMCSA: ["#6138F5", "nbc"], T: ["#00A8E0", "att"], VZ: ["#CD040B", "verizon"], BA: ["#0D2D6C", "boeing"],
+    JPM: ["#5C3D2E", null, null, "JPM"], GS: ["#6B9BD1", "goldmansachs"], BAC: ["#E31837", "bankofamerica"], WFC: ["#D71E28", "wellsfargo"],
+    UNH: ["#002677", null, null, "U"], LLY: ["#D52B1E", null, null, "L"], JNJ: ["#D51900", null, null, "J"], PFE: ["#0093D0", "pfizer"],
+    ABT: ["#0099D8", null, null, "A"], XOM: ["#ED1B2D", null, null, "X"], CVX: ["#0054A4", "chevron"],
+    CPAY: ["#E8541E", null, null, "C"], GWW: ["#D50032", null, null, "G"], FIS: ["#3BAA35", null, null, "FIS"],
+  };
+  const LOGO_CDN = "https://cdn.jsdelivr.net/npm/simple-icons@11.14.0/icons/";
+  const logoCache = new Map();
+  const loadLogo = (slug) => {
+    if (!logoCache.has(slug)) logoCache.set(slug, new Promise((res) => {
+      const im = new Image(), t = setTimeout(() => res(null), 4000);
+      im.crossOrigin = "anonymous"; im.onload = () => { clearTimeout(t); res(im); }; im.onerror = () => { clearTimeout(t); res(null); };
+      im.src = LOGO_CDN + slug + ".svg";
+    }));
+    return logoCache.get(slug);
+  };
+  const mixHex = (a, b, f) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - f) + parseInt(b.slice(i, i + 2), 16) * f).toString(16).padStart(2, "0")).join("");
+  const HOLD_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#e87ba4", "#6f4cc3", "#d4a017", "#2bb3c0", "#c0392b", "#5b8c2a", "#8e96a3"];
+  // one key per holding: the ticker, or the description without account numbers and share-class words
+  // descriptions without a ticker: drop owner codes in front ("DC Visa Inc"), account numbers, share-class words
+  const plainDesc = (t) => (t.a || "").toUpperCase().replace(/^[^A-Z0-9$]+/, "").replace(/^(SP|DC|JT)\s+/, "").replace(/\s+E\d{6,}.*$/, "")
+    .replace(/\bET\b/, "ETF").replace(/[,\s]+(UNSOLICITED|CL [A-Z]|COM|CMN|SHS|COMMON STOCK)\b.*$/, "").trim();
+  const holdingKey = (t) => (/^GOOG/.test(t.t || "") ? "GOOGL" : t.t) || plainDesc(t).slice(0, 48);  // Alphabet's share classes count as one
+  // brand by ticker (Alphabet's other share lines count as Alphabet), or by fund family for funds without one
+  const brandOf = (t) => BRAND[t.t] || (/^GOOG/.test(t.t || "") ? BRAND.GOOGL : null)
+    || (/VANGUARD/i.test(t.a || "") ? ["#96151D", null, null, "V"] : /ISHARES/i.test(t.a || "") ? ["#3A3F47", null, null, "iS"]
+    : /SPDR/i.test(t.a || "") ? ["#1F3A93", null, null, "S"] : null);
+  const titleCase = (x) => x.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase()).replace(/\bEtf\b/g, "ETF").replace(/\bS&p\b/g, "S&P");
+  function holdingInfo(t) {
+    const up = (t.a || "").toUpperCase();
+    const bond = !t.st && !/\bETF\b/.test(up) && /\bDUE\b|\d%|\bREV\b|\bBDS?\b|\bNOTES?\b|\bBONDS?\b|\bMUNI|\bLINKED\b|\bSTRUCTURED\b/.test(up);
+    const fund = !bond && (t.cls === "fund" || /\b(ETF|FUND|INDEX|TRUST|ISHARES|VANGUARD|SPDR)\b/.test(up));
+    let name;
+    if (t.st) name = cleanName(t.st[0]).replace(/\s*-?\s*(American )?Depositary Shares?.*$/i, "").replace(/[,.]?\s+(Inc|Corp|Corporation|Ltd|Plc|Co)\.?$/i, "");
+    else if (/DIVIDEND APPRECIATION/.test(up)) name = "Vanguard Dividend ETF";
+    else if (/VANGUARD S&P 500/.test(up)) name = "Vanguard S&P 500 ETF";
+    else if (/COMMODITY/.test(up)) name = "Commodities ETF";
+    else if (/INTERNATIONAL TREASURY/.test(up)) name = "Intl. Treasury ETF";
+    else if (/U\.?S\.? TREASURY/.test(up)) name = "U.S. Treasury ETF";
+    else if (/\bLINKED\b|\bSTRUCTURED\b/.test(up)) name = titleCase(plainDesc(t).replace(/\b(FINANCE|BANK|LLC|PLC|INC|CORP|LINKED|NOTES?)\b.*$/, "").trim().split(" ").slice(0, 3).join(" ") || "Bank") + " linked note";
+    else if (bond) name = titleCase(plainDesc(t).split(/\s\d/)[0].split(" ").slice(0, 3).join(" ")) + " bond";
+    else name = titleCase(plainDesc(t).split(" ").slice(0, 4).join(" "));
+    const badge = bond ? "$" : t.t ? t.t.slice(0, 4) : name.split(" ").filter((w) => /^[A-Z]/.test(w)).slice(0, 2).map((w) => w[0]).join("") || "•";
+    return { kind: bond ? "bond" : fund ? "fund" : "stock", name, badge };
+  }
+  async function drawHoldings(ctx, W, H, th) {
+    const m = PE.member;
+    if (!m) return "Pick a politician.";
+    const since = windowStart();
+    const mine = trades.filter((t) => t.m === m.i && t.time >= since && t.side !== "O" && t.cls !== "option" && t.lo);
+    const by = new Map();
+    for (const t of mine) {
+      const k = holdingKey(t);
+      if (!k) continue;
+      const g = by.get(k) || { k, info: holdingInfo(t), t: t.t, first: t, b: 0, s: 0, nb: 0, ns: 0 };
+      if (t.side === "B") { g.b += t.amt; g.nb++; } else { g.s += t.amt; g.ns++; }
+      by.set(k, g);
+    }
+    const all = [...by.values()], top = all.filter((g) => g.b > 0).sort((a, b) => b.b - a.b).slice(0, 15);
+    if (!top.length) return `No buys by ${m.name} in ${periodLong()}. Pick a longer period.`;
+    const buys = mine.filter((t) => t.side === "B"), sells = mine.filter((t) => t.side === "S");
+    const eb = estOf(buys), es = estOf(sells), total = top.reduce((a, g) => a + g.b, 0);
+    const money = (v) => v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e8 ? `$${Math.round(v / 1e6)}M` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${Math.round(v / 1e3)}K` : `$${Math.round(v)}`;
+    // colours: the brand's, or the next palette colour; the ring uses a softer shade
+    let pi = 0;
+    for (const g of top) {
+      const b = brandOf(g.first);
+      g.col = b ? b[0] : HOLD_PALETTE[pi++ % HOLD_PALETTE.length];
+      g.soft = mixHex(g.col, th.muted, 0.3);
+      g.logo = b && b[1] && b[1] !== "ms" ? await loadLogo(b[1]) : null;
+      g.brand = b;
+    }
+    header(ctx, W, th, `${titleOf(m)} ${shortName(m)} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
+    ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`; ctx.fillText(fitText(ctx, `${lastName(m)}’s biggest buys`, W - 128), 64, 160);
+    const inP = P.window === "all" ? `since ${START_SHORT}` : P.window === "ytd" ? `in ${YEAR} so far` : `in ${periodLong()}`;
+    ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
+    ctx.fillText(fitText(ctx, `${top.length === 1 ? "The largest buy" : `The ${top.length} largest buys`} ${inP}, and how much of each was also sold`, W - 128), 64, 200);
+    // ring
+    const CX = W / 2, CY = 600, RO = 228, RI = 146;
+    let a = -Math.PI / 2;
+    for (const g of top) {
+      const sw = Math.PI * 2 * g.b / total; g.mid = a + sw / 2;
+      ctx.beginPath(); ctx.arc(CX, CY, RO, a, a + sw); ctx.arc(CX, CY, RI, a + sw, a, true); ctx.closePath();
+      ctx.fillStyle = g.soft; ctx.fill(); if (top.length > 1) { ctx.lineWidth = 3; ctx.strokeStyle = th.bg; ctx.stroke(); }
+      a += sw;
+    }
+    drawFace(ctx, await photoHD(m), m, CX, CY, RI - 18, th);
+    // cards: right column for the right half of the ring, left for the rest, each in the order its slice sits
+    const CW = 252, CH = 60;
+    const right = top.filter((g) => Math.cos(g.mid) >= 0).sort((p, q) => Math.sin(p.mid) - Math.sin(q.mid));
+    const left = top.filter((g) => Math.cos(g.mid) < 0).sort((p, q) => Math.sin(p.mid) - Math.sin(q.mid));
+    for (const [col, sgn] of [[right, 1], [left, -1]]) {
+      col.forEach((g) => { g.side = sgn; g.ty = CY + (RO + 20) * Math.sin(g.mid); });
+      if (col.length > 6) { const y0 = CY - RO - 92, step = (2 * RO + 184) / (col.length - 1); col.forEach((g, i) => { g.ty = y0 + i * step; }); }
+      else {
+        for (let i = 1; i < col.length; i++) col[i].ty = Math.max(col[i].ty, col[i - 1].ty + CH + 16);
+        const over = col.length ? col[col.length - 1].ty - (CY + RO + 92) : 0;  // keep the column above the facts
+        if (over > 0) col.forEach((g) => { g.ty -= over; });
+      }
+    }
+    const badge = (g, x, y, z) => {
+      const b = g.brand || [g.col];
+      if (b[1] === "ms") {  // Microsoft's four squares
+        ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.roundRect(x, y, z, z, 8); ctx.fill(); ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.stroke();
+        const q = z * 0.2, gp = z * 0.04, x0 = x + z / 2 - q - gp / 2, y0 = y + z / 2 - q - gp / 2;
+        [["#F25022", 0, 0], ["#7FBA00", 1, 0], ["#00A4EF", 0, 1], ["#FFB900", 1, 1]].forEach(([c, i, j]) => { ctx.fillStyle = c; ctx.fillRect(x0 + i * (q + gp), y0 + j * (q + gp), q, q); });
+        return;
+      }
+      ctx.fillStyle = b[2] || b[0]; ctx.beginPath(); ctx.roundRect(x, y, z, z, 8); ctx.fill();
+      if (g.logo) {  // single-colour SVG: tint it on a scratch canvas (white on the brand colour, or the brand colour on a dark badge)
+        const n = Math.round(z * 1.2), off = document.createElement("canvas"); off.width = off.height = n;
+        const oc = off.getContext("2d"); oc.drawImage(g.logo, 0, 0, n, n); oc.globalCompositeOperation = "source-in";
+        oc.fillStyle = b[2] ? b[0] : "#ffffff"; oc.fillRect(0, 0, n, n);
+        ctx.drawImage(off, x + z * 0.2, y + z * 0.2, z * 0.6, z * 0.6); return;
+      }
+      const txt = b[3] || g.info.badge;
+      ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = `800 ${txt.length > 3 ? z * 0.3 : txt.length > 2 ? z * 0.36 : txt.length > 1 ? z * 0.42 : z * 0.56}px ${UI}`; ctx.fillText(txt, x + z / 2, y + z / 2 + 1);
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    };
+    for (const g of top) {
+      const x0 = g.side > 0 ? W - 40 - CW : 40, y0 = g.ty - CH / 2, ax = g.side > 0 ? x0 : x0 + CW;
+      const ex = CX + (RO + 3) * Math.cos(g.mid), ey = CY + (RO + 3) * Math.sin(g.mid);
+      ctx.strokeStyle = g.soft; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ax - g.side * 16, g.ty); ctx.lineTo(ax, g.ty); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex, ey, 3.5, 0, Math.PI * 2); ctx.fillStyle = g.soft; ctx.fill();
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x0, y0, CW, CH, 10); ctx.fill();
+      ctx.fillStyle = g.soft; ctx.beginPath(); ctx.roundRect(x0, y0, 6, CH, [10, 0, 0, 10]); ctx.fill();
+      badge(g, x0 + 16, y0 + 10, 40);
+      const tx = x0 + 66;
+      ctx.fillStyle = th.ink2; ctx.font = `600 12.5px ${UI}`;
+      let nm = g.info.name; while (nm.includes(" ") && ctx.measureText(nm).width > CW - 76) nm = nm.slice(0, nm.lastIndexOf(" "));  // whole words only
+      ctx.fillText(fitText(ctx, nm, CW - 76), tx, y0 + 18);
+      ctx.fillStyle = th.ink; ctx.font = `700 19px ${MONO}`; ctx.fillText(money(g.b), tx, y0 + 39);
+      const more = g.s > g.b;
+      ctx.fillStyle = more ? th.down : th.muted; ctx.font = `${more ? 700 : 500} 11.5px ${UI}`;
+      ctx.fillText(fitText(ctx, g.s >= 500 ? `sold ${money(g.s)}${more ? " · more than bought" : ""}` : "none sold", CW - 76), tx, y0 + 53);
+    }
+    // three facts
+    const fy = CY + RO + 140, gap = 20, fw = (W - 96 - 2 * gap) / 3, fh = 176, net = eb.best - es.best;
+    const kinds = { stock: 0, fund: 0, bond: 0 }; for (const g of all) kinds[g.info.kind] += g.b;
+    const share = (v) => Math.round(v / (eb.best || 1) * 100) + "%";
+    const likely = (e) => e.exact ? money(e.best) : `${money(e.lo)}–${money(e.hi)}`;
+    const third = kinds.bond / (eb.best || 1) >= 0.1 ? ["#C98F00", money(kinds.bond), "Went into bonds and notes", `Bonds and bank notes took ${share(kinds.bond)} of the buying; stocks ${share(kinds.stock)}, funds ${share(kinds.fund)}.`]
+      : kinds.fund / (eb.best || 1) >= 0.1 ? [th.up, money(kinds.fund), "Went into funds and ETFs", `Funds and ETFs took ${share(kinds.fund)} of the buying; single stocks ${share(kinds.stock)}.`]
+      : [th.up, share(total), `In these ${top.length}`, `Of all the buying ${inP}, ${share(total)} went into the ${top.length === 1 ? "holding" : `${top.length} holdings`} shown.`];
+    const facts = [
+      [th.line, money(eb.best), "Bought", `Best estimate from ${buys.length.toLocaleString()} buy${buys.length === 1 ? "" : "s"}${eb.exact ? "" : `, likely ${likely(eb)}`}. The filings' ranges alone allow ${money(eb.min)}–${money(eb.max)}.`],
+      [th.down, money(es.best), "Sold in the same period", sells.length ? `${sells.length.toLocaleString()} sale${sells.length === 1 ? "" : "s"}${es.exact ? "" : `, likely ${likely(es)}`}. Net, about ${money(Math.abs(net))} more ${net >= 0 ? "went in than came out" : "came out than went in"}.` : "No sales in this period."],
+      third,
+    ];
+    facts.forEach(([c, big, head, body], i) => {
+      const x = 48 + i * (fw + gap);
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, fy, fw, fh, 14); ctx.fill();
+      ctx.fillStyle = c; ctx.font = `700 40px ${MONO}`; ctx.fillText(big, x + 20, fy + 54);
+      ctx.fillStyle = th.ink; ctx.font = `700 17px ${UI}`; ctx.fillText(head, x + 20, fy + 84);
+      ctx.fillStyle = th.ink2; ctx.font = `500 14px ${UI}`;
+      drawWrapped(ctx, body, x + 20, fy + 112, fw - 40, 20, 3);
+    });
+    // notes and footer
+    const lastFiled = mine.reduce((mx, t) => t.fd && t.fd > mx ? t.fd : mx, "");
+    ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`;
+    ctx.fillText(fitText(ctx, `Source: ${isExec(m) ? "OGE Form 278-T transaction reports" : "STOCK Act periodic transaction reports"}${lastFiled ? `, filed through ${fmtDate(lastFiled)}` : ""} (${mine.length.toLocaleString()} trades). Options are left out.`, W - 128), 64, H - 166);
+    ctx.fillText(fitText(ctx, "Best estimates place each range where trades with known exact amounts usually sit; “likely” totals hold the real figure 7 times in 10.", W - 128), 64, H - 146);
+    footer(ctx, W, H, th);
     return null;
   }
 
@@ -5697,7 +5884,7 @@ if (location.hostname === "harryv12.github.io") {
   // a 3:4 blank (the posters' shape) shown while a new image is being drawn
   const BLANK_POST = (() => { const c = document.createElement("canvas"); c.width = 3; c.height = 4; return c.toDataURL("image/png"); })();
   const DRAW = { terminal: drawTerminal, list: drawRoundup, breaking: drawBreaking, scorecard: drawScorecardPoster,
-    leaders: drawLeaders, conflict: drawConflict, frontpage: drawFrontPage, card: drawCard, receipt: drawReceipt, spikes: drawSpikes, signals: drawSignals };
+    leaders: drawLeaders, conflict: drawConflict, frontpage: drawFrontPage, card: drawCard, receipt: drawReceipt, spikes: drawSpikes, signals: drawSignals, holdings: drawHoldings };
   for (const s of MARKET) DRAW[s] = drawMarket;
   const POSTER_FONTS = ['800 64px "Public Sans"', '700 26px "Public Sans"', '600 20px "Public Sans"', '500 19px "Public Sans"',
     '400 20px "IBM Plex Mono"', '500 20px "IBM Plex Mono"', '600 26px "IBM Plex Mono"', '700 26px "IBM Plex Mono"',
@@ -5727,7 +5914,7 @@ if (location.hostname === "harryv12.github.io") {
     const fallback = S.members.length && traded(S.members[0]) ? String(S.members[0]) : String([...tradeCount.entries()].sort((a, b) => b[1] - a[1])[0][0]);
     PE.memberKey = allowAll && P.member === "all" ? "all" : traded(P.member) ? String(P.member) : fallback;
     PE.member = PE.memberKey === "all" ? null : members[+PE.memberKey];
-    if (["scorecard", "conflict", "card"].includes(P.style) || (scoped && P.who === "one")) fillPostMembers(allowAll);
+    if (["scorecard", "conflict", "card", "holdings"].includes(P.style) || (scoped && P.who === "one")) fillPostMembers(allowAll);
     const comms = postCommittees();
     PE.committee = comms.some((c) => c.cid === P.committee) ? P.committee
       : comms.some((c) => c.cid === S.committee) ? S.committee : [...comms].sort((a, b) => b.n - a.n)[0]?.cid || "";
@@ -5929,6 +6116,7 @@ if (location.hostname === "harryv12.github.io") {
       list: `${P.who === "all" ? "congress" : scope}-latest-${{ B: "buys", S: "sells", both: "trades" }[P.side]}`,
       breaking: `breaking-${one}`,
       scorecard: `scorecard-${who}`,
+      holdings: `biggest-buys-${who}-${P.window}`,
       leaders: "congress-best-to-follow",
       conflict: PE.memberKey === "all" ? "committee-map-congress" : `committee-map-${who}`,
       signals: "public-signals",
@@ -6100,7 +6288,7 @@ if (location.hostname === "harryv12.github.io") {
       if (tr) { P.trade = tradeKey(tr); P.filing = String(tr.doc); }
       P.member = mi; P.ticker = tk;
       P.window = age < 80 ? "90" : age < 170 ? "182" : age < 350 ? "365" : "all";
-      if (!["scorecard", "conflict"].includes(P.style)) {
+      if (!["scorecard", "conflict", "holdings"].includes(P.style)) {
         if (!isMarket()) P.style = "chart";
         P.who = "one"; P.sells = true;
       }
