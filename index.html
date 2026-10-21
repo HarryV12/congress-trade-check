@@ -2562,6 +2562,17 @@ if (location.hostname === "harryv12.github.io") {
     if (!imgCache.has(uri)) imgCache.set(uri, new Promise((resolve) => { const im = new Image(); im.onload = () => resolve(im); im.onerror = () => resolve(null); im.src = uri; }));
     return imgCache.get(uri);
   }
+  // a name that must fit maxW: a smaller size first (down to min), then whole words off the end (keeping at least
+  // `keep` words), and only then an ellipsis. Sets ctx.font to the size used.
+  function fitName(ctx, text, weight, size, min, maxW, family = UI, keep = 2) {
+    let z = size; ctx.font = `${weight} ${z}px ${family}`;
+    while (z > min && ctx.measureText(text).width > maxW) { z = Math.max(min, z - 1); ctx.font = `${weight} ${z}px ${family}`; }
+    let t = String(text);
+    while (t.split(" ").length > keep && ctx.measureText(t).width > maxW) t = t.slice(0, t.lastIndexOf(" ")).replace(/[,·–-]\s*$/, "");
+    // after dropping words, don't end on a word that needs the next one ("…School General", "…Bank of")
+    if (t !== String(text)) while (t.split(" ").length > keep && /\s(General|of|the|and|&|for|de|del|la|Public|New|North|South|East|West)$/i.test(t)) t = t.slice(0, t.lastIndexOf(" "));
+    return fitText(ctx, t, maxW);
+  }
   function fitText(ctx, text, maxW) {
     if (ctx.measureText(text).width <= maxW) return text;
     while (text.length > 1 && ctx.measureText(text + "…").width > maxW) text = text.slice(0, -1);
@@ -4389,7 +4400,9 @@ if (location.hostname === "harryv12.github.io") {
     header(ctx, W, th, `${tk} · trades by members and officials · ${windowLabel()}`);
     // quote
     ctx.fillStyle = C.text; ctx.font = `800 52px ${UI}`;
-    ctx.fillText(fitText(ctx, cleanName(st[0]), 600), 28, 150);
+    ctx.font = `700 52px ${MONO}`;
+    const priceW = ctx.measureText(price(last)).width;  // the title uses the width the price leaves
+    ctx.fillStyle = C.text; ctx.fillText(fitName(ctx, cleanName(st[0]), 800, 52, 30, W - 56 - priceW - 40), 28, 150);
     ctx.fillStyle = C.label; ctx.font = `500 19px ${UI}`;
     ctx.fillText(fitText(ctx, [tk, st[3] || st[2], st[1]].filter(Boolean).join(" · "), 600), 28, 182);
     const prev = s[end - 1], d1 = prev ? last / prev - 1 : null;
@@ -4780,7 +4793,7 @@ if (location.hostname === "harryv12.github.io") {
       yl = head(xL, yl + z(14), colL, `SECTORS BOUGHT · ${perName}`);
       secRows.slice(0, nSec).forEach(([name, amt], i) => {
         const yy = yl + z(28) + i * z(40), share = amt / secTot;
-        ctx.fillStyle = th.ink2; ctx.font = `500 ${z(15)}px ${UI}`; ctx.fillText(fitText(ctx, name, colL - z(60)), xL, yy);
+        ctx.fillStyle = th.ink2; ctx.fillText(fitName(ctx, name, 500, z(15), z(12), colL - z(60)), xL, yy);
         ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 ${z(15)}px ${MONO}`; ctx.fillText(`${Math.round(share * 100)}%`, xL + colL, yy); ctx.textAlign = "left";
         ctx.fillStyle = th.grid; ctx.fillRect(xL, yy + z(8), colL, z(9));
         ctx.fillStyle = ACC; ctx.fillRect(xL, yy + z(8), Math.max(2, colL * share), z(9));
@@ -4893,7 +4906,7 @@ if (location.hostname === "harryv12.github.io") {
         ctx.fillStyle = th.muted; ctx.font = `500 ${z(15)}px ${MONO}`; ctx.fillText(fmtDate(t.d, { month: "short", day: "numeric", year: "2-digit" }), xL, yy);
         ctx.fillStyle = sold ? th.down : th.up; ctx.font = `700 ${z(14)}px ${UI}`; ctx.fillText(sold ? (t.k === "SP" ? "PART SOLD" : "SOLD") : "BOUGHT", xL + z(110), yy);
         ctx.fillStyle = th.ink; ctx.font = `700 ${z(16)}px ${MONO}`; ctx.fillText(t.t, xL + z(215), yy);
-        ctx.fillStyle = th.ink2; ctx.font = `500 ${z(15)}px ${UI}`; ctx.fillText(fitText(ctx, cleanName(t.st[0]), fw - z(215) - z(80) - z(340)), xL + z(295), yy);
+        ctx.fillStyle = th.ink2; ctx.fillText(fitName(ctx, cleanName(t.st[0]), 500, z(15), z(12), fw - z(215) - z(80) - z(340)), xL + z(295), yy);
         ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `500 ${z(15)}px ${MONO}`; ctx.fillText(amountShort(t), xL + fw - z(150), yy);
         ctx.fillStyle = th.muted; ctx.fillText(`filed ${fmtDate(t.fd, { month: "short", day: "numeric" })}`, xL + fw, yy); ctx.textAlign = "left";
         ctx.fillStyle = th.grid; ctx.fillRect(xL, yy + z(12), fw, 1);
@@ -4917,7 +4930,7 @@ if (location.hostname === "harryv12.github.io") {
     const side = { D: [], R: [], I: [] };
     for (const t of list) (side[members[t.m].party] || side.I).push(t);
     header(ctx, W, th, `${tk} · Democrats vs Republicans · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
-    ctx.fillStyle = th.ink; ctx.font = `800 52px ${UI}`; ctx.fillText(fitText(ctx, cleanName(st[0]), 640), 64, 156);
+    ctx.fillStyle = th.ink; ctx.fillText(fitName(ctx, cleanName(st[0]), 800, 52, 34, 640), 64, 156);
     ctx.fillStyle = th.muted; ctx.font = `500 19px ${UI}`; ctx.fillText(fitText(ctx, [tk, st[3] || st[2]].filter(Boolean).join(" · "), 640), 64, 190);
     ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 46px ${MONO}`; ctx.fillText(price(last), W - 64, 150);
     ctx.fillStyle = th.muted; ctx.font = `500 15px ${MONO}`; ctx.fillText(`close ${fmtDate(PRICES.dates[end], { day: "numeric", month: "short" })}`, W - 64, 178); ctx.textAlign = "left";
@@ -5053,6 +5066,7 @@ if (location.hostname === "harryv12.github.io") {
       const prev = out.length ? out[out.length - 1] : "";
       if (up === "ST") out.push(US_STATES.includes(prev) || US_STATES.some((x) => x.endsWith(" " + prev)) ? "State" : i === 0 || /^[A-Z]/.test(words[i + 1] || "") && !US_STATES.includes(prev) && i < 2 ? "St." : "State");
       else if (i > 0 && STATE_ABBR[up] && !(up === "MO" && /^[A-Z][a-z]/.test(words[i + 1] || "") && false)) out.push(STATE_ABBR[up]);
+      else if (up === "UNI" && /^SCH/i.test(words[i + 1] || "")) out.push("Unified");  // "UNI SCH DIST": Unified School District
       else if (WORD_ABBR[up] && !(up === "TX" && i > 0 && out.includes("Texas"))) out.push(WORD_ABBR[up]);
       else out.push(w.length <= 3 && w === w.toUpperCase() && !/\d/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
     });
@@ -5101,8 +5115,7 @@ if (location.hostname === "harryv12.github.io") {
     const rows = [...per.values()].filter((e) => e.b.length).map((e) => ({ ...e, eb: estOf(e.b), es: estOf(e.s) })).sort((a, b) => b.eb.best - a.eb.best);
     header(ctx, W, th, `${DEBT_KINDS.find(([k]) => k === kind)[1]} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
     ctx.fillStyle = th.ink; ctx.font = `800 52px ${UI}`;
-    let nm = name; while (nm.includes(" ") && ctx.measureText(`Who bought ${nm}`).width > W - 128) nm = nm.slice(0, nm.lastIndexOf(" "));
-    ctx.fillText(fitText(ctx, `Who bought ${nm}`, W - 128), 64, 156);
+    ctx.fillText(fitName(ctx, `Who bought ${name}`, 800, 52, 32, W - 128, UI, 4), 64, 156);
     ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
     ctx.fillText(fitText(ctx, `${rows.length === 1 ? "One person" : `${rows.length} people`} bought its bonds ${P.window === "all" ? `since ${START_SHORT}` : `in ${periodLong()}`}`, W - 128), 64, 196);
     // facts
@@ -5241,8 +5254,7 @@ if (location.hostname === "harryv12.github.io") {
         if (i % 2) { ctx.fillStyle = th.card; ctx.fillRect(48, ry, W - 96, rowH); }
         ctx.fillStyle = KC[g.d.kind]; ctx.beginPath(); ctx.roundRect(64, ry + 13, 10, 12, 2); ctx.fill();
         ctx.fillStyle = th.ink; ctx.font = `600 16px ${UI}`;
-        let nm = g.d.name; while (nm.includes(" ") && ctx.measureText(nm).width > 470) nm = nm.slice(0, nm.lastIndexOf(" "));
-        ctx.fillText(fitText(ctx, nm, 470), 84, bl);
+        ctx.fillText(fitName(ctx, g.d.name, 600, 16, 12, 470), 84, bl);
         ctx.fillStyle = th.ink2; ctx.font = `500 14px ${UI}`; ctx.fillText(DEBT_KINDS.find(([k]) => k === g.d.kind)[1].replace(" & CDs", ""), 560, bl);
         ctx.font = `600 15px ${MONO}`; ctx.fillStyle = th.ink2;
         ctx.fillText(g.d.coupon != null ? `${+g.d.coupon.toFixed(3)}%` : "–", 700, bl);
@@ -5359,9 +5371,7 @@ if (location.hostname === "harryv12.github.io") {
     ctx.fillStyle = th.ink;
     // a long company name: a smaller title first; only then whole words off the end, keeping at least two of the name's
     let ttl = byStock ? `Who bought ${stName}` : `${lastName(m)}’s biggest buys`;
-    fitSize(ctx, ttl, (z) => `800 ${z}px ${UI}`, 58, W - 128, 38);
-    while (byStock && ttl.split(" ").length > 4 && ctx.measureText(ttl).width > W - 128) ttl = ttl.slice(0, ttl.lastIndexOf(" "));
-    ctx.fillText(fitText(ctx, ttl, W - 128), 64, 160);
+    ctx.fillText(fitName(ctx, ttl, 800, 58, 38, W - 128, UI, 4), 64, 160);
     ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
     ctx.fillText(fitText(ctx, byStock ? `The ${top.length === 1 ? "buyer" : `${top.length} biggest buyers`} ${inP}, and how much each also sold`
       : `${top.length === 1 ? "The largest buy" : `The ${top.length} largest buys`} ${inP}, and how much of each was also sold`, W - 128), 64, 200);
@@ -5382,7 +5392,7 @@ if (location.hostname === "harryv12.github.io") {
       const center = { brand: b || [th.line, null, null, tk.slice(0, 4)], info: { badge: tk.slice(0, 4) }, col: b ? b[0] : th.line, logo: b && b[1] && b[1] !== "ms" ? await loadLogo(b[1]) : null };
       g0Badge = center;
       ctx.fillStyle = th.ink; ctx.textAlign = "center"; ctx.font = `800 26px ${MONO}`; ctx.fillText(tk, CX, CY + 72);
-      ctx.fillStyle = th.muted; ctx.font = `600 14px ${UI}`; ctx.fillText(fitText(ctx, stName, 2 * r - 30), CX, CY + 96); ctx.textAlign = "left";
+      ctx.fillStyle = th.muted; ctx.fillText(fitName(ctx, stName, 600, 14, 11, 2 * r - 30), CX, CY + 96); ctx.textAlign = "left";
     } else drawFace(ctx, await photoHD(m), m, CX, CY, RI - 18, th);
     // cards: right column for the right half of the ring, left for the rest, each in the order its slice sits
     const CW = 252, CH = 60;
@@ -5432,9 +5442,8 @@ if (location.hostname === "harryv12.github.io") {
       const z = small ? ch - 14 : 40;
       if (byStock) drawFace(ctx, g.photo, g.m, x0 + 16 + z / 2, y0 + ch / 2, z / 2 - 1, th); else badge(g, x0 + 16, y0 + (ch - z) / 2, z);
       const tx = x0 + 26 + z;
-      ctx.fillStyle = th.ink2; ctx.font = `600 12.5px ${UI}`;
-      let nm = g.info.name; while (nm.includes(" ") && ctx.measureText(nm).width > CW - (tx - x0) - 10) nm = nm.slice(0, nm.lastIndexOf(" "));  // whole words only
-      ctx.fillText(fitText(ctx, nm, CW - (tx - x0) - 10), tx, y0 + (small ? 16 : 18));
+      ctx.fillStyle = th.ink2;
+      ctx.fillText(fitName(ctx, g.info.name, 600, 12.5, 10, CW - (tx - x0) - 10), tx, y0 + (small ? 16 : 18));
       ctx.fillStyle = th.ink; ctx.font = `700 ${small ? 16 : 19}px ${MONO}`; ctx.fillText(money(g.b), tx, y0 + (small ? 35 : 39));
       const more = g.s > g.b, aw = small ? ctx.measureText(money(g.b)).width + 8 : 0;
       ctx.fillStyle = more ? th.down : th.muted; ctx.font = `${more ? 700 : 500} 11.5px ${UI}`;
@@ -5510,8 +5519,7 @@ if (location.hostname === "harryv12.github.io") {
       ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(X0, y, W - 2 * X0, rowH - 10, 14); ctx.fill();
       ctx.fillStyle = th.ink; ctx.font = `800 24px ${MONO}`; ctx.fillText(r.t, 64, y + 34);
       ctx.fillStyle = th.ink2; let nm = cleanName(r.name); ctx.font = `500 15px ${UI}`;
-      while (nm.includes(" ") && ctx.measureText(nm).width > 178) nm = nm.slice(0, nm.lastIndexOf(" "));  // drop whole words, never cut one
-      ctx.fillText(fitText(ctx, nm, 178), 64, y + 58);
+      ctx.fillText(fitName(ctx, nm, 500, 15, 11, 178), 64, y + 58);
       for (const [, x, w, max, pts, val, sub] of cols) {
         const f = Math.max(0, Math.min(1, pts(r) / max));
         ctx.save(); ctx.fillStyle = th.line; ctx.globalAlpha = f ? 0.1 + 0.32 * f : 0; ctx.beginPath(); ctx.roundRect(x, y + 8, w, rowH - 26, 9); ctx.fill(); ctx.restore();
@@ -5674,7 +5682,7 @@ if (location.hostname === "harryv12.github.io") {
     ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(48, fy, W - 96, 560, 20); ctx.fill();
     ctx.fillStyle = th.ink; ctx.font = `800 40px ${MONO}`; ctx.fillText(f.t, 76, fy + 56);
     const tw = ctx.measureText(f.t).width;
-    ctx.fillStyle = th.ink2; ctx.font = `600 22px ${UI}`; ctx.fillText(fitText(ctx, cleanName(f.st[0]) + (f.st[5] ? " · S&P 500" : ""), W - 96 - 60 - tw - 200), 76 + tw + 18, fy + 54);
+    ctx.fillStyle = th.ink2; ctx.fillText(fitName(ctx, cleanName(f.st[0]) + (f.st[5] ? " · S&P 500" : ""), 600, 22, 16, W - 96 - 60 - tw - 200), 76 + tw + 18, fy + 54);
     if (f.since != null) { ctx.textAlign = "right"; ctx.fillStyle = f.since >= 0 ? th.up : th.down; ctx.font = `800 34px ${MONO}`; ctx.fillText(pct(f.since), W - 76, fy + 56); ctx.textAlign = "left"; }
     ctx.fillStyle = th.ink; ctx.font = `800 26px ${MONO}`; ctx.fillText(`Bought ${estText(f.est)}`, 76, fy + 94);
     ctx.fillStyle = th.muted; ctx.font = `500 18px ${UI}`; ctx.fillText(fitText(ctx, `Usually ${f.s.usual < 1 ? "under 1 member" : f.s.usual.toFixed(1) + " members"} a month${f.spy != null ? ` · S&P 500 ${pct(f.spy)} over the same days` : ""}`, W - 152), 76, fy + 124);
@@ -5699,7 +5707,7 @@ if (location.hostname === "harryv12.github.io") {
       if (g.since != null) { ctx.textAlign = "right"; ctx.fillStyle = g.since >= 0 ? th.up : th.down; ctx.font = `700 22px ${MONO}`; ctx.fillText(pct(g.since), x + tw2 - 20, y + 38); ctx.textAlign = "left"; }
       ctx.fillStyle = th.ink; ctx.font = `700 16px ${MONO}`; ctx.textAlign = "right"; ctx.fillText(`Bought ${estText(g.est)}`, x + tw2 - 20, y + 62); ctx.textAlign = "left";
       const aw = ctx.measureText(`Bought ${estText(g.est)}`).width;
-      ctx.fillStyle = th.ink2; ctx.font = `500 15px ${UI}`; ctx.fillText(fitText(ctx, cleanName(g.st[0]), tw2 - 56 - aw), x + 20, y + 62);
+      ctx.fillStyle = th.ink2; ctx.fillText(fitName(ctx, cleanName(g.st[0]), 500, 15, 12, tw2 - 56 - aw), x + 20, y + 62);
       ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; // the average buy and today's price as two pills on the right, styled like the main chart's tags
       const nowPx = PRICES.px[g.t][lastIdx(PRICES.px[g.t])];
       const pills = [g.avg != null && { text: "Avg " + price(g.avg), fill: th.card, ink: th.ink, stroke: th.ink2 }, { text: "Now " + price(nowPx), fill: th.line, ink: th.card }].filter(Boolean);
