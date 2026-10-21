@@ -25,8 +25,10 @@
       <input id="q" type="search" placeholder="Search a politician or stock" autocomplete="off" spellcheck="false" aria-label="Search a politician or stock" aria-controls="qList" aria-expanded="false" role="combobox">
       <ul id="qList" role="listbox" hidden></ul>
     </div>
+    <button id="filterBtn" class="btn fbtn" type="button" aria-expanded="false" aria-controls="fpanel">Filter</button>
     <button id="theme" class="icon-btn" type="button" aria-label="Light or dark">◐</button>
   </div>
+  <section id="fpanel" class="fpanel" hidden aria-label="Filter"></section>
 </header>
 <main id="app" class="wrap" tabindex="-1"><p class="loading">Loading the trades…</p></main>
 <footer class="foot wrap">

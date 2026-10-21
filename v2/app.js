@@ -31,14 +31,15 @@
     return bandCache.get(k);
   }
   const LOWS = [1001, 15001, 50001, 100001, 250001, 500001, 1000001, 5000001, 25000001];
-  const trades = D.trades.map((r) => {
+  const trades = D.trades.filter((r) => !(stocks[r[F.t]] && stocks[r[F.t]][1] === "Crypto")).map((r) => {  // crypto is left off, as on the classic site
     let lo = r[F.lo] || 0; const hi = r[F.hi] || lo;
     if (hi && lo > hi) lo = LOWS.filter((x) => x < hi).pop() || lo;  // a misread range (top below bottom)
     const ex = r[F.ex] ? r[F.ex][0] : null, b = ex ? { mean: ex, sd: 0 } : band(lo, hi);
     const k = r[F.k];
     return { m: r[F.m], t: r[F.t] || "", a: r[F.a] || "", k, side: k === "B" ? "B" : (k === "S" || k === "SP") ? "S" : "O", d: r[F.d], fd: r[F.fd],
       time: Date.parse(r[F.d] + "T00:00:00Z"), ftime: r[F.fd] ? Date.parse(r[F.fd] + "T00:00:00Z") : 0, lo, hi, ex, amt: b.mean, sd: b.sd,
-      cls: r[F.cls], opt: r[F.opt], own: r[F.own] || "", r: r[F.r], sr: r[F.sr], ep: r[F.ep] };
+      cls: r[F.cls], opt: r[F.opt], own: r[F.own] || "", rT: r[F.r], srT: r[F.sr], rP: r[F.rf], srP: r[F.srf], r: r[F.r], sr: r[F.sr], ep: r[F.ep],
+      c: r[F.c] || [], src: r[F.src], delay: r[F.fd] ? Math.round((Date.parse(r[F.fd] + "T00:00:00Z") - Date.parse(r[F.d] + "T00:00:00Z")) / DAY) : null };
   });
   const est = (list) => {  // best estimate, its likely range (7 times in 10) and the filings' own bounds
     let best = 0, v = 0, min = 0, max = 0;
@@ -78,6 +79,102 @@
   const tkLink = (tk) => tk && stocks[tk] ? `<a class="tk" href="#/stock/${encodeURIComponent(tk)}">${esc(tk)}</a>` : `<span class="tk">${esc(tk || "–")}</span>`;
   const stockName = (t) => t.t && stocks[t.t] ? cleanName(stocks[t.t][0]) : t.a;
 
+
+  // ---------- the Filter: the same settings as the classic site, saved in the same place (so both sites share them) ----------
+  const FDEF = { chamber: "all", committee: "all", owner: "all", timing: "trade", hideBig: true, sp500: true, capMax: "0", exclude: "NVDA, AAPL, GOOGL",
+    committeeOnly: true, lateOnly: false, options: true };
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("ctc-state") || "{}") || {}; } catch (e) { /* storage blocked */ }
+  const S = { ...FDEF, ...Object.fromEntries(Object.keys(FDEF).filter((k) => k in saved).map((k) => [k, saved[k]])) };
+  if (S.committee !== "all" && !D.committees[S.committee]) S.committee = "all";
+  const saveFilter = () => { try { const cur = JSON.parse(localStorage.getItem("ctc-state") || "{}") || {}; localStorage.setItem("ctc-state", JSON.stringify({ ...cur, ...S, v: Math.max(cur.v || 0, 13) })); } catch (e) { /* storage blocked */ } };
+  let excl = new Set(), capMax = 0;
+  const applyFilterSettings = () => {
+    excl = new Set(String(S.exclude || "").toUpperCase().split(/[\s,;]+/).filter(Boolean)); capMax = +S.capMax || 0;
+    for (const t of trades) { t.r = S.timing === "public" ? t.rP : t.rT; t.sr = S.timing === "public" ? t.srP : t.srT; }
+  };
+  applyFilterSettings();
+  // members whose committee (or department) oversees industries; "committee-linked only" leaves out the rest
+  const oversees = new Set(members.filter((m) => (m.committees || []).some((c) => (D.committees[c] || {}).matches)).map((m) => m.i));
+  const ownUnknown = (t) => t.src === "o" || t.src === "q" || t.src === "s" || t.src === "i";  // forms that don't say whose account
+  const isBig = (t) => { const st = stocks[t.t]; return !!st && (t.cls === "fund" || (S.sp500 && st[5]) || (capMax && st[4] > capMax) || excl.has(t.t)); };
+  // does a trade pass the Filter? person: false on a politician's own page (who they are is already chosen);
+  // big: false on a stock's own page (the stock you opened always shows)
+  function pass(t, o = {}) {
+    const m = members[t.m];
+    if (o.person !== false) {
+      if (S.chamber === "all" ? isBiz(m) : m.chamber !== S.chamber) return false;
+      if (S.committee !== "all" && !(m.committees || []).includes(S.committee)) return false;
+    }
+    if (S.owner !== "all" && !ownUnknown(t) && (t.own || "self") !== S.owner) return false;
+    if (t.cls === "option" && !S.options) return false;
+    if (o.big !== false && S.hideBig && (t.cls === "stock" || t.cls === "fund") && isBig(t)) return false;
+    if (S.committeeOnly) {
+      if (!oversees.has(t.m)) { if (o.person !== false) return false; }
+      else if (!(t.c && t.c.length)) return false;
+    }
+    if (S.lateOnly && !(t.delay > 45)) return false;
+    return true;
+  }
+  const filterLabels = () => [
+    S.chamber !== "all" && { H: "House", S: "Senate", E: "Executive branch", C: "Business leaders" }[S.chamber],
+    S.committee !== "all" && (D.committees[S.committee] || {}).name,
+    S.owner !== "all" && { self: "Own accounts", SP: "Spouse", DC: "Children", JT: "Joint" }[S.owner],
+    S.hideBig && `Large caps and funds excluded${S.sp500 ? " (S&P 500" : " ("}${capMax ? `${S.sp500 ? ", " : ""}over ${usd(capMax)}` : ""}${excl.size ? `${S.sp500 || capMax ? ", " : ""}${[...excl].join(" ")}` : ""})`.replace(" ()", ""),
+    S.committeeOnly && "Committee-linked trades only",
+    S.lateOnly && "Late disclosures only",
+    !S.options && "Options left out",
+    S.timing === "public" && "Returns from disclosure date",
+  ].filter(Boolean);
+  function filterStrip() {
+    const ls = filterLabels();
+    return `<div class="fstrip"><span class="lbl">Filter</span>${ls.length ? ls.map((l) => `<span class="tag">${esc(l)}</span>`).join("") : `<span class="muted">none: every trade counts</span>`}
+      <button type="button" class="linkbtn" data-open-filter>Edit</button>${ls.length ? `<button type="button" class="linkbtn" data-clear-filter>Clear all</button>` : ""}</div>`;
+  }
+  function bindStrip(el) {
+    $$("[data-open-filter]", el).forEach((b) => b.addEventListener("click", openFilter));
+    $$("[data-clear-filter]", el).forEach((b) => b.addEventListener("click", () => {
+      Object.assign(S, { chamber: "all", committee: "all", owner: "all", timing: "trade", hideBig: false, committeeOnly: false, lateOnly: false, options: true });
+      saveFilter(); applyFilterSettings(); route();
+    }));
+  }
+  // the panel
+  function openFilter() {
+    const fp = $("#fpanel"), seg = (k, opts) => `<div class="seg" data-fk="${k}">${opts.map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${String(S[k]) === v}">${l}</button>`).join("")}</div>`;
+    const chk = (k, title, sub) => `<label class="toggle"><input type="checkbox" data-fc="${k}"${S[k] ? " checked" : ""}><span><b>${title}</b><span class="muted">${sub}</span></span></label>`;
+    const comms = Object.entries(D.committees).filter(([, c]) => c.name).sort((a, b) => a[1].name.localeCompare(b[1].name));
+    fp.innerHTML = `<div class="wrap fp-inner">
+      <div class="fp-head"><h2>Filter</h2><span class="muted">Applies to every page here and on the classic site.</span><button type="button" class="btn" id="fpClose">Done</button></div>
+      <div class="fp-grid">
+        <div><h3>Whose trades</h3>
+          <div class="field"><span class="flbl">Chamber</span>${seg("chamber", [["all", "All"], ["H", "House"], ["S", "Senate"], ["E", "Executive"], ["C", "Business"]])}</div>
+          <div class="field"><span class="flbl">Committee / department</span><select data-fs="committee"><option value="all">All committees</option>${comms.map(([k, c]) => `<option value="${esc(k)}"${S.committee === k ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
+          <div class="field"><span class="flbl">Account</span>${seg("owner", [["all", "All"], ["self", "Own"], ["SP", "Spouse"], ["DC", "Children"], ["JT", "Joint"]])}</div>
+          <div class="field"><span class="flbl">Returns measured from</span>${seg("timing", [["trade", "Trade date"], ["public", "Disclosure date"]])}</div>
+        </div>
+        <div><h3>Which trades count</h3>
+          ${chk("hideBig", "Exclude large caps and funds", "Widely held stocks, funds and ETFs.")}
+          <div class="subopts">
+            <label class="check"><input type="checkbox" data-fc="sp500"${S.sp500 ? " checked" : ""}> S&amp;P 500 companies</label>
+            <label class="check">Market cap above <select data-fs="capMax">${[["0", "No limit"], ["10000000000", "$10 billion"], ["50000000000", "$50 billion"], ["200000000000", "$200 billion"]].map(([v, l]) => `<option value="${v}"${String(S.capMax) === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+            <label class="check">Always exclude <input type="text" data-ft="exclude" value="${esc(S.exclude)}" spellcheck="false"></label>
+          </div>
+          ${chk("committeeOnly", "Committee-linked trades only", "House and Senate trades in sectors their committees oversee.")}
+          ${chk("lateOnly", "Late disclosures only", "Filed after the STOCK Act's 45-day deadline.")}
+          ${chk("options", "Include options", "Valued at the underlying share price.")}
+        </div>
+      </div></div>`;
+    fp.hidden = false; $("#filterBtn").setAttribute("aria-expanded", "true");
+    const changed = () => { saveFilter(); applyFilterSettings(); updateFilterBadge(); route(true); };
+    $$("[data-fk]", fp).forEach((g) => $$("button", g).forEach((b) => b.addEventListener("click", () => { S[g.dataset.fk] = b.dataset.v; $$("button", g).forEach((x) => x.setAttribute("aria-pressed", String(x === b))); changed(); })));
+    $$("[data-fc]", fp).forEach((c) => c.addEventListener("change", () => { S[c.dataset.fc] = c.checked; changed(); }));
+    $$("[data-fs]", fp).forEach((c) => c.addEventListener("change", () => { S[c.dataset.fs] = c.value; changed(); }));
+    let tm; $$("[data-ft]", fp).forEach((c) => c.addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(() => { S[c.dataset.ft] = c.value; changed(); }, 400); }));
+    $("#fpClose", fp).addEventListener("click", closeFilter);
+  }
+  function closeFilter() { $("#fpanel").hidden = true; $("#filterBtn").setAttribute("aria-expanded", "false"); }
+  function updateFilterBadge() { const n = filterLabels().length; $("#filterBtn").innerHTML = `Filter${n ? ` <span class="badge">${n}</span>` : ""}`; }
+
   // ---------- period (shared by every page, remembered in this browser) ----------
   const PERIODS = [["90", "3 months"], ["182", "6 months"], ["ytd", "This year"], ["365", "1 year"], ["all", `Since ${fmtDate(D.start, { month: "short", year: "numeric" })}`]];
   let period = "365";
@@ -89,7 +186,7 @@
   function bindPeriod(el) {
     $$("[data-period]", el).forEach((b) => b.addEventListener("click", () => {
       period = b.dataset.period; try { localStorage.setItem("ctc-v2-period", period); } catch (e) { /* storage blocked */ }
-      route();
+      route(true);
     }));
   }
   const securities = (t) => t.cls === "stock" || t.cls === "fund";  // options and other assets are left out of most pages
@@ -151,7 +248,7 @@
 
   function pageHome() {
     setNav("home");
-    const s0 = since(), win = trades.filter((t) => t.time >= s0 && t.side !== "O" && !isBiz(members[t.m]));
+    const s0 = since(), win = trades.filter((t) => t.time >= s0 && t.side !== "O" && pass(t));
     const buys = win.filter((t) => t.side === "B" && securities(t)), sells = win.filter((t) => t.side === "S" && securities(t));
     const people = new Set(win.map((t) => t.m));
     const lastFiled = trades.reduce((mx, t) => t.fd && t.fd > mx ? t.fd : mx, "");
@@ -186,7 +283,7 @@
       { key: "s", label: "Sold", cls: "r", html: (g) => `<span class="down">${g.s.length ? usd(est(g.s).best) : "–"}</span>`, sort: (g) => est(g.s).best },
     ], topP, { page: 8 });
     // latest filings
-    const latest = trades.filter((t) => t.fd && t.side !== "O" && !isBiz(members[t.m])).sort((a, b) => b.ftime - a.ftime || b.amt - a.amt).slice(0, 400);
+    const latest = trades.filter((t) => t.fd && t.side !== "O" && pass(t)).sort((a, b) => b.ftime - a.ftime || b.amt - a.amt).slice(0, 400);
     table($("#latest"), [
       { key: "fd", label: "Filed", cls: "num", html: (t) => fmtDate(t.fd, { day: "numeric", month: "short" }), sort: (t) => t.ftime },
       { key: "who", label: "Person", html: (t) => who(members[t.m]) },
@@ -201,17 +298,18 @@
     setNav("politicians");
     const s0 = since(), g = new Map();
     for (const t of trades) {
-      if (t.time < s0 || t.side === "O") continue;
+      if (t.time < s0 || t.side === "O" || !pass(t, { person: false })) continue;
       const e = g.get(t.m) || { m: members[t.m], b: [], s: [], last: 0 }; (t.side === "B" ? e.b : e.s).push(t); e.last = Math.max(e.last, t.time); g.set(t.m, e);
     }
     let rows = [...g.values()].map((e) => ({ ...e, eb: est(e.b).best, es: est(e.s).best, n: e.b.length + e.s.length }));
     app.innerHTML = `<h1>Politicians</h1><p class="lede">Everyone with disclosed trades ${periodWords()}. Click a column to sort, a row to open their page.</p>
-      <div class="toolbar">${periodSeg()}<div class="seg" role="group" aria-label="Who"><button type="button" data-ch="all" aria-pressed="true">All</button><button type="button" data-ch="H">House</button><button type="button" data-ch="S">Senate</button><button type="button" data-ch="E">Officials</button><button type="button" data-ch="C">Business</button></div>
+      <div class="toolbar">${periodSeg()}<div class="seg" role="group" aria-label="Who"><button type="button" data-ch="all">All</button><button type="button" data-ch="H">House</button><button type="button" data-ch="S">Senate</button><button type="button" data-ch="E">Officials</button><button type="button" data-ch="C">Business</button></div>
       <input type="search" id="filt" placeholder="Filter by name or state"><span class="count" id="cnt"></span></div><div class="card" id="tbl"></div>`;
     bindPeriod(app);
-    let ch = "all", q = "";
+    let ch = S.chamber, q = "";
+    $$("[data-ch]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.ch === ch)));
     const draw = () => {
-      const list = rows.filter((e) => (ch === "all" || e.m.chamber === ch) && (!q || (e.m.name + " " + (e.m.state || "") + " " + (e.m.role || "")).toLowerCase().includes(q)));
+      const list = rows.filter((e) => (ch === "all" ? !isBiz(e.m) : e.m.chamber === ch) && (S.committee === "all" || (e.m.committees || []).includes(S.committee)) && (!q || (e.m.name + " " + (e.m.state || "") + " " + (e.m.role || "")).toLowerCase().includes(q)));
       $("#cnt").textContent = `${list.length} people`;
       table($("#tbl"), [
         { key: "who", label: "Person", html: (e) => who(e.m), sort: (e) => e.m.last || e.m.name },
@@ -230,7 +328,7 @@
     setNav("stocks");
     const s0 = since(), g = new Map();
     for (const t of trades) {
-      if (t.time < s0 || t.side === "O" || !t.t || !stocks[t.t] || isBiz(members[t.m])) continue;
+      if (t.time < s0 || t.side === "O" || !t.t || !stocks[t.t] || !pass(t)) continue;
       const e = g.get(t.t) || { tk: t.t, b: [], s: [], buyers: new Set(), sellers: new Set(), last: 0 };
       if (t.side === "B") { e.b.push(t); e.buyers.add(t.m); } else { e.s.push(t); e.sellers.add(t.m); }
       e.last = Math.max(e.last, t.time); g.set(t.t, e);
@@ -260,7 +358,7 @@
     setNav("politicians");
     const m = members.find((x) => x.id === id);
     if (!m) { app.innerHTML = `<h1>Not found</h1><p>No politician with that link. <a href="#/politicians">See everyone</a>.</p>`; return; }
-    const s0 = since(), mine = trades.filter((t) => t.m === m.i && t.time >= s0 && t.side !== "O");
+    const s0 = since(), mine = trades.filter((t) => t.m === m.i && t.time >= s0 && t.side !== "O" && pass(t, { person: false }));
     const buys = mine.filter((t) => t.side === "B"), sells = mine.filter((t) => t.side === "S");
     const priced = buys.filter((t) => securities(t) && t.r != null && t.sr != null);
     const inv = priced.reduce((a, t) => a + t.amt, 0), ret = inv ? priced.reduce((a, t) => a + t.amt * t.r, 0) / inv : null, spy = inv ? priced.reduce((a, t) => a + t.amt * t.sr, 0) / inv : null;
@@ -321,7 +419,7 @@
     setNav("stocks");
     const st = stocks[tk];
     if (!st) { app.innerHTML = `<h1>Not found</h1><p>No stock with that ticker. <a href="#/stocks">See every stock</a>.</p>`; return; }
-    const s0 = since(), list = trades.filter((t) => t.t === tk && t.time >= s0 && t.side !== "O" && !isBiz(members[t.m]));
+    const s0 = since(), list = trades.filter((t) => t.t === tk && t.time >= s0 && t.side !== "O" && pass(t, { big: false }));
     const buys = list.filter((t) => t.side === "B"), sells = list.filter((t) => t.side === "S");
     app.innerHTML = `<div class="crumbs"><a href="#/stocks">Stocks</a></div>
       <div class="price-head"><div><h1>${esc(cleanName(st[0]))}</h1><div class="muted"><span class="tk">${esc(tk)}</span> ${esc([st[3] || st[2], st[1]].filter(Boolean).join(" · "))}${st[4] ? ` · market value ${usd(st[4])}` : ""}</div></div>
@@ -415,17 +513,23 @@
   }
 
   // ---------- routing: #/, #/politicians, #/stocks, #/member/<id>, #/stock/<ticker> ----------
-  function route() {
+  function route(keepScroll) {
+    const y = window.scrollY;
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, "")), [page, arg] = h.split("/");
-    window.scrollTo(0, 0);
+    if (keepScroll !== true) window.scrollTo(0, 0);
     if (page === "politicians") pagePoliticians();
     else if (page === "stocks") pageStocks();
     else if (page === "member" && arg) pageMember(arg);
     else if (page === "stock" && arg) pageStock(arg.toUpperCase());
     else pageHome();
+    const h1 = $("h1", app);
+    if (h1) { const strip = document.createElement("div"); strip.innerHTML = filterStrip(); const anchorEl = h1.closest(".profile, .price-head") || h1; (anchorEl.nextElementSibling && anchorEl.nextElementSibling.classList.contains("lede") ? anchorEl.nextElementSibling : anchorEl).after(strip.firstElementChild); bindStrip(app); }
     const title = $("h1", app); document.title = title && page ? `${title.textContent} · Congress Trade Check` : "Congress Trade Check";
   }
-  window.addEventListener("hashchange", route);
+  window.addEventListener("hashchange", () => route());
+  $("#filterBtn").addEventListener("click", () => $("#fpanel").hidden ? openFilter() : closeFilter());
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#fpanel").hidden) closeFilter(); });
+  updateFilterBadge();
   $("#theme").addEventListener("click", () => {
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t; try { localStorage.setItem("ctc-theme", t); } catch (e) { /* storage blocked */ }

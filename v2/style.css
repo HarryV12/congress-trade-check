@@ -123,6 +123,29 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .legend .tri-up { border: 6px solid transparent; border-bottom: 10px solid var(--good); border-top: 0; }
 .legend .tri-dn { border: 6px solid transparent; border-top: 10px solid var(--bad); border-bottom: 0; }
 
+/* filter */
+.fbtn { padding: 8px 12px; white-space: nowrap; }
+.fbtn .badge { display: inline-block; min-width: 19px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--surface); font-size: 12px; line-height: 19px; text-align: center; }
+.fpanel { border-top: 1px solid var(--line); background: var(--surface); box-shadow: 0 12px 26px rgb(0 0 0 / 0.12); max-height: calc(100vh - 70px); overflow-y: auto; }
+.fp-inner { padding-top: 16px; padding-bottom: 18px; }
+.fp-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.fp-head h2 { margin: 0; } .fp-head .btn { margin-left: auto; }
+.fp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.fp-grid h3 { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+.fpanel .field { margin-bottom: 12px; }
+.fpanel .flbl { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 5px; }
+.fpanel select, .fpanel input[type="text"] { font: inherit; font-size: 14px; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--ink); max-width: 100%; }
+.toggle { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; cursor: pointer; }
+.toggle input { margin-top: 3px; width: 17px; height: 17px; accent-color: var(--accent); flex: none; }
+.toggle b { display: block; font-size: 14px; } .toggle .muted { font-size: 13px; }
+.subopts { display: grid; gap: 8px; margin: -2px 0 14px 27px; font-size: 14px; }
+.check { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .check input[type="checkbox"] { accent-color: var(--accent); }
+.fstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 16px; font-size: 13px; }
+.fstrip .lbl { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+.fstrip .tag { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.linkbtn { font: inherit; font-size: 13px; font-weight: 600; background: none; border: 0; color: var(--accent); cursor: pointer; padding: 2px 4px; }
+.linkbtn:hover { text-decoration: underline; }
+
 .foot { color: var(--muted); font-size: 13px; padding-top: 18px; padding-bottom: 30px; border-top: 1px solid var(--line); }
 
 /* phones */
@@ -136,6 +159,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   h1 { font-size: 27px; }
   .hide-sm { display: none; }
   .profile img { width: 72px; height: 72px; }
+  .fp-grid { grid-template-columns: minmax(0, 1fr); }
+  .fbtn { order: 1; }
 }
 @media (max-width: 520px) {
   .cols-3 { grid-template-columns: minmax(0, 1fr); }
