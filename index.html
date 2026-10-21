@@ -5343,21 +5343,23 @@ if (location.hostname === "harryv12.github.io") {
     let pi = 0;
     const party3 = { D: 0, R: 0, I: 0 };
     for (const g of top) {
-      if (byStock) {  // party colours, a little lighter for each further member of the same party
-        const pk = g.m.party in party3 ? g.m.party : "I";
-        g.col = mixHex(th[pk] || th.I, "#ffffff", Math.min(0.5, 0.16 * party3[pk]++)); g.photo = await photoImage(g.m);
+      if (byStock) {  // a colour of its own for each person (their party shows in the ring around their face)
+        g.col = HOLD_PALETTE[pi++ % HOLD_PALETTE.length]; g.photo = await photoImage(g.m);
       } else {
         const b = brandOf(g.first);
         g.col = b ? b[0] : HOLD_PALETTE[pi++ % HOLD_PALETTE.length];
         g.logo = b && b[1] && b[1] !== "ms" ? await loadLogo(b[1]) : null;
         g.brand = b;
       }
-      g.soft = mixHex(g.col, th.muted, byStock ? 0.15 : 0.3);
+      g.soft = mixHex(g.col, th.muted, 0.3);
     }
     const inP = P.window === "all" ? `since ${START_SHORT}` : P.window === "ytd" ? `in ${YEAR} so far` : `in ${periodLong()}`;
     const stName = byStock ? cleanName(stocks[tk][0]) : "";
     header(ctx, W, th, byStock ? `${tk} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}` : `${titleOf(m)} ${shortName(m)} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
-    ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`; ctx.fillText(fitText(ctx, byStock ? `Who bought ${stName}` : `${lastName(m)}’s biggest buys`, W - 128), 64, 160);
+    ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`;
+    let ttl = byStock ? `Who bought ${stName}` : `${lastName(m)}’s biggest buys`;
+    while (byStock && ttl.split(" ").length > 3 && ctx.measureText(ttl).width > W - 128) ttl = ttl.slice(0, ttl.lastIndexOf(" "));  // drop whole words
+    ctx.fillText(fitText(ctx, ttl, W - 128), 64, 160);
     ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
     ctx.fillText(fitText(ctx, byStock ? `The ${top.length === 1 ? "buyer" : `${top.length} biggest buyers`} ${inP}, and how much each also sold`
       : `${top.length === 1 ? "The largest buy" : `The ${top.length} largest buys`} ${inP}, and how much of each was also sold`, W - 128), 64, 200);
@@ -5386,7 +5388,10 @@ if (location.hostname === "harryv12.github.io") {
     const left = top.filter((g) => Math.cos(g.mid) < 0).sort((p, q) => Math.sin(p.mid) - Math.sin(q.mid));
     for (const [col, sgn] of [[right, 1], [left, -1]]) {
       col.forEach((g) => { g.side = sgn; g.ty = CY + (RO + 20) * Math.sin(g.mid); });
-      if (col.length > 6) { const y0 = CY - RO - 92, step = (2 * RO + 184) / (col.length - 1); col.forEach((g, i) => { g.ty = y0 + i * step; }); }
+      if (col.length > 9) {  // crowded (one buy dwarfs the rest): use the full height, with shorter cards
+        const top0 = 262, bot = CY + RO + 140 - 40, step = (bot - top0) / (col.length - 1), ch = Math.min(CH, step - 6);
+        col.forEach((g, i) => { g.ty = top0 + i * step; g.ch = ch; });
+      } else if (col.length > 6) { const y0 = CY - RO - 92, step = (2 * RO + 184) / (col.length - 1); col.forEach((g, i) => { g.ty = y0 + i * step; }); }
       else {
         for (let i = 1; i < col.length; i++) col[i].ty = Math.max(col[i].ty, col[i - 1].ty + CH + 16);
         const over = col.length ? col[col.length - 1].ty - (CY + RO + 92) : 0;  // keep the column above the facts
@@ -5415,21 +5420,23 @@ if (location.hostname === "harryv12.github.io") {
     };
     if (byStock && g0Badge) badge(g0Badge, CX - 44, CY - 74, 88);  // the company's logo in the middle of the ring
     for (const g of top) {
-      const x0 = g.side > 0 ? W - 40 - CW : 40, y0 = g.ty - CH / 2, ax = g.side > 0 ? x0 : x0 + CW;
+      const ch = g.ch || CH, small = ch < 56;  // small: name on top, amount and what was sold on one line under it
+      const x0 = g.side > 0 ? W - 40 - CW : 40, y0 = g.ty - ch / 2, ax = g.side > 0 ? x0 : x0 + CW;
       const ex = CX + (RO + 3) * Math.cos(g.mid), ey = CY + (RO + 3) * Math.sin(g.mid);
       ctx.strokeStyle = g.soft; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ax - g.side * 16, g.ty); ctx.lineTo(ax, g.ty); ctx.stroke();
       ctx.beginPath(); ctx.arc(ex, ey, 3.5, 0, Math.PI * 2); ctx.fillStyle = g.soft; ctx.fill();
-      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x0, y0, CW, CH, 10); ctx.fill();
-      ctx.fillStyle = g.soft; ctx.beginPath(); ctx.roundRect(x0, y0, 6, CH, [10, 0, 0, 10]); ctx.fill();
-      if (byStock) drawFace(ctx, g.photo, g.m, x0 + 36, y0 + 30, 19, th); else badge(g, x0 + 16, y0 + 10, 40);
-      const tx = x0 + 66;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x0, y0, CW, ch, 10); ctx.fill();
+      ctx.fillStyle = g.soft; ctx.beginPath(); ctx.roundRect(x0, y0, 6, ch, [10, 0, 0, 10]); ctx.fill();
+      const z = small ? ch - 14 : 40;
+      if (byStock) drawFace(ctx, g.photo, g.m, x0 + 16 + z / 2, y0 + ch / 2, z / 2 - 1, th); else badge(g, x0 + 16, y0 + (ch - z) / 2, z);
+      const tx = x0 + 26 + z;
       ctx.fillStyle = th.ink2; ctx.font = `600 12.5px ${UI}`;
-      let nm = g.info.name; while (nm.includes(" ") && ctx.measureText(nm).width > CW - 76) nm = nm.slice(0, nm.lastIndexOf(" "));  // whole words only
-      ctx.fillText(fitText(ctx, nm, CW - 76), tx, y0 + 18);
-      ctx.fillStyle = th.ink; ctx.font = `700 19px ${MONO}`; ctx.fillText(money(g.b), tx, y0 + 39);
-      const more = g.s > g.b;
+      let nm = g.info.name; while (nm.includes(" ") && ctx.measureText(nm).width > CW - (tx - x0) - 10) nm = nm.slice(0, nm.lastIndexOf(" "));  // whole words only
+      ctx.fillText(fitText(ctx, nm, CW - (tx - x0) - 10), tx, y0 + (small ? 16 : 18));
+      ctx.fillStyle = th.ink; ctx.font = `700 ${small ? 16 : 19}px ${MONO}`; ctx.fillText(money(g.b), tx, y0 + (small ? 35 : 39));
+      const more = g.s > g.b, aw = small ? ctx.measureText(money(g.b)).width + 8 : 0;
       ctx.fillStyle = more ? th.down : th.muted; ctx.font = `${more ? 700 : 500} 11.5px ${UI}`;
-      ctx.fillText(fitText(ctx, g.s >= 500 ? `sold ${money(g.s)}${more ? " · more than bought" : ""}` : "none sold", CW - 76), tx, y0 + 53);
+      ctx.fillText(fitText(ctx, g.s >= 500 ? `sold ${money(g.s)}${more ? (small ? " · more" : " · more than bought") : ""}` : "none sold", CW - (tx - x0) - 10 - aw), tx + aw, y0 + (small ? 35 : 53));
     }
     // three facts
     const fy = CY + RO + 140, gap = 20, fw = (W - 96 - 2 * gap) / 3, fh = 176, net = eb.best - es.best;
