@@ -4452,8 +4452,8 @@ if (location.hostname === "harryv12.github.io") {
       ctx.font = `600 18px ${UI}`; ctx.fillStyle = C.text;
       { const full = `${shortName(g.m)} · ${party(g.m)}`, w = 330 - 62 - 12; ctx.fillText(fitText(ctx, ctx.measureText(full).width <= w ? full : shortName(g.m), w), 62, bl); }
       ctx.font = `600 17px ${M}`;
-      ctx.fillStyle = g.buys.length ? C.green : C.label; ctx.fillText(fitText(ctx, g.buys.length ? `${estOf(g.buys).best ? usdEst(estOf(g.buys).best) : "–"} ×${g.buys.length}` : "–", 506 - 330 - 10), 330, bl);
-      ctx.fillStyle = g.sells.length ? C.red : C.label; ctx.fillText(fitText(ctx, g.sells.length ? `${estOf(g.sells).best ? usdEst(estOf(g.sells).best) : "?"} ×${g.sells.length}` : "–", 676 - 506 - 10), 506, bl);
+      ctx.fillStyle = g.buys.length ? C.green : C.label; ctx.fillText(fitText(ctx, g.buys.length ? `${estOf(g.buys).best ? usdEst(estOf(g.buys).best) : "–"} · ${plural(g.buys.length, "buy")}` : "–", 506 - 330 - 10), 330, bl);
+      ctx.fillStyle = g.sells.length ? C.red : C.label; ctx.fillText(fitText(ctx, g.sells.length ? `${estOf(g.sells).best ? usdEst(estOf(g.sells).best) : "?"} · ${plural(g.sells.length, "sale")}` : "–", 676 - 506 - 10), 506, bl);
       ctx.fillStyle = g.col || C.amber; ctx.fillText(g.avg ? price(g.avg) : "–", 676, bl);
       const r = g.avg ? last / g.avg - 1 : null;
       ctx.fillStyle = r == null ? C.label : r >= 0 ? C.green : C.red; ctx.fillText(r == null ? "–" : pct(r), 800, bl);
@@ -4470,7 +4470,7 @@ if (location.hostname === "harryv12.github.io") {
     }
     ctx.fillStyle = C.label; ctx.font = `500 13px ${UI}`;
     const fromAnnual = shown.filter((g) => g.annual).map((g) => `${shortName(g.m)}'s counted from the ${g.annual.as_of.slice(0, 4)} year-end holdings in the annual report`);
-    drawWrapped(ctx, `Bought and sold: best estimates in the period (×trades; ? = amount unreadable). Change: today's price against their average buy. Left now: estimated shares still held (buys minus sales since ${START_SHORT}${fromAnnual.length ? `; ${fromAnnual.join(", ")}` : ""}), at today's price; unknown when they only sold shares bought earlier.`, 40, ny, W - 80, 18, 3);
+    drawWrapped(ctx, `Bought and sold: best estimates in the period (totals over the number of trades shown; ? = amount unreadable). Change: today's price against their average buy. Left now: estimated shares still held (buys minus sales since ${START_SHORT}${fromAnnual.length ? `; ${fromAnnual.join(", ")}` : ""}), at today's price; unknown when they only sold shares bought earlier.`, 40, ny, W - 80, 18, 3);
     // the price, white on black with a gridded scale, buys and sells marked
     bar(`PRICE · ${periodLong().toUpperCase()}`, gy - 50, "▲ BUY   ▼ SELL   - - AVERAGE BUY");
     const [i0, i1] = priceRange(s, windowDays());
@@ -4982,6 +4982,56 @@ if (location.hostname === "harryv12.github.io") {
     return null;
   }
 
+  // bond issuers as filings abbreviate them ("MICHIGAN ST HOSP FI") written out ("Michigan State Hospital Finance").
+  // Word by word; "St" is "State" after a state name and "St." (Saint) elsewhere; state abbreviations other than
+  // the first word become the state's name. Words cut off by the filing's length limit can't be recovered.
+  const US_STATES = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+    "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri",
+    "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
+    "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia",
+    "Wisconsin", "Wyoming"];
+  const STATE_ABBR = { ALA: "Alabama", AL: "Alabama", ALASKA: "Alaska", ARIZ: "Arizona", AZ: "Arizona", ARK: "Arkansas", CALIF: "California", CA: "California",
+    COLO: "Colorado", CONN: "Connecticut", CT: "Connecticut", FLA: "Florida", FL: "Florida", GA: "Georgia", ILL: "Illinois", IL: "Illinois", IND: "Indiana",
+    KAN: "Kansas", KANS: "Kansas", KS: "Kansas", KY: "Kentucky", MASS: "Massachusetts", MD: "Maryland", MICH: "Michigan", MI: "Michigan", MINN: "Minnesota",
+    MN: "Minnesota", MISS: "Mississippi", MO: "Missouri", MONT: "Montana", NEB: "Nebraska", NEV: "Nevada", NJ: "New Jersey", NC: "North Carolina",
+    NY: "New York", OKLA: "Oklahoma", OK: "Oklahoma", ORE: "Oregon", PA: "Pennsylvania", SC: "South Carolina", TENN: "Tennessee", TN: "Tennessee",
+    TEX: "Texas", TX: "Texas", VA: "Virginia", VT: "Vermont", WASH: "Washington", WA: "Washington", WIS: "Wisconsin", WISC: "Wisconsin", WI: "Wisconsin",
+    WYO: "Wyoming", NH: "New Hampshire", RI: "Rhode Island", WV: "West Virginia", NM: "New Mexico", DC: "D.C." };
+  const WORD_ABBR = { HOSP: "Hospital", HOSPS: "Hospitals", FI: "Finance", FIN: "Finance", FING: "Financing", FINL: "Financial", AUTH: "Authority",
+    CNTY: "County", CNTYS: "Counties", SCH: "School", SCHS: "Schools", DIST: "District", DISTS: "Districts", REV: "Revenue", RV: "Revenue", REVS: "Revenue",
+    GO: "General Obligation", HSG: "Housing", WTR: "Water", WTRWKS: "Waterworks", SPLY: "Supply", PUB: "Public", IMPT: "Improvement", IMPTS: "Improvements",
+    BLDG: "Building", UNIV: "University", UNI: "University", EDL: "Educational", EDUC: "Education", HLTH: "Health", HLTHCARE: "Healthcare", HEALTHCARE: "Healthcare",
+    FAC: "Facility", FACS: "Facilities", DEV: "Development", REDEV: "Redevelopment", AGY: "Agency", CMNTY: "Community", CMNTYS: "Communities", MTG: "Mortgage",
+    MUN: "Municipal", MUNI: "Municipal", TWP: "Township", BORO: "Borough", TRANSN: "Transportation", TRANS: "Transportation", TRNSMSN: "Transmission",
+    CNTRCT: "Contract", RFDG: "Refunding", REF: "Refunding", SER: "Series", SR: "Senior", PWR: "Power", ELEC: "Electric", UTIL: "Utility", UTILS: "Utilities",
+    TPK: "Turnpike", TPKE: "Turnpike", TWY: "Tollway", BRDG: "Bridge", BRDGS: "Bridges", TUNL: "Tunnel", ARPT: "Airport", INTL: "International",
+    GOVT: "Government", GEN: "General", OBLIG: "Obligation", MLTIFAM: "Multifamily", MLTI: "Multi", APTS: "Apartments", SETTLMT: "Settlement",
+    PMT: "Payment", MSTR: "Master", TOB: "Tobacco", RCPTS: "Receipts", CTF: "Certificates", CTFS: "Certificates", PARTN: "Participation", WKS: "Works",
+    DEPT: "Department", SVCS: "Services", SVC: "Service", MED: "Medical", CTR: "Center", CTRS: "Centers", CMWLTH: "Commonwealth", ASSN: "Association",
+    PKG: "Parking", SWR: "Sewer", SYS: "System", METRO: "Metropolitan", METROP: "Metropolitan", NATL: "National", NAT: "Natural", RES: "Resources",
+    RESH: "Research", ENVIR: "Environmental", ENV: "Environmental", COLL: "College", CMNTYCOLL: "Community College", LN: "Loan", LNS: "Loans",
+    STUD: "Student", HWY: "Highway", HWYS: "Highways", PORT: "Port", RR: "Railroad", TRAN: "Transit", INDL: "Industrial", INDT: "Independent",
+    CONS: "Consolidated", CONSOL: "Consolidated", PROJ: "Project", PJ: "Project", PREPAY: "Prepayment", DB: "Bond", BDS: "Bonds", BD: "Bond",
+    ST: "State", STS: "Streets", JR: "Junior", LTD: "Limited", TX: "Tax", INCR: "Increment", ASSMT: "Assessment", SPL: "Special", EXCH: "Exchange",
+    COOP: "Cooperative", ENERGY: "Energy", AVIATION: "Aviation", COMWLTH: "Commonwealth", COMMWLTH: "Commonwealth", COMMN: "Commission",
+    WASTEWTR: "Wastewater", PURP: "Purpose", INDPT: "Independent", STR: "Street", ED: "Education", EDUCL: "Educational", MGMT: "Management",
+    CORR: "Correctional", RECR: "Recreation", HOUS: "Housing", GTD: "Guaranteed", INS: "Insured", LEASE: "Lease", SANTN: "Sanitation" };
+  function readableIssuer(name) {
+    const words = name.replace(/\bN Y\b/gi, "NY").replace(/\bN Mex\b/gi, "NM").replace(/\bW Va\b/gi, "WV").replace(/&/g, " & ").split(/\s+/).filter(Boolean);
+    const out = [];
+    words.forEach((w, i) => {
+      const up = w.toUpperCase().replace(/[.,]$/, "");
+      const prev = out.length ? out[out.length - 1] : "";
+      if (up === "ST") out.push(US_STATES.includes(prev) || US_STATES.some((x) => x.endsWith(" " + prev)) ? "State" : i === 0 || /^[A-Z]/.test(words[i + 1] || "") && !US_STATES.includes(prev) && i < 2 ? "St." : "State");
+      else if (i > 0 && STATE_ABBR[up] && !(up === "MO" && /^[A-Z][a-z]/.test(words[i + 1] || "") && false)) out.push(STATE_ABBR[up]);
+      else if (WORD_ABBR[up] && !(up === "TX" && i > 0 && out.includes("Texas"))) out.push(WORD_ABBR[up]);
+      else out.push(w.length <= 3 && w === w.toUpperCase() && !/\d/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    });
+    // a state written twice in a row ("Texas Texas") or "State State" collapses to one
+    // a word or two-word place written twice in a row ("New York New York City") is kept once
+    return out.filter((w, i) => w !== out[i - 1]).join(" ").replace(/\b([A-Z][a-z]+(?: [A-Z][a-z]+)?) \1\b/g, "$1").replace(/\s+&\s+/g, " & ");
+  }
+
   // --- Bonds and debt: Treasuries, municipal and corporate bonds, bank notes and bond funds ---
   const DEBT_RE = /\bDUE\b|\d%|\bREV\b|\bBDS?\b|\bNOTES?\b|\bNTS\b|\bBONDS?\b|\bMUNI|TREAS|T-BILL|\bBILLS?\b|\bCDS?\b|CERTIFICATE OF DEPOSIT|\bGO\b|DEBENTURE|\bLINKED\b|\bPERP\b/i;
   const isDebt = (t) => t.cls !== "option" && t.side !== "O" && (t.st ? /\b(BOND|TREASURY|MUNI)/i.test(t.st[0]) : DEBT_RE.test(t.a || ""));
@@ -5000,6 +5050,7 @@ if (location.hostname === "harryv12.github.io") {
     let name = a.replace(/\s+(B\/E|BE\/R|SER(IES)?\b|RFDG|DUE\b|DTD\b|FC\b|PTC\b).*$/i, "").replace(/\s*\d{1,2}(\.\d+)?\s?%.*$/, "").replace(/\s+\d{1,2}\/\d{1,2}\/\d{2,4}.*$/, "").trim();
     if (kind === "treasury") name = /BILL/.test(up) ? "U.S. Treasury bills" : /BOND/.test(up) && !/NOTE/.test(up) ? "U.S. Treasury bonds" : "U.S. Treasury notes";
     name = name.length > 4 && name === name.toUpperCase() ? titleCase(name) : name;
+    if (kind === "muni" || kind === "corp" || kind === "bank") name = readableIssuer(name);
     return { kind, coupon, year, mdate, msrc, name: name || a };
   }
   async function drawBonds(ctx, W, H, th) {
@@ -5096,7 +5147,7 @@ if (location.hostname === "harryv12.github.io") {
         ctx.fillStyle = g.d.msrc === "likely" ? th.muted : th.ink2;  // grey: likely rather than stated or looked up
         ctx.fillText(g.d.mdate ? fmtDate(g.d.mdate, { month: "short", year: "numeric" }) : "–", 800, bl);
         ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 15px ${MONO}`;
-        ctx.fillText(`${g.list.length === 1 ? amountShort(g.list[0]) : usdEst(g.est.best)}${g.list.length > 1 ? ` ×${g.list.length}` : ""}`, W - 64, bl); ctx.textAlign = "left";
+        ctx.fillText(`${g.list.length === 1 ? amountShort(g.list[0]) : usdEst(g.est.best)}${g.list.length > 1 ? ` · ${g.list.length} buys` : ""}`, W - 64, bl); ctx.textAlign = "left";
       }
       if (rows.length > n) { ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; ctx.fillText(`+${rows.length - n} more issues`, 64, y + 30 + n * rowH + 22); }
     }
@@ -5160,7 +5211,7 @@ if (location.hostname === "harryv12.github.io") {
     else if (/INTERNATIONAL TREASURY/.test(up)) name = "Intl. Treasury ETF";
     else if (/U\.?S\.? TREASURY/.test(up)) name = "U.S. Treasury ETF";
     else if (/\bLINKED\b|\bSTRUCTURED\b/.test(up)) name = titleCase(plainDesc(t).replace(/\b(FINANCE|BANK|LLC|PLC|INC|CORP|LINKED|NOTES?)\b.*$/, "").trim().split(" ").slice(0, 3).join(" ") || "Bank") + " linked note";
-    else if (bond) name = titleCase(plainDesc(t).split(/\s\d/)[0].split(" ").slice(0, 3).join(" ")) + " bond";
+    else if (bond) name = readableIssuer(plainDesc(t).split(/\s\d/)[0].replace(/\s+(B\/E|BE\/R|SER(IES)?\b|RFDG|DUE\b).*$/i, "").split(" ").slice(0, 4).join(" ")) + " bond";
     else name = titleCase(plainDesc(t).split(" ").slice(0, 4).join(" "));
     const badge = bond ? "$" : t.t ? t.t.slice(0, 4) : name.split(" ").filter((w) => /^[A-Z]/.test(w)).slice(0, 2).map((w) => w[0]).join("") || "•";
     return { kind: bond ? "bond" : fund ? "fund" : "stock", name, badge };
@@ -5349,7 +5400,7 @@ if (location.hostname === "harryv12.github.io") {
     // who is behind the top scores: the members buying, well-known figures posting about it, company insiders buying
     const byId = new Map(members.map((m) => [m.id, m])), notes = [];
     // SEC filings list people as "Last First Middle": show "First Last" (firms stay as they are)
-    const insiderName = (n) => { const p = n.replace(/\s*\(.*$/, "").split(" "); return p.length > 1 && !/(Inc|LLC|LP|L\.P\.|Ltd|Fund|Corp|Trust|Partners|Capital|Holdings)/i.test(n) ? `${p[1]} ${p[0]}` : p.join(" "); };
+    const insiderName = (n) => { const p = n.replace(/\s*\(.*$/, "").split(" "); return p.length > 1 && !/\b(Inc|LLC|LP|L\.P\.|Ltd|Fund|Corp|Trust|Partners|Capital|Holdings)\b/i.test(n) ? `${p[1]} ${p[0]}` : p.join(" "); };
     for (const r of rows.slice(0, 3)) {
       const big = new Map((r.unusual || []).map(([id, x]) => [id, x]));  // net buys far above the person's usual trade
       const tag = (m) => big.has(m.id) ? `${shortName(m)} (${big.get(m.id) >= 10 ? Math.round(big.get(m.id)) : big.get(m.id).toFixed(1)}× usual size)` : shortName(m);
