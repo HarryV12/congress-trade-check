@@ -5150,7 +5150,8 @@ if (location.hostname === "harryv12.github.io") {
       ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1px";
       cols.forEach(([l, x], i) => { ctx.textAlign = i === cols.length - 1 ? "right" : "left"; ctx.fillText(l, x, y + 17); });
       ctx.textAlign = "left"; ctx.letterSpacing = "0px";
-      const rowH = 38, n = Math.min(rows.length, Math.floor((H - 170 - (y + 30)) / rowH));
+      // room for the rows, the "+N more issues" line and the note under them
+      const rowH = 38, n = Math.min(rows.length, Math.floor((H - 196 - (y + 30)) / rowH));
       for (let i = 0; i < n; i++) {
         const g = rows[i], ry = y + 30 + i * rowH, bl = ry + 25;
         if (i % 2) { ctx.fillStyle = th.card; ctx.fillRect(48, ry, W - 96, rowH); }
