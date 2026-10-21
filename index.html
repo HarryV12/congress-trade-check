@@ -839,6 +839,8 @@ if (location.hostname === "harryv12.github.io") {
           <div class="styles" id="pStyleOther" role="group" aria-label="More info">
             <button type="button" data-v="terminal"><b>Stock breakdown</b><span>One stock's price, with each member's buys, sells and average buy price</span></button>
             <button type="button" data-v="list"><b>Latest disclosures</b><span>The most recent filers and their largest trades</span></button>
+            <button type="button" data-v="parties"><b>Democrats vs Republicans</b><span>One stock: what each party bought and sold, and how their buys did</span></button>
+            <button type="button" data-v="bonds"><b>Bonds and debt</b><span>Treasuries, municipal and corporate bonds a member (or everyone) bought</span></button>
             <button type="button" data-v="holdings"><b>Biggest buys</b><span>One member's 15 largest buys in the period, and how much of each they also sold</span></button>
             <button type="button" data-v="scorecard"><b>Member factsheet</b><span>One member's return vs the S&amp;P 500, largest buys and sector mix</span></button>
             <button type="button" data-v="leaders"><b>Copy-trading leaderboard</b><span>Members ranked by copy-trading score for the period</span></button>
@@ -854,7 +856,7 @@ if (location.hostname === "harryv12.github.io") {
             <button type="button" data-v="committee">One committee</button>
           </div>
         </div>
-        <div class="field" data-for="market:one list:one scorecard conflict card holdings">
+        <div class="field" data-for="market:one list:one scorecard conflict card holdings bonds">
           <label for="pMemberSel">Politician</label>
           <select id="pMemberSel"></select>
         </div>
@@ -870,7 +872,7 @@ if (location.hostname === "harryv12.github.io") {
           <label for="pFilingSel">Filing</label>
           <select id="pFilingSel"></select>
         </div>
-        <div class="field" data-for="market terminal">
+        <div class="field" data-for="market terminal parties">
           <label for="pTickerSearch">Stock</label>
           <div class="combo pcombo">
             <input type="text" id="pTickerSearch" placeholder="Ticker or company" role="combobox" aria-expanded="false" aria-controls="pTickerList" aria-autocomplete="list" autocomplete="off" spellcheck="false">
@@ -878,7 +880,7 @@ if (location.hostname === "harryv12.github.io") {
           </div>
           <select id="pTicker" hidden></select>
         </div>
-        <div class="field" data-for="market terminal scorecard conflict leaders spikes holdings">
+        <div class="field" data-for="market terminal scorecard conflict leaders spikes holdings parties bonds">
           <span class="label">Period</span>
           <div class="seg" id="pWindow" role="group" aria-label="Chart period">
             <button type="button" data-v="90">3 months</button>
@@ -4861,6 +4863,238 @@ if (location.hostname === "harryv12.github.io") {
     return null;
   }
 
+  // --- Democrats vs Republicans: one stock, what each party bought and sold, and how their buys did ---
+  // Members and officials by party (business leaders left out; independents counted apart). Returns are
+  // each party's buys from the trade date to today or their sale, weighted by best-estimate dollars,
+  // against the S&P 500 over the same days.
+  async function drawParties(ctx, W, H, th) {
+    const tk = PE.ticker, s = PRICES.px[tk];
+    if (!s) return "Pick a stock.";
+    const st = stocks[tk], since = windowStart(), end = lastIdx(s), last = s[end];
+    const list = trades.filter((t) => t.t === tk && t.st && t.side !== "O" && t.time >= since && !isBiz(members[t.m]));
+    if (!list.length) return `No trades in ${tk} in ${periodLong()}. Pick a longer period.`;
+    const side = { D: [], R: [], I: [] };
+    for (const t of list) (side[members[t.m].party] || side.I).push(t);
+    header(ctx, W, th, `${tk} · Democrats vs Republicans · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
+    ctx.fillStyle = th.ink; ctx.font = `800 52px ${UI}`; ctx.fillText(fitText(ctx, cleanName(st[0]), 640), 64, 156);
+    ctx.fillStyle = th.muted; ctx.font = `500 19px ${UI}`; ctx.fillText(fitText(ctx, [tk, st[3] || st[2]].filter(Boolean).join(" · "), 640), 64, 190);
+    ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 46px ${MONO}`; ctx.fillText(price(last), W - 64, 150);
+    ctx.fillStyle = th.muted; ctx.font = `500 15px ${MONO}`; ctx.fillText(`close ${fmtDate(PRICES.dates[end], { day: "numeric", month: "short" })}`, W - 64, 178); ctx.textAlign = "left";
+    // the two party cards
+    const P2 = [["D", "Democrats", th.D], ["R", "Republicans", th.R]].map(([k, name, col]) => {
+      const L = side[k], buys = L.filter((t) => t.side === "B"), sells = L.filter((t) => t.side === "S");
+      const pb = buys.filter((t) => t.amt > 0 && t.T.ep), sh = pb.reduce((a, t) => a + t.amt / t.T.ep, 0);
+      return { k, name, col, L, buys, sells, eb: estOf(buys), es: estOf(sells), avg: sh ? pb.reduce((a, t) => a + t.amt, 0) / sh : null,
+        st: stats(buys, "T"), who: new Set(L.map((t) => t.m)) };
+    });
+    const cy = 222, cw = (W - 128 - 24) / 2, ch = 372;
+    P2.forEach((g, i) => {
+      const x = 64 + i * (cw + 24);
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, cy, cw, ch, 14); ctx.fill();
+      ctx.fillStyle = g.col; ctx.beginPath(); ctx.roundRect(x, cy, cw, 8, [14, 14, 0, 0]); ctx.fill();
+      ctx.fillStyle = g.col; ctx.font = `800 30px ${UI}`; ctx.fillText(g.name, x + 24, cy + 52);
+      ctx.fillStyle = th.muted; ctx.font = `500 15px ${UI}`;
+      ctx.fillText(g.L.length ? `${g.who.size} ${g.who.size === 1 ? "person" : "people"} · ${plural(g.buys.length, "buy")} · ${plural(g.sells.length, "sale")}` : "No trades in this period", x + 24, cy + 78);
+      if (!g.L.length) return;
+      const net = g.eb.best - g.es.best, r = g.avg ? last / g.avg - 1 : null;
+      const rows = [
+        ["Bought", g.buys.length ? estText(g.eb) : "–", g.buys.length ? th.up : th.muted],
+        ["Sold", g.sells.length ? estText(g.es) : "–", g.sells.length ? th.down : th.muted],
+        ["Net", `${net >= 0 ? "+" : "−"}${usdEst(Math.abs(net))}`, net >= 0 ? th.up : th.down],
+        ["Average buy", g.avg ? price(g.avg) : "–", th.ink],
+        ["Price since then", r == null ? "–" : pct(r), r == null ? th.muted : r >= 0 ? th.up : th.down],
+        ["Their buys returned", g.st.n ? pct(g.st.ret) : "–", g.st.n ? (g.st.ret >= 0 ? th.up : th.down) : th.muted],
+        ["S&P 500, same days", g.st.n ? pct(g.st.spyRet) : "–", th.muted],
+        ["Ahead of the S&P 500", g.st.n ? pts(g.st.diff) : "–", g.st.n ? (g.st.diff >= 0 ? th.up : th.down) : th.muted],
+      ];
+      rows.forEach(([l, v, c], j) => {
+        const yy = cy + 116 + j * 32;
+        if (j % 2 === 0) { ctx.fillStyle = th.chip; ctx.fillRect(x + 12, yy - 22, cw - 24, 32); }
+        ctx.fillStyle = th.ink2; ctx.font = `${j === 7 ? 700 : 500} 16px ${UI}`; ctx.fillText(l, x + 24, yy);
+        ctx.textAlign = "right"; ctx.fillStyle = c; ctx.font = `700 17px ${MONO}`; ctx.fillText(fitText(ctx, v, cw * 0.5), x + cw - 24, yy); ctx.textAlign = "left";
+      });
+    });
+    // one line on who did better
+    const [Dg, Rg] = P2;
+    let verdict = "";
+    if (Dg.st.n && Rg.st.n) {
+      const better = Dg.st.diff >= Rg.st.diff ? Dg : Rg, worse = better === Dg ? Rg : Dg;
+      verdict = `${better.name}' buys did better: ${pts(better.st.diff)} against the S&P 500, versus ${pts(worse.st.diff)} for ${worse.name}.`;
+    } else if (Dg.st.n || Rg.st.n) { const g = Dg.st.n ? Dg : Rg; verdict = `Only ${g.name} bought ${tk} in this period: ${pts(g.st.diff)} against the S&P 500.`; }
+    else verdict = `Neither party bought ${tk} in this period; only sales are on file.`;
+    ctx.fillStyle = th.ink; ctx.font = `700 19px ${UI}`; ctx.fillText(fitText(ctx, verdict, W - 128), 64, cy + ch + 40);
+    // price chart, trades marked in party colours, each party's average buy dashed
+    const gy = cy + ch + 70, gh = 300, gw = W - 128 - 96;
+    const [i0, i1] = priceRange(s, windowDays());
+    const sp = sparkline(ctx, s, i0, i1, 64, gy, gw, gh, th.ink2, { width: 2.5, fill: th.area });
+    if (sp) {
+      ctx.font = `500 14px ${MONO}`;
+      for (let q = 0; q <= 3; q++) {
+        const v = sp.lo + (sp.hi - sp.lo) * q / 3, yy = sp.Y(v);
+        ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(64, yy); ctx.lineTo(64 + gw, yy); ctx.stroke();
+        ctx.fillStyle = th.muted; ctx.fillText(price(v), 64 + gw + 10, yy + 5);
+      }
+      for (const g of P2) {
+        if (g.avg && g.avg >= sp.lo && g.avg <= sp.hi) {
+          ctx.save(); ctx.strokeStyle = g.col; ctx.lineWidth = 2; ctx.setLineDash([7, 6]); ctx.beginPath(); ctx.moveTo(64, sp.Y(g.avg)); ctx.lineTo(64 + gw, sp.Y(g.avg)); ctx.stroke(); ctx.restore();
+        }
+        for (const t of g.L) {
+          const i = idxOfDate(t.d); if (i < i0) continue;
+          const x = sp.X(i), yv = sp.Y(s[i] ?? t.T.ep), up = t.side === "B";
+          ctx.beginPath(); ctx.moveTo(x, up ? yv + 5 : yv - 5); ctx.lineTo(x - 7, up ? yv + 18 : yv - 18); ctx.lineTo(x + 7, up ? yv + 18 : yv - 18); ctx.closePath();
+          if (up) { ctx.fillStyle = g.col; ctx.fill(); } else { ctx.fillStyle = th.card; ctx.fill(); ctx.strokeStyle = g.col; ctx.lineWidth = 2; ctx.stroke(); }
+        }
+      }
+      ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
+      ctx.fillText("▲ filled: buy   ▽ outline: sale   dashed: the party's average buy   blue Democrats · red Republicans", 64, gy + gh + 26);
+    }
+    // each party's biggest traders
+    const ty = gy + gh + 64;
+    for (const [i, g] of P2.entries()) {
+      const x = 64 + i * (cw + 24), per = new Map();
+      for (const t of g.L) { const e = per.get(t.m) || { m: members[t.m], b: 0, s: 0 }; if (t.side === "B") e.b += t.amt; else e.s += t.amt; per.set(t.m, e); }
+      const topP = [...per.values()].sort((a, b) => (b.b + b.s) - (a.b + a.s)).slice(0, 3);
+      ctx.fillStyle = g.col; ctx.font = `700 14px ${UI}`; ctx.letterSpacing = "1px"; ctx.fillText(`MOST ACTIVE ${g.name.toUpperCase()}`, x, ty); ctx.letterSpacing = "0px";
+      for (const [j, e] of topP.entries()) {
+        const yy = ty + 30 + j * 40;
+        drawFace(ctx, await photoImage(e.m), e.m, x + 15, yy - 6, 15, th);
+        ctx.fillStyle = th.ink; ctx.font = `600 16px ${UI}`; ctx.fillText(fitText(ctx, shortName(e.m), cw - 230), x + 40, yy);
+        ctx.textAlign = "right"; ctx.font = `600 15px ${MONO}`;
+        ctx.fillStyle = e.b ? th.up : th.muted; ctx.fillText(e.b ? `+${usdEst(e.b)}` : "–", x + cw - 100, yy);
+        ctx.fillStyle = e.s ? th.down : th.muted; ctx.fillText(e.s ? `−${usdEst(e.s)}` : "–", x + cw, yy); ctx.textAlign = "left";
+      }
+      if (!topP.length) { ctx.fillStyle = th.muted; ctx.font = `500 15px ${UI}`; ctx.fillText("No trades", x, ty + 30); }
+    }
+    if (side.I.length) { ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`; ctx.fillText(`Independents also made ${plural(side.I.length, "trade")} in ${tk} (not shown).`, 64, H - 138); }
+    footer(ctx, W, H, th);
+    return null;
+  }
+
+  // --- Bonds and debt: Treasuries, municipal and corporate bonds, bank notes and bond funds ---
+  const DEBT_RE = /\bDUE\b|\d%|\bREV\b|\bBDS?\b|\bNOTES?\b|\bNTS\b|\bBONDS?\b|\bMUNI|TREAS|T-BILL|\bBILLS?\b|\bCDS?\b|CERTIFICATE OF DEPOSIT|\bGO\b|DEBENTURE|\bLINKED\b|\bPERP\b/i;
+  const isDebt = (t) => t.cls !== "option" && t.side !== "O" && (t.st ? /\b(BOND|TREASURY|MUNI)/i.test(t.st[0]) : DEBT_RE.test(t.a || ""));
+  const DEBT_KINDS = [["treasury", "U.S. Treasury"], ["muni", "Municipal"], ["corp", "Corporate"], ["bank", "Bank notes & CDs"], ["fund", "Bond funds"]];
+  function debtInfo(t) {
+    const a = (t.st ? t.st[0] : t.a || "").replace(/\s+/g, " ").trim(), up = a.toUpperCase();
+    const kind = /\b(ETF|FUND|FD|INDEX|SWEEP|MONEY MARKET|TRUST)\b/.test(up) || (t.st && true) ? "fund"
+      : /TREAS|T-BILL|\bU\.?S\.? (GOVT|GOVERNMENT)\b|UNITED STATES/.test(up) ? "treasury"
+      : /\bLINKED\b|STRUCTURED|\bCDS?\b|CERTIFICATE OF DEPOSIT|\bBANK\b.*\bNOTE/.test(up) ? "bank"
+      : /\b(ST|STATE|CNTY|COUNTY|CITY|AUTH|DIST|SCH|SCHOOL|REV|GO|HOSP|HSG|WTR|TRANSIT|TURNPIKE|PORT|UNIV|PUB|MUNI|MUN|TWP|BORO|COMMONWEALTH|AIRPORT|AVIATION|TOLL|UTIL)\b/.test(up) ? "muni" : "corp";
+    const cm = up.match(/(\d{1,2}(?:\.\d{1,5})?)\s?%/), coupon = cm && +cm[1] > 0 && +cm[1] < 20 ? +cm[1] : null;
+    let year = null, m;
+    if ((m = up.match(/DUE\s+[A-Z]{3}\.?\s+\d{1,2},?\s+(\d{4})/))) year = +m[1];
+    else if ((m = up.match(/\b\d{1,2}\/\d{1,2}\/(\d{2,4})\b/))) year = m[1].length === 2 ? 2000 + +m[1] : +m[1];
+    else if ((m = up.match(/DUE\s+\d{2}\d{2}(\d{2})\b/))) year = 2000 + +m[1];
+    else if ((m = up.match(/\b(20[2-7]\d)\b/))) year = +m[1];
+    // a readable name: the issuer, before the coupon, series and maturity details
+    let name = a.replace(/\s+(B\/E|BE\/R|SER(IES)?\b|RFDG|DUE\b|DTD\b|FC\b|PTC\b).*$/i, "").replace(/\s*\d{1,2}(\.\d+)?\s?%.*$/, "").replace(/\s+\d{1,2}\/\d{1,2}\/\d{2,4}.*$/, "").trim();
+    if (kind === "treasury") name = /BILL/.test(up) ? "U.S. Treasury bills" : /BOND/.test(up) && !/NOTE/.test(up) ? "U.S. Treasury bonds" : "U.S. Treasury notes";
+    name = name.length > 4 && name === name.toUpperCase() ? titleCase(name) : name;
+    return { kind, coupon, year, name: name || a };
+  }
+  async function drawBonds(ctx, W, H, th) {
+    const since = windowStart(), KC = { treasury: th.line, muni: "#1baf7a", corp: "#eb6834", bank: "#6f4cc3", fund: "#8e96a3" };
+    const all = PE.memberKey === "all";
+    const m = PE.member;
+    const pool = trades.filter((t) => t.time >= since && t.lo && isDebt(t) && !isBiz(members[t.m]) && (all || t.m === m.i));
+    const buys = pool.filter((t) => t.side === "B"), sells = pool.filter((t) => t.side === "S");
+    if (!buys.length) return all ? `No bond or debt purchases in ${periodLong()}.` : `No bond or debt purchases by ${m.name} in ${periodLong()}. Pick a longer period or "Everyone".`;
+    for (const t of pool) t.debt = t.debt || debtInfo(t);
+    const per = (all ? "everyone" : null), eb = estOf(buys), es = estOf(sells);
+    header(ctx, W, th, all ? `Members and officials · bonds and debt · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}` : `${titleOf(m)} ${shortName(m)} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
+    ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`;
+    ctx.fillText(fitText(ctx, all ? "Who buys bonds and debt" : `${lastName(m)}’s bonds and debt`, W - 128 - (all ? 0 : 150)), 64, 160);
+    ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
+    ctx.fillText(fitText(ctx, all ? "U.S. Treasuries, municipal and corporate bonds, bank notes and bond funds they bought" : "Treasuries, municipal and corporate bonds, bank notes and bond funds", W - 128 - (all ? 0 : 150)), 64, 200);
+    if (!all) drawFace(ctx, await photoHD(m), m, W - 64 - 60, 140, 60, th);
+    // facts
+    const fy = 236, fw = (W - 128 - 2 * 20) / 3;
+    const theirAll = all ? null : trades.filter((t) => t.m === m.i && t.time >= since && t.side === "B" && t.lo && t.cls !== "option");
+    const facts = [
+      [th.line, usdEst(eb.best), "Bought", `${plural(buys.length, "purchase")}${eb.exact ? "" : `, likely ${spanText(eb.lo, eb.hi)}`}.`],
+      [th.down, sells.length ? usdEst(es.best) : "$0", "Sold or redeemed", sells.length ? `${plural(sells.length, "sale")}${es.exact ? "" : `, likely ${spanText(es.lo, es.hi)}`}.` : "None in this period."],
+      all ? [th.ink, String(new Set(buys.map((t) => t.m)).size), "People", "members and officials who bought bonds or debt in this period."]
+        : [th.ink, `${Math.round(eb.best / (estOf(theirAll).best || 1) * 100)}%`, "Of all their buying", "went into bonds and debt rather than stocks or funds."],
+    ];
+    facts.forEach(([c, big, head, body], i) => {
+      const x = 64 + i * (fw + 20);
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, fy, fw, 132, 14); ctx.fill();
+      ctx.fillStyle = c; ctx.font = `700 34px ${MONO}`; ctx.fillText(fitText(ctx, big, fw - 40), x + 20, fy + 46);
+      ctx.fillStyle = th.ink; ctx.font = `700 16px ${UI}`; ctx.fillText(head, x + 20, fy + 72);
+      ctx.fillStyle = th.ink2; ctx.font = `500 13.5px ${UI}`; drawWrapped(ctx, body, x + 20, fy + 96, fw - 40, 18, 2);
+    });
+    // split by kind: one stacked bar with its legend
+    let y = fy + 170;
+    const byKind = new Map(DEBT_KINDS.map(([k]) => [k, 0]));
+    for (const t of buys) byKind.set(t.debt.kind, byKind.get(t.debt.kind) + t.amt);
+    const tot = [...byKind.values()].reduce((a, v) => a + v, 0) || 1;
+    capsText(ctx, "WHAT KIND OF DEBT", 64, y, 14, th.muted, 700, 1.5);
+    y += 16; let bx = 64;
+    for (const [k] of DEBT_KINDS) { const w = (W - 128) * byKind.get(k) / tot; if (w > 0) { ctx.fillStyle = KC[k]; ctx.fillRect(bx, y, Math.max(2, w - 2), 22); bx += w; } }
+    y += 50; let lx = 64;
+    ctx.font = `600 15px ${UI}`;
+    for (const [k, label] of DEBT_KINDS) {
+      const v = byKind.get(k); if (!v) continue;
+      const t = `${label} ${usdEst(v)} · ${Math.round(v / tot * 100)}%`;
+      if (lx + 24 + ctx.measureText(t).width > W - 64) { lx = 64; y += 28; }
+      ctx.fillStyle = KC[k]; ctx.beginPath(); ctx.roundRect(lx, y - 12, 14, 14, 3); ctx.fill();
+      ctx.fillStyle = th.ink2; ctx.fillText(t, lx + 22, y); lx += 22 + ctx.measureText(t).width + 28;
+    }
+    y += 44;
+    if (all) {
+      // ranking: who bought the most
+      const pp = new Map();
+      for (const t of buys) { const e = pp.get(t.m) || { m: members[t.m], list: [], kinds: new Map() }; e.list.push(t); e.kinds.set(t.debt.kind, (e.kinds.get(t.debt.kind) || 0) + t.amt); pp.set(t.m, e); }
+      const rank = [...pp.values()].map((e) => ({ ...e, est: estOf(e.list) })).sort((a, b) => b.est.best - a.est.best);
+      capsText(ctx, "WHO BOUGHT THE MOST", 64, y, 14, th.muted, 700, 1.5);
+      const rowH = 54, n = Math.min(rank.length, Math.floor((H - 160 - (y + 20)) / rowH)), maxV = rank[0].est.best || 1;
+      for (let i = 0; i < n; i++) {
+        const e = rank[i], ry = y + 24 + i * rowH, cyy = ry + rowH / 2;
+        if (i % 2 === 0) { ctx.fillStyle = th.card; ctx.fillRect(48, ry, W - 96, rowH); }
+        drawFace(ctx, await photoImage(e.m), e.m, 84, cyy, 18, th);
+        ctx.fillStyle = th.ink; ctx.font = `600 17px ${UI}`; ctx.fillText(fitText(ctx, `${shortName(e.m)} · ${party(e.m)}`, 300), 114, cyy - 2);
+        const topK = [...e.kinds.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`; ctx.fillText(`${plural(e.list.length, "purchase")} · mostly ${{ treasury: "U.S. Treasuries", muni: "municipal bonds", corp: "corporate bonds", bank: "bank notes and CDs", fund: "bond funds" }[topK]}`, 114, cyy + 17);
+        const bx0 = 440, bw = W - 64 - 200 - bx0; let x = bx0;
+        for (const [k] of DEBT_KINDS) { const w = bw * (e.kinds.get(k) || 0) / maxV; if (w > 0) { ctx.fillStyle = KC[k]; ctx.fillRect(x, cyy - 8, w, 16); x += w; } }
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 17px ${MONO}`; ctx.fillText(usdEst(e.est.best), W - 64, cyy + 5); ctx.textAlign = "left";
+      }
+    } else {
+      // their bonds: one row per issue, biggest first
+      const gs = new Map();
+      for (const t of buys) {
+        const d = t.debt, k = `${d.name}|${d.coupon}|${d.year}`;
+        const g = gs.get(k) || { d, list: [] }; g.list.push(t); gs.set(k, g);
+      }
+      const rows = [...gs.values()].map((g) => ({ ...g, est: estOf(g.list) })).sort((a, b) => b.est.best - a.est.best);
+      const cols = [["ISSUER", 64], ["TYPE", 560], ["COUPON", 700], ["MATURES", 800], ["BOUGHT", W - 64]];
+      ctx.fillStyle = th.chip; ctx.beginPath(); ctx.roundRect(48, y - 4, W - 96, 32, 8); ctx.fill();
+      ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1px";
+      cols.forEach(([l, x], i) => { ctx.textAlign = i === cols.length - 1 ? "right" : "left"; ctx.fillText(l, x, y + 17); });
+      ctx.textAlign = "left"; ctx.letterSpacing = "0px";
+      const rowH = 38, n = Math.min(rows.length, Math.floor((H - 170 - (y + 30)) / rowH));
+      for (let i = 0; i < n; i++) {
+        const g = rows[i], ry = y + 30 + i * rowH, bl = ry + 25;
+        if (i % 2) { ctx.fillStyle = th.card; ctx.fillRect(48, ry, W - 96, rowH); }
+        ctx.fillStyle = KC[g.d.kind]; ctx.beginPath(); ctx.roundRect(64, ry + 13, 10, 12, 2); ctx.fill();
+        ctx.fillStyle = th.ink; ctx.font = `600 16px ${UI}`;
+        let nm = g.d.name; while (nm.includes(" ") && ctx.measureText(nm).width > 470) nm = nm.slice(0, nm.lastIndexOf(" "));
+        ctx.fillText(fitText(ctx, nm, 470), 84, bl);
+        ctx.fillStyle = th.ink2; ctx.font = `500 14px ${UI}`; ctx.fillText(DEBT_KINDS.find(([k]) => k === g.d.kind)[1].replace(" & CDs", ""), 560, bl);
+        ctx.font = `600 15px ${MONO}`; ctx.fillStyle = th.ink2;
+        ctx.fillText(g.d.coupon != null ? `${+g.d.coupon.toFixed(3)}%` : "–", 700, bl);
+        ctx.fillText(g.d.year ? String(g.d.year) : "–", 800, bl);
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 15px ${MONO}`;
+        ctx.fillText(`${g.list.length === 1 ? amountShort(g.list[0]) : usdEst(g.est.best)}${g.list.length > 1 ? ` ×${g.list.length}` : ""}`, W - 64, bl); ctx.textAlign = "left";
+      }
+      if (rows.length > n) { ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; ctx.fillText(`+${rows.length - n} more issues`, 64, y + 30 + n * rowH + 22); }
+    }
+    ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`;
+    ctx.fillText(fitText(ctx, "Best estimates of the reported ranges; one purchase shows its likely range. Coupon and maturity come from the filing's description.", W - 128), 64, H - 140);
+    footer(ctx, W, H, th);
+    return null;
+  }
+
   // --- Biggest buys: one person's largest buys in the period as a ring, each with what they also sold ---
   // Amounts are the best estimates; the totals also show their likely range (7 times in 10). Logos come from
   // Simple Icons where it has the brand; everything else gets a letter badge in the brand's colour.
@@ -5914,7 +6148,7 @@ if (location.hostname === "harryv12.github.io") {
   // a 3:4 blank (the posters' shape) shown while a new image is being drawn
   const BLANK_POST = (() => { const c = document.createElement("canvas"); c.width = 3; c.height = 4; return c.toDataURL("image/png"); })();
   const DRAW = { terminal: drawTerminal, list: drawRoundup, breaking: drawBreaking, scorecard: drawScorecardPoster,
-    leaders: drawLeaders, conflict: drawConflict, frontpage: drawFrontPage, card: drawCard, receipt: drawReceipt, spikes: drawSpikes, signals: drawSignals, holdings: drawHoldings };
+    leaders: drawLeaders, conflict: drawConflict, frontpage: drawFrontPage, card: drawCard, receipt: drawReceipt, spikes: drawSpikes, signals: drawSignals, holdings: drawHoldings, parties: drawParties, bonds: drawBonds };
   for (const s of MARKET) DRAW[s] = drawMarket;
   const POSTER_FONTS = ['800 64px "Public Sans"', '700 26px "Public Sans"', '600 20px "Public Sans"', '500 19px "Public Sans"',
     '400 20px "IBM Plex Mono"', '500 20px "IBM Plex Mono"', '600 26px "IBM Plex Mono"', '700 26px "IBM Plex Mono"',
@@ -5940,16 +6174,16 @@ if (location.hostname === "harryv12.github.io") {
   function resolvePicks() {
     const scoped = isMarket() || P.style === "list";
     const traded = (v) => v !== "" && v != null && v !== "all" && !!members[+v] && !!tradeCount.get(+v);
-    const allowAll = P.style === "conflict";
+    const allowAll = P.style === "conflict" || P.style === "bonds";
     const fallback = S.members.length && traded(S.members[0]) ? String(S.members[0]) : String([...tradeCount.entries()].sort((a, b) => b[1] - a[1])[0][0]);
     PE.memberKey = allowAll && P.member === "all" ? "all" : traded(P.member) ? String(P.member) : fallback;
     PE.member = PE.memberKey === "all" ? null : members[+PE.memberKey];
-    if (["scorecard", "conflict", "card", "holdings"].includes(P.style) || (scoped && P.who === "one")) fillPostMembers(allowAll);
+    if (["scorecard", "conflict", "card", "holdings", "bonds"].includes(P.style) || (scoped && P.who === "one")) fillPostMembers(allowAll);
     const comms = postCommittees();
     PE.committee = comms.some((c) => c.cid === P.committee) ? P.committee
       : comms.some((c) => c.cid === S.committee) ? S.committee : [...comms].sort((a, b) => b.n - a.n)[0]?.cid || "";
     if (scoped && P.who === "committee") fillPostCommittees();
-    if (PRICES && (isMarket() || P.style === "terminal")) fillPostStocks();
+    if (PRICES && (isMarket() || P.style === "terminal" || P.style === "parties")) fillPostStocks();
     if (P.style === "breaking" || P.style === "frontpage") fillTrades();
     if (P.style === "receipt") fillFilings();
   }
@@ -6192,6 +6426,8 @@ if (location.hostname === "harryv12.github.io") {
       breaking: `breaking-${one}`,
       scorecard: `scorecard-${who}`,
       holdings: `biggest-buys-${who}-${P.window}`,
+      parties: `democrats-vs-republicans-${slug(PE.ticker)}-${P.window}`,
+      bonds: PE.memberKey === "all" ? `bonds-everyone-${P.window}` : `bonds-${who}-${P.window}`,
       leaders: "congress-best-to-follow",
       conflict: PE.memberKey === "all" ? "committee-map-congress" : `committee-map-${who}`,
       signals: "public-signals",
