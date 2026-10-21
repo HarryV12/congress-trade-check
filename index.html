@@ -1284,7 +1284,7 @@ if (location.hostname === "harryv12.github.io") {
     ["Jared Moskowitz", /Moskowitz/]];
 
   // portraits and daily prices load after the page is drawn
-  let PHOTOS = window.CTC_PHOTOS || null, PRICES = window.CTC_PRICES || null, DESC = null, SIGNALS = null;  // SIGNALS: signals.js (Public signals view)  // DESC: what each company does (descriptions.js)
+  let PHOTOS = window.CTC_PHOTOS || null, PRICES = window.CTC_PRICES || null, DESC = null, SIGNALS = null, HOLD0 = null;  // HOLD0: holdings_start.js (year-end holdings from annual reports)  // SIGNALS: signals.js (Public signals view)  // DESC: what each company does (descriptions.js)
   const loadScript = (src) => new Promise((resolve) => {
     const s = document.createElement("script");
     s.src = src; s.onload = () => resolve(true); s.onerror = () => resolve(false);
@@ -4320,10 +4320,20 @@ if (location.hostname === "harryv12.github.io") {
   // its best-estimate dollars ÷ that day's close, each sale takes them away, per account (own, spouse, child,
   // joint). A House or Senate full sale ("S", as opposed to "S (partial)") empties that account; officials'
   // forms don't mark partial sales, so theirs only subtract. Shares held before the data starts are unknown.
+  // Where an annual report (OGE 278e) gives their year-end holdings, the count starts there instead: each
+  // account row's best-estimate value ÷ that day's close, and only later trades are applied.
+  const annualStart = (m, tk) => { const b = HOLD0 && HOLD0[m.id]; return b && b.stocks[tk] ? b : null; };
   function sharesLeft(m, tk, s) {
-    const acct = new Map();
-    let any = false, bought = false, lastFull = false;
-    for (const t of trades.filter((t) => t.m === m.i && t.t === tk && t.side !== "O" && t.cls !== "option" && t.amt > 0).sort((a, b) => a.time - b.time)) {
+    const acct = new Map(), base = annualStart(m, tk);
+    let any = false, bought = false, lastFull = false, from = -Infinity;
+    if (base) {
+      const px0 = s[idxOfDate(base.as_of)];
+      if (px0) {
+        acct.set("self", base.stocks[tk].reduce((a, [lo, hi]) => a + bandStats(lo, hi).mean, 0) / px0);
+        from = Date.parse(base.as_of + "T23:59:59Z"); any = bought = true;
+      }
+    }
+    for (const t of trades.filter((t) => t.m === m.i && t.t === tk && t.side !== "O" && t.cls !== "option" && t.amt > 0 && t.time > from).sort((a, b) => a.time - b.time)) {
       const px = s[idxOfDate(t.d)] ?? t.T.ep;
       if (!px) continue;
       const o = t.own || "self", h = acct.get(o) || 0;
@@ -4420,7 +4430,7 @@ if (location.hostname === "harryv12.github.io") {
     for (const g of people) {
       const pb = g.buys.filter((t) => t.T.ep), dol = pb.reduce((acc, t) => acc + (t.amt || 1), 0);
       g.avg = pb.length ? dol / pb.reduce((acc, t) => acc + (t.amt || 1) / t.T.ep, 0) : null;  // cost per share
-      g.left = sharesLeft(g.m, tk, s);
+      g.left = sharesLeft(g.m, tk, s); g.annual = annualStart(g.m, tk);
     }
     y = by + 50;
     const cols = [["MEMBER", 40], ["BOUGHT", 330], ["SOLD", 506], ["AVG BUY", 676], ["CHANGE", 800], ["LEFT NOW", W - 40]];
@@ -4428,7 +4438,7 @@ if (location.hostname === "harryv12.github.io") {
     ctx.fillStyle = C.yellow; ctx.font = `700 15px ${M}`;
     cols.forEach(([l, x], i) => { ctx.textAlign = i === cols.length - 1 ? "right" : "left"; ctx.fillText(l, x, y + 23); });
     ctx.textAlign = "left";
-    const rowH = 40, avail = gy - 58 - (y + 34) - 44;  // 44: the two-line note under the table
+    const rowH = 40, avail = gy - 58 - (y + 34) - 62;  // 62: the note under the table (up to three lines)
     let nRows = Math.max(1, Math.floor(avail / rowH));
     if (people.length > nRows) nRows = Math.max(1, Math.floor((avail - 22) / rowH));
     const shown = people.slice(0, nRows);
@@ -4458,7 +4468,8 @@ if (location.hostname === "harryv12.github.io") {
       ctx.fillText(`+${people.length - nRows} MORE MEMBERS AND OFFICIALS TRADED ${tk} IN THIS PERIOD`, 40, ny); ny += 22;
     }
     ctx.fillStyle = C.label; ctx.font = `500 13px ${UI}`;
-    drawWrapped(ctx, `Bought and sold: best estimates in the period (×trades; ? = amount unreadable). Change: today's price against their average buy. Left now: estimated shares still held from all their filings since ${START_SHORT} (buys minus sales), at today's price; unknown when they only sold shares bought earlier.`, 40, ny, W - 80, 18, 2);
+    const fromAnnual = shown.filter((g) => g.annual).map((g) => `${shortName(g.m)}'s counted from the ${g.annual.as_of.slice(0, 4)} year-end holdings in the annual report`);
+    drawWrapped(ctx, `Bought and sold: best estimates in the period (×trades; ? = amount unreadable). Change: today's price against their average buy. Left now: estimated shares still held (buys minus sales since ${START_SHORT}${fromAnnual.length ? `; ${fromAnnual.join(", ")}` : ""}), at today's price; unknown when they only sold shares bought earlier.`, 40, ny, W - 80, 18, 3);
     // the price, white on black with a gridded scale, buys and sells marked
     bar(`PRICE · ${periodLong().toUpperCase()}`, gy - 50, "▲ BUY   ▼ SELL   - - AVERAGE BUY");
     const [i0, i1] = priceRange(s, windowDays());
@@ -6208,6 +6219,7 @@ if (location.hostname === "harryv12.github.io") {
     $("#postHint").textContent = "Drawing the image…";
     if (!PHOTOS) PHOTOS = (await loadScript("photos.js") && window.CTC_PHOTOS) || {};
     if (!DESC) DESC = (await loadScript("descriptions.js") && window.CTC_DESC) || {};
+    if (P.style === "terminal" && !HOLD0) HOLD0 = (await loadScript("holdings_start.js") && window.CTC_HOLDINGS) || {};
     if (P.style === "signals" && !SIGNALS) SIGNALS = (await loadScript("signals.js") && window.CTC_SIGNALS) || { stocks: [] };
     if (!PRICES) { await loadScript("prices.js"); PRICES = window.CTC_PRICES || null; }
     if (seq !== drawSeq) return;
