@@ -1304,7 +1304,7 @@
 
   // ---------- Market drops: why did the market fall? ----------
   let MOVES = null;
-  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript("../market_moves.js").then(() => (MOVES = window.CTC_MOVES || null));
+  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
   async function pageDrops() {
     setNav("drops");
     app.innerHTML = `<h1>Why did the market drop?</h1><p class="loading">Loading…</p>`;
@@ -1424,8 +1424,8 @@
       const yrs2 = []; for (let i = 1; i < n; i++) if (ser[i][0].slice(0, 4) !== ser[i - 1][0].slice(0, 4)) yrs2.push(i);
       const ev = t.events, ups = ev.filter((e) => e.dir === "up").length;
       $("#thBody").innerHTML = `<div class="grid cols-3"><div class="mini"><span class="lbl">Since ${fmtDate(ser[0][0], { month: "short", year: "numeric" })}</span><b class="${cls(vals2[n - 1])}">${pct(vals2[n - 1], 0)}</b><span class="muted small">S&amp;P 500 ${pct(spv[n - 1], 0)}</span></div>
-          <div class="mini"><span class="lbl">Sharp jumps</span><b class="up">${ups}</b><span class="muted small">5 days up ${pct(t.cut, 0)} or more</span></div>
-          <div class="mini"><span class="lbl">Sharp falls</span><b class="down">${ev.length - ups}</b><span class="muted small">5 days down ${pct(t.cut, 0)} or more</span></div></div>
+          <div class="mini"><span class="lbl">Sharp jumps</span><b class="up">${ups}</b><span class="muted small">5 days up ${Math.round(t.cut * 100)}% or more</span></div>
+          <div class="mini"><span class="lbl">Sharp falls</span><b class="down">${ev.length - ups}</b><span class="muted small">5 days down ${Math.round(t.cut * 100)}% or more</span></div></div>
         <div class="chart">${svgBox(Wt, Ht, `
           ${[lo2, 0, hi2].map((v) => `<line x1="10" x2="${Wt - 60}" y1="${Yt(v).toFixed(1)}" y2="${Yt(v).toFixed(1)}" stroke="var(--line)"/><text x="${Wt - 54}" y="${(Yt(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">${pct(v, 0)}</text>`).join("")}
           ${yrs2.map((i) => `<text x="${Xt(i).toFixed(1)}" y="${Ht - 8}" font-size="12" fill="var(--muted)" text-anchor="middle">${ser[i][0].slice(0, 4)}</text>`).join("")}
