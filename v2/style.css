@@ -401,3 +401,9 @@ h2.section { margin-bottom: 0; }
 .tip-ev { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); max-width: 340px; } .tip-ev.up > b { color: var(--good); } .tip-ev.down > b { color: var(--bad); }
 #thChart .tip { max-width: 360px; white-space: normal; z-index: 5; }
 .thmove.flash { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .3s; }
+
+/* market drops: the plain-English explanation, with its headlines folded underneath */
+.why-sum { margin: 10px 0 0; padding: 10px 14px; background: var(--bg); border-left: 3px solid var(--accent); border-radius: 8px; line-height: 1.5; }
+.thmove .why-sum { margin: 0; }
+details.srcs { margin-top: 12px; } details.srcs > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
+details.srcs > summary:hover { color: var(--accent); } details.srcs .news2 { margin-top: 8px; } details.srcs > ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; }

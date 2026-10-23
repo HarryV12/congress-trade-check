@@ -639,7 +639,7 @@
     bindPeriod(app);
     loadMoves().then((M) => {
       const e = M && M.episodes[0]; if (!e || today - Date.parse(e.end + "T00:00:00Z") > 21 * DAY || !$("#moveBanner")) return;
-      $("#moveBanner").innerHTML = `<a class="banner" href="#/drops"><b>Market drop ${fmtDate(e.start, { day: "numeric", month: "short" })}${e.end !== e.start ? `–${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}:</b> S&amp;P 500 ${pct(e.spy)}, Nasdaq 100 ${pct(e.qqq)}. ${e.what[0] ? esc(e.what[0].title) : ""} <span>Why it happened →</span></a>`;
+      $("#moveBanner").innerHTML = `<a class="banner" href="#/drops"><b>Market drop ${fmtDate(e.start, { day: "numeric", month: "short" })}${e.end !== e.start ? `–${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}:</b> S&amp;P 500 ${pct(e.spy)}, Nasdaq 100 ${pct(e.qqq)}. ${esc(e.summary || (e.what[0] ? e.what[0].title : ""))} <span>More →</span></a>`;
     });
     const byT = new Map();
     for (const t of buys) { if (!t.t || !stocks[t.t]) continue; const g = byT.get(t.t) || { tk: t.t, ms: new Set(), list: [] }; g.ms.add(t.m); g.list.push(t); byT.set(t.t, g); }
@@ -1367,6 +1367,7 @@
           <div class="drop-top"><div><span class="muted small">${k === 0 ? "Latest · " : ""}${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""} · ${e.days} trading day${e.days === 1 ? "" : "s"}</span>
             <h2>S&amp;P 500 <span class="down">${pct(e.spy)}</span> <span class="muted small">Nasdaq ${pct(e.qqq)}</span></h2></div>
             <span class="rec ${e.recover == null ? "open" : ""}">${e.level ? e.recover == null ? "Not yet recovered" : `Recovered in ${e.recover} days` : ""}</span></div>
+          ${e.summary ? `<p class="why-sum"><b>Why it fell:</b> ${esc(e.summary)}</p>` : ""}
           <div class="drop-grid">
             <div class="dblock"><h4>How far it fell</h4>${bars(idx, mx)}<p class="small muted">Worst day ${fmtDate(e.worst_day.date, { day: "numeric", month: "short" })}: S&amp;P ${pct(e.worst_day.spy)}, Nasdaq ${pct(e.worst_day.qqq)}</p></div>
             <div class="dblock"><h4>Hardest-hit sectors</h4>${bars(e.sectors.map(([s2, r]) => [esc(s2), r]), mx)}</div>
@@ -1374,8 +1375,8 @@
             <div class="dblock"><h4>Big companies that fell most</h4><div class="bigfalls">${e.big.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 28) : ""}<span class="tk">${esc(tk)}</span><b class="down">${pct(r, 0)}</b></a>`).join("")}</div></div>
             ${before(e)}
           </div>
-          <div class="news2"><div><h3>What happened</h3><ul>${e.what.map(hl).join("") || `<li class="muted">No headlines found.</li>`}</ul></div>
-            ${e.why.length ? `<div><h3>Why: the week after</h3><ul>${e.why.map(hl).join("")}</ul></div>` : ""}</div></div>`;
+          ${e.what.length || e.why.length ? `<details class="srcs"><summary>Headlines this explanation is based on (${e.what.length + e.why.length})</summary><div class="news2"><div><h3>That week</h3><ul>${e.what.map(hl).join("")}</ul></div>
+            ${e.why.length ? `<div><h3>The week after</h3><ul>${e.why.map(hl).join("")}</ul></div>` : ""}</div></details>` : ""}</div>`;
       }).join("") || `<p class="muted">No market drop data yet.</p>`}</div>
       ${eps.length > 3 ? `<div class="more"><button type="button" class="btn" id="moreDrops">Show ${eps.length - 3} more drops</button></div>` : ""}
       <div class="grid cols-2 section">
@@ -1444,7 +1445,7 @@
         const e = eps[+g.dataset.ep], k = +g.dataset.ep;
         g.addEventListener("mouseenter", () => {
           tip.innerHTML = `<div class="muted">${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""}</div><div>S&amp;P 500 <b class="down">${pct(e.spy)}</b> · Nasdaq <b class="down">${pct(e.qqq)}</b></div>
-            <div class="small">${e.sectors.slice(0, 2).map(([s2, r]) => `${esc(s2)} ${pct(r, 0)}`).join(" · ")}</div>${e.what[0] ? `<div class="small" style="max-width:300px;white-space:normal">${esc(e.what[0].title)}</div>` : ""}
+            <div class="small">${e.sectors.slice(0, 2).map(([s2, r]) => `${esc(s2)} ${pct(r, 0)}`).join(" · ")}</div>${e.summary || e.what[0] ? `<div class="small" style="max-width:320px;white-space:normal">${esc(e.summary || e.what[0].title)}</div>` : ""}
             <div class="small muted">${e.recover == null ? "not yet recovered" : `recovered in ${e.recover} days`}</div>`;
           tip.hidden = false;
           const r = svg.getBoundingClientRect(), gx = g.getBoundingClientRect(), left = gx.left - r.left, tw = tip.offsetWidth;
@@ -1538,7 +1539,8 @@
         <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}" id="thm-${k}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
             <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
           <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 0)}</b></a>`).join("")}</div>
-          ${e.what.length ? `<h4>What happened</h4><ul>${e.what.slice(0, 3).map(hl).join("")}</ul>` : ""}${e.why.length ? `<h4>Why</h4><ul>${e.why.slice(0, 3).map(hl).join("")}</ul>` : ""}</div>`).join("") || `<p class="muted">No sharp moves in this period.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
+          ${e.summary ? `<p class="why-sum small"><b>Why:</b> ${esc(e.summary)}</p>` : ""}
+          ${e.what.length || e.why.length ? `<details class="srcs"><summary>Headlines (${e.what.length + e.why.length})</summary><ul>${[...e.what, ...e.why].map(hl).join("")}</ul></details>` : ""}</div>`).join("") || `<p class="muted">No sharp moves in this period.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
       const older = $("#thOlder"); if (older) older.addEventListener("click", () => showTheme(key, true));
       // hover anywhere on the chart: that day's move, the week's, the S&P 500, the stocks that moved most that day,
       // and, inside a shaded band, that jump or fall with its first headline; click a band to read it below
@@ -1556,7 +1558,7 @@
           <div class="small">S&amp;P 500 ${pct(dchg(spy, i))} that day · ${pct(vb[k])} for the basket since the start of this period</div>
           ${movers.length ? `<div class="small">Moved most: ${movers.map(([tk, m]) => `<b>${esc(tk)}</b> <span class="${cls(m)}">${pct(m)}</span>`).join(" · ")}</div>` : ""}
           ${e ? `<div class="tip-ev ${e.dir}"><b>${e.dir === "up" ? "▲ Sharp jump" : "▼ Sharp fall"} ${pct(e.move)}</b> · ${fmtDate(e.start, { day: "numeric", month: "short" })}${e.end !== e.start ? `–${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""} · S&amp;P ${pct(e.spy)}
-            ${e.what[0] ? `<div class="small" style="white-space:normal">${esc(e.what[0].title)} <span class="muted">${esc(e.what[0].source)}</span></div>` : ""}${e.why[0] ? `<div class="small" style="white-space:normal"><span class="muted">Why:</span> ${esc(e.why[0].title)}</div>` : ""}<div class="small muted">click to read more below</div></div>` : ""}`;
+            ${e.summary ? `<div class="small" style="white-space:normal">${esc(e.summary)}</div>` : e.what[0] ? `<div class="small" style="white-space:normal">${esc(e.what[0].title)}</div>` : ""}<div class="small muted">click to read more below</div></div>` : ""}`;
         tip.hidden = false;
         const left = Xt(k) / Wt * r.width, tw = tip.offsetWidth;
         tip.style.left = `${Math.max(0, Math.min(r.width - tw, left + (left > r.width / 2 ? -tw - 14 : 14)))}px`; tip.style.top = "6px";
