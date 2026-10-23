@@ -1304,7 +1304,7 @@
 
   // ---------- Market drops: why did the market fall? ----------
   let MOVES = null;
-  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=4&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
+  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=5&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
   let dropInd = "all", dropRange = "all", thRange = "1y";
   // "what happened", in words, from the numbers: how far, over how long, what moved most
   const coName = (tk) => stocks[tk] ? cleanName(stocks[tk][0]).replace(/\s+(Sponsored|Corporation|Oyj|AG|SE)\b.*$/i, "") : tk;
@@ -1363,6 +1363,7 @@
       <p class="lede">Every sharp fall in the S&amp;P 500 and Nasdaq 100 since ${fmtDate(D.start, { month: "short", year: "numeric" })}: how far it fell, what fell most, how long it took to win back, and the headlines that day and the week after.</p>
       <div class="toolbar pin-top"><div class="seg" role="group" aria-label="Market or industry"><button type="button" data-ind="all">Whole market</button>${TH ? Object.entries(TH).map(([k, t]) => `<button type="button" data-ind="${k}">${esc(t.name)}</button>`).join("") : ""}</div></div>
       <div class="grid cols-4" id="nowCards"></div>
+      <div id="recentCards"></div>
       ${TH ? `<div class="card section"><h2 id="thTitle">By industry</h2><div id="thBody"></div></div>` : ""}
       <div class="card section"><h2>The S&amp;P 500, every drop and jump <span class="muted">red above: drops · green below: jumps · darker, bigger move · hover for what happened, click a drop to read it</span></h2>
         <div class="toolbar"><div class="seg" role="group" aria-label="Chart period">${[["1w", "1 week"], ["1m", "1 month"], ["3m", "3 months"], ["6m", "6 months"], ["1y", "1 year"], ["all", `Since ${D.start.slice(0, 4)}`]].map(([v, l]) => `<button type="button" data-cr="${v}" aria-pressed="${v === dropRange}">${l}</button>`).join("")}</div></div>
@@ -1465,6 +1466,21 @@
     };
     drawMain();
     $$("[data-cr]").forEach((b) => b.addEventListener("click", () => { dropRange = b.dataset.cr; $$("[data-cr]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); drawMain(); }));
+    // today and this week, written out: what happened, why, and the independent analysis
+    const recentCard = (key, w) => {
+      const src = key === "all" ? (MOVES && MOVES.market) : TH && TH[key]; if (!src || !src[w]) return "";
+      const e = src[w]; e.dir = e.move >= 0 ? "up" : "down";
+      const t = { name: key === "all" ? "The S&P 500" : TH[key].name };
+      const what = key === "all" ? `The S&amp;P 500 ${e.dir === "up" ? "rose" : "fell"} ${pctAbs(e.move)} ${spanTxt(e.start, e.end)}. Among companies worth $50 billion or more, ${e.most.slice(0, 3).map(([tk, r]) => `${esc(coName(tk))} (${pct(r, 1)})`).join(", ")} moved most.` : moveWhat(t, e);
+      const lbl = w === "today" ? `${e.end === new Date().toISOString().slice(0, 10) ? "Today" : "Latest trading day"} · ${fmtDate(e.end, { weekday: "long", day: "numeric", month: "short" })}` : `This week · ${fmtDate(e.start, { day: "numeric", month: "short" })} – ${fmtDate(e.end, { day: "numeric", month: "short", year: "numeric" })}`;
+      return `<div class="card recent ${e.dir}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pctAbs(e.move)}</span>
+          <span><b class="rc-lbl">${lbl}</b><br><span class="muted small">${key === "all" ? "S&amp;P 500" : `${esc(t.name)} · S&amp;P 500 ${pct(e.spy)}`} · past month ${pct(e.month)}</span></span>
+          <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 1)}</b></a>`).join("")}</div></div>
+        <div class="recent-body"><div><p><b>What happened:</b> ${what}</p>${e.summary ? `<p><b>Why:</b> ${esc(e.summary)}</p>` : `<p class="muted"><b>Why:</b> not written yet for this ${w === "today" ? "day" : "week"}.</p>`}</div>
+          <div class="ana" data-ana="${key}|${w}"></div></div>
+        ${e.what.length ? `<details class="srcs"><summary>Sources: ${e.what.length} news articles</summary><ul>${e.what.map(hl).join("")}</ul></details>` : ""}</div>`;
+    };
+    const drawRecent = (key) => { const el = $("#recentCards"); if (!el) return; el.innerHTML = recentCard(key, "today") + recentCard(key, "now"); fillAnalysis(el); };
     const showAllDrops = () => { $$(".drops > .drop[hidden]").forEach((d) => { d.hidden = false; }); const b = $("#moreDrops"); if (b) b.parentElement.remove(); };
     if ($("#moreDrops")) $("#moreDrops").addEventListener("click", showAllDrops);
     // where things stand now, for the whole market or one industry: today's move, how far below the year's high, the
@@ -1554,11 +1570,11 @@
       return `<div class="ana-box"><h5>Independent analysis <span class="muted small">what caused it, step by step, with the numbers from the price data</span></h5><ul>${out.map((o) => `<li>${o}</li>`).join("")}</ul></div>`;
     };
     const fillAnalysis = (root) => $$("[data-ana]", root).forEach((el) => {
-      const [key, k] = el.dataset.ana.split("|"), e = key === "all" ? eps[+k] : k === "now" ? TH[key].now : TH[key].events[+k];
+      const [key, k] = el.dataset.ana.split("|"), e = k === "now" || k === "today" ? (key === "all" ? MOVES.market : TH[key])[k] : key === "all" ? eps[+k] : TH[key].events[+k];
       if (e) el.innerHTML = anaHtml(key, e);
     });
     fillAnalysis(app);
-    if (!TH) { drawNow("all"); return; }
+    if (!TH) { drawNow("all"); drawRecent("all"); return; }
     // one industry over its own period: its basket against the S&P 500 day by day, its sharp moves marked, how many
     // there were and when, then each move as a card (newest six first)
     const TH_SPANS = [["1m", "1 month", 21], ["3m", "3 months", 63], ["6m", "6 months", 126], ["1y", "1 year", 252], ["all", `Since ${D.start.slice(0, 4)}`, 0]];
@@ -1577,14 +1593,6 @@
         axis += `<line x1="${xx}" x2="${xx}" y1="${Ht - 36}" y2="${Ht - 32}" stroke="var(--line-strong)"/>${label ? `<text x="${xx}" y="${Ht - 20}" font-size="10" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], { month: "short" })}</text>` : ""}${jan ? `<text x="${xx}" y="${Ht - 4}" font-size="12" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${dates[i].slice(0, 4)}</text>` : ""}`;
       }
       const ev = t.events.filter((e) => e.end >= dates[i0]);
-      // this week, always shown first, whether or not the move was sharp
-      const nw = t.now ? { ...t.now, dir: t.now.move >= 0 ? "up" : "down", why: [] } : null;
-      if (nw) t.now.dir = nw.dir;
-      const nowCard = nw ? `<div class="thmove thnow ${nw.dir}"><div class="tm-head"><span class="tm-big ${cls(nw.move)}">${nw.dir === "up" ? "▲" : "▼"} ${pct(nw.move, 1).replace(/^[+−]/, "")}</span>
-          <span><b>This week · ${fmtDate(nw.start, { day: "numeric", month: "short" })} – ${fmtDate(nw.end, { day: "numeric", month: "short", year: "numeric" })}</b><br><span class="muted small">S&amp;P 500 ${pct(nw.spy)} · past month ${esc(t.name)} ${pct(nw.month)}</span></span></div>
-          <div class="bigfalls">${nw.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 1)}</b></a>`).join("")}</div>
-          <div class="why-sum small"><p><b>What happened:</b> ${moveWhat(t, nw)}</p>${nw.summary ? `<p><b>Why:</b> ${esc(nw.summary)}</p>` : ""}<div class="ana" data-ana="${key}|now"></div></div>
-          ${nw.what.length ? `<details class="srcs"><summary>Sources: ${nw.what.length} news articles</summary><ul>${nw.what.map(hl).join("")}</ul></details>` : ""}</div>` : "";
       $("#thBody").innerHTML = `<div class="toolbar"><div class="seg" role="group" aria-label="Industry period">${TH_SPANS.map(([v, l]) => `<button type="button" data-tr="${v}" aria-pressed="${v === thRange}">${l}</button>`).join("")}</div>
           <span class="count">${esc(t.name)} ${pct(vb[n])} · S&amp;P 500 ${pct(vs[n])} over this period</span></div>
         <div class="grid cols-2">
@@ -1599,7 +1607,6 @@
           <path d="${path(vb)}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>
           <line class="cx" x1="0" x2="0" y1="14" y2="${Ht - 36}" stroke="var(--ink-2)" stroke-dasharray="3 3" visibility="hidden"/><circle class="cdot" r="4" fill="var(--chart)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`, `${t.name} against the S&P 500`)}<div class="tip" hidden></div></div>
         <div class="legend small"><span><i class="sw" style="background:var(--chart)"></i>${esc(t.name)} basket</span><span><i class="sw" style="background:#eb6834"></i>S&amp;P 500</span><span><i class="sw" style="background:var(--good)"></i>sharp jump</span><span><i class="sw" style="background:var(--bad)"></i>sharp fall</span><span class="tks">${t.tickers.map((x2) => tkLink(x2)).join(" ")}</span></div>
-        ${nowCard}
         <h4 class="th-sub">Sharp moves in this period</h4>
         <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}" id="thm-${k}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
             <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
@@ -1641,7 +1648,7 @@
     };
     const choose = (key) => {
       dropInd = key; $$("[data-ind]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.ind === key)));
-      drawNow(key);
+      drawNow(key); drawRecent(key);
       if (key === "all") overview(); else { $("#thTitle").innerHTML = `${esc(TH[key].name)} <span class="muted">sharp falls and jumps, whether or not the whole market moved</span>`; showTheme(key); }
     };
     $$("[data-ind]").forEach((b) => b.addEventListener("click", () => choose(b.dataset.ind)));
