@@ -1307,7 +1307,7 @@
   const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
   let dropInd = "all", dropRange = "all", thRange = "1y";
   // "what happened", in words, from the numbers: how far, over how long, what moved most
-  const coName = (tk) => stocks[tk] ? cleanName(stocks[tk][0]).replace(/s+(Sponsored|Corporation|Oyj|AG|SE)b.*$/i, "") : tk;
+  const coName = (tk) => stocks[tk] ? cleanName(stocks[tk][0]).replace(/\s+(Sponsored|Corporation|Oyj|AG|SE)\b.*$/i, "") : tk;
   const spanTxt = (a, b) => a === b ? `on ${fmtDate(a, { day: "numeric", month: "short" })}` : `from ${fmtDate(a, { day: "numeric", month: "short" })} to ${fmtDate(b, { day: "numeric", month: "short" })}`;
   const pctAbs = (r, d = 1) => `${Math.abs(r * 100).toFixed(d)}%`;
   const dropWhat = (e) => {
