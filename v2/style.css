@@ -278,7 +278,6 @@ ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
   .stat .big { font-size: 22px; }
   .pret { grid-template-columns: minmax(0, 1fr); }
   .podium { grid-template-columns: minmax(0, 1fr); } .pod.p1 { order: -1; }
-  .tcard { width: 200px; }
 }
 
 /* biggest buys: ring with labelled cards */
@@ -300,3 +299,19 @@ a.rc-name:hover { color: var(--accent); }
 .rc-sub { font-size: 12px; color: var(--muted); line-height: 1.3; }
 .rc-sub.down { color: var(--bad); font-weight: 600; }
 .rc-held { color: var(--ink-2); }
+
+/* stock chart: trade pills (as on the classic site) */
+.tpill { position: relative; display: inline-flex; align-items: center; gap: 9px; background: var(--surface); border: 2px solid var(--line-strong); border-radius: 999px; padding: 4px 14px 4px 4px; box-shadow: 0 4px 14px rgba(0, 0, 0, .12); white-space: nowrap; color: var(--ink); font-family: var(--font-ui); }
+a.tpill:hover { text-decoration: none; box-shadow: 0 4px 18px rgba(0, 0, 0, .2); }
+.tpill.B { border-color: var(--good); } .tpill.S { border-color: var(--bad); }
+.tp-faces { display: inline-flex; flex: none; } .tp-faces:empty { display: none; }
+.tp-ph + .tp-ph { margin-left: -16px; }
+.tp-ph img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; display: block; border: 2px solid var(--ind); background: var(--chip); box-shadow: 0 0 0 2px var(--surface); }
+.tp-ph.D img { border-color: var(--dem); } .tp-ph.R img { border-color: var(--rep); }
+.tp-txt { display: grid; line-height: 1.25; }
+.tp-txt b { font: 700 15px var(--font-mono); } .tpill.B .tp-txt b { color: var(--good); } .tpill.S .tp-txt b { color: var(--bad); }
+.tp-txt > span { font-size: 12px; color: var(--muted); }
+.tp-names { font-size: 12px; } .tp-names a { color: var(--ink-2); font-weight: 600; }
+.tpill .x { border: 0; background: none; font-size: 17px; line-height: 1; color: var(--muted); cursor: pointer; padding: 0 0 0 4px; margin-right: -6px; } .tpill .x:hover { color: var(--ink); }
+.pin .tpill { pointer-events: auto; }
+@media (max-width: 520px) { .tp-ph img { width: 32px; height: 32px; } .tp-txt b { font-size: 13px; } .tp-txt > span { font-size: 11px; } }

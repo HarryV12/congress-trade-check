@@ -1074,11 +1074,18 @@
       <div class="tip tcard-tip" hidden></div><div class="pins"></div></div>`;
     const svg = $("svg", el), tip = $(".tip", el), cx = $(".cx", el), pinsEl = $(".pins", el), linksEl = $(".links", el);
     const byK = new Map(G.map((g) => [g.k, g]));
-    // a trade card: rounded corners, each trader's photo in a rounded square, their amount and party
-    const tcard = (g, pinned) => `<div class="tcard ${g.side}">${pinned ? `<button type="button" class="x" data-unpin="${g.k}" aria-label="Close">×</button>` : ""}
-      <div class="tc-date">${g.side === "B" ? "Bought" : "Sold"} · ${fmtDate(dates[g.i])} · ${price(pv(g.i))}</div>
-      ${g.list.slice(0, 4).map((t) => { const m = members[t.m]; return `<a class="tc-row" href="#/member/${encodeURIComponent(m.id)}"><span class="tc-ph ${esc(m.party || "I")}">${photo(m)}</span><span class="tc-txt"><b>${esc(m.name)}</b><span class="small">${partyTag(m)} <span class="mono">${rangeText(t)}</span></span></span></a>`; }).join("")}
-      ${g.list.length > 4 ? `<div class="muted small">+${g.list.length - 4} more</div>` : ""}</div>`;
+    // a trade pill, like the classic site's chart: the trader's round photo, "Bought $549.47" in green or "Sold" in red,
+    // then the date, who and how much. Several people on one day share a pill with their faces overlapping.
+    const surname = (m) => { const w = String(m.name).replace(/,? (Jr\.?|Sr\.?|III|II|IV)$/i, "").trim().split(/\s+/); return w[w.length - 1]; };
+    const tcard = (g, pinned) => {
+      const ms = [...new Map(g.list.map((t) => [t.m, members[t.m]])).values()], one = g.list.length === 1, t0 = g.list[0];
+      const sub = `${fmtDate(dates[g.i], { day: "numeric", month: "short" })} · ${one ? `${esc(surname(ms[0]))} · ${rangeText(t0)}` : `${ms.length > 1 ? `${ms.length} people` : esc(surname(ms[0]))} · ${g.list.length} trades · ≈${usd(est(g.list).best)}`}`;
+      const names = !one && ms.length > 1 ? `<span class="tp-names">${ms.slice(0, 4).map((m) => `<a href="#/member/${encodeURIComponent(m.id)}">${esc(surname(m))}</a>`).join(", ")}${ms.length > 4 ? ` +${ms.length - 4}` : ""}</span>` : "";
+      const tag = ms.length === 1 ? "a" : "div", href = ms.length === 1 ? ` href="#/member/${encodeURIComponent(ms[0].id)}"` : "";
+      return `<${tag} class="tpill ${g.side}"${href} title="${esc(ms.map((m) => m.name).join(", "))}"><span class="tp-faces">${ms.slice(0, 3).map((m) => `<span class="tp-ph ${esc(m.party || "I")}">${photo(m)}</span>`).join("")}</span>
+        <span class="tp-txt"><b>${g.side === "B" ? "Bought" : "Sold"} ${price(pv(g.i))}</b><span>${sub}</span>${pinned ? names : ""}</span>
+        ${pinned ? `<button type="button" class="x" data-unpin="${g.k}" aria-label="Close">×</button>` : ""}</${tag}>`;
+    };
     // pinned cards sit beside their marker, nudged up or down so none overlap, with a line back to the marker
     const pinned = [];
     const layout = () => {
@@ -1112,7 +1119,7 @@
     svg.addEventListener("mousemove", (ev) => {
       const { g, i } = nearest(ev), ii = g ? g.i : i, r = svg.getBoundingClientRect();
       cx.setAttribute("x1", X(ii)); cx.setAttribute("x2", X(ii)); cx.setAttribute("visibility", "visible");
-      tip.innerHTML = g ? tcard(g, false) : `<div class="tcard"><div class="tc-date">${fmtDate(dates[ii])} · ${price(pv(ii))}</div></div>`;
+      tip.innerHTML = g ? tcard(g, false) : `<div class="tpill"><span class="tp-txt"><b>${price(pv(ii))}</b><span>${fmtDate(dates[ii])}</span></span></div>`;
       tip.hidden = false; const left = X(ii) / W * r.width, tw = tip.offsetWidth;
       tip.style.left = `${Math.max(0, Math.min(r.width - tw, left + (left > r.width / 2 ? -tw - 16 : 16)))}px`;
       tip.style.top = `${Math.max(0, Math.min(r.height - tip.offsetHeight, Y(pv(ii)) / H * r.height - 30))}px`;
