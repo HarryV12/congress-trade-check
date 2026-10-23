@@ -1070,7 +1070,7 @@ if (location.hostname === "harryv12.github.io") {
       <div>
         <h2>Best-timed buys</h2>
         <p class="ctx"></p>
-        <p class="note">Filtered buys with the largest outperformance versus the S&amp;P 500, in percentage points (pts). A buy up 30% while the S&amp;P 500 rose 10% is +20 pts.</p>
+        <p class="note">Filtered buys with the largest outperformance versus the S&amp;P 500. A buy up 30% while the S&amp;P 500 rose 10% is +20%.</p>
       </div>
       <div class="best" id="best"></div>
     </div>
@@ -1078,7 +1078,7 @@ if (location.hostname === "harryv12.github.io") {
       <div>
         <h2>Worst-timed buys</h2>
         <p class="ctx"></p>
-        <p class="note">Filtered buys with the largest underperformance versus the S&amp;P 500, in percentage points (pts).</p>
+        <p class="note">Filtered buys with the largest underperformance versus the S&amp;P 500.</p>
       </div>
       <div class="best" id="worst"></div>
     </div>
@@ -1097,7 +1097,7 @@ if (location.hostname === "harryv12.github.io") {
       <div>
         <h2 id="leaderTitle">Members ranked by return</h2>
         <p class="ctx"></p>
-        <p class="note">Click a member to view their trades. <b>Return</b> is the combined return on their filtered buys; <b>Vs S&amp;P</b> is the difference, in percentage points (pts), from an S&amp;P 500 fund bought on the same dates.</p>
+        <p class="note">Click a member to view their trades. <b>Return</b> is the combined return on their filtered buys; <b>Vs S&amp;P</b> is the difference, as a percentage, from an S&amp;P 500 fund bought on the same dates.</p>
       </div>
     </div>
     <div class="scroll"><table id="leader" class="cards"></table></div>
@@ -1150,22 +1150,22 @@ if (location.hostname === "harryv12.github.io") {
     <details>
       <summary>How Public signals are scored</summary>
       <div class="body">
-        <p>Public signals (in Data Visualization) ranks stocks that members of Congress and officials bought in the last 120 days. Each stock gets a score out of 100 that combines their buying with other public information about the company. Business leaders are left out, since they aren't public officials.</p>
-        <p><b>Net buyers (up to 40 points).</b> Buying and selling are weighed together, so a stock that is mostly being sold doesn't score well just because a few people bought some. Each person gets one vote: what they bought minus what they sold, using the middle of each reported range (a trade with no stated amount counts at that person's usual size). Three steps keep the vote fair:</p>
+        <p>Public signals (in Data Visualization) ranks stocks that members of Congress and officials bought in the last 120 days. Each stock gets a score out of 100% that combines their buying with other public information about the company. Business leaders are left out, since they aren't public officials.</p>
+        <p><b>Net buyers (up to 40%).</b> Buying and selling are weighed together, so a stock that is mostly being sold doesn't score well just because a few people bought some. Each person gets one vote: what they bought minus what they sold, using the middle of each reported range (a trade with no stated amount counts at that person's usual size). Three steps keep the vote fair:</p>
         <ul>
           <li><b>Log scale.</b> Every 10 times more money adds the same amount to a vote, so one very large trader can't outweigh everyone else. An $8,000 net buy is worth about 1, $375,000 about 2.6 and $5 million about 3.7.</li>
           <li><b>Their usual trade size.</b> Each person's usual size is the middle of all the trades they have reported since 2023. A trade far larger than usual counts up to twice as much; one far smaller counts as little as half.</li>
-          <li><b>Adding up.</b> Buyers' votes count as positive and sellers' as negative. A positive total earns up to 30 points; a negative total takes up to 30 points off. Three or more different people buying within a month adds 10 points, because several people buying close together is a stronger sign than one large trade.</li>
+          <li><b>Adding up.</b> Buyers' votes count as positive and sellers' as negative. A positive total earns up to 30%; a negative total takes up to 30% off. Three or more different people buying within a month adds 10%, because several people buying close together is a stronger sign than one large trade.</li>
         </ul>
         <p>Only people who put in more than they took out count as <b>net buyers</b>. Under that number, the image shows <b>net buying by number of trades</b> (left) and <b>by dollars</b> (right), each labelled at the top of the column: (buys − sells) ÷ (buys + sells), from −100% (all selling) to +100% (all buying), in green when buying outweighs selling and red when selling does. This measure, the net purchase ratio, is widely used in research on company insiders' trading. The two can disagree: many small sales against a few large buys gives a negative trades figure and a positive dollars figure.</p>
-        <p><b>Committee (up to 20).</b> 10 points for each net buyer whose committee covers the company's industry (see “Which industries each committee oversees”).</p>
-        <p><b>Contracts (up to 15).</b> Federal contract money awarded to the company in the last 90 days, from USAspending.gov.</p>
-        <p><b>Lobbying (up to 15).</b> What the company reported spending on lobbying in the latest House lobbying disclosures, with its most frequent lobbying topic.</p>
-        <p><b>Hearings (up to 10).</b> House committee hearings and markups in the next 28 days that name the company (10 points) or cover its industry (2 points), from the House committee calendar.</p>
-        <p><b>Leaders (up to 10).</b> Posts in the last 30 days by well-known political figures that name the company or its ticker: 4 points for each person, plus 1 for each further post. The big number is how many people; the small one is how many posts. A mention counts whether it praises or criticises the company, since either can move a stock. Company names that are also everyday words, such as Apple or Target, count only when the ticker is used.</p>
+        <p><b>Committee (up to 20%).</b> 10% for each net buyer whose committee covers the company's industry (see “Which industries each committee oversees”).</p>
+        <p><b>Contracts (up to 15%).</b> Federal contract money awarded to the company in the last 90 days, from USAspending.gov.</p>
+        <p><b>Lobbying (up to 15%).</b> What the company reported spending on lobbying in the latest House lobbying disclosures, with its most frequent lobbying topic.</p>
+        <p><b>Hearings (up to 10%).</b> House committee hearings and markups in the next 28 days that name the company (10%) or cover its industry (2%), from the House committee calendar.</p>
+        <p><b>Leaders (up to 10%).</b> Posts in the last 30 days by well-known political figures that name the company or its ticker: 4% for each person, plus 1 for each further post. The big number is how many people; the small one is how many posts. A mention counts whether it praises or criticises the company, since either can move a stock. Company names that are also everyday words, such as Apple or Target, count only when the ticker is used.</p>
         <p>Only personal accounts are read, not government-office or campaign accounts, and a post doesn't count when the person runs, owns or works for the company (for example, the Trump family or Devin Nunes posting about Trump Media). The people followed are Donald Trump, Donald Trump Jr., Eric Trump, Devin Nunes, Pete Hegseth, Marco Rubio and Tulsi Gabbard on Truth Social, and Alexandria Ocasio-Cortez, Elizabeth Warren, Chris Murphy, Hakeem Jeffries, Pete Buttigieg, Barack Obama, Gavin Newsom, JB Pritzker, Jasmine Crockett and Mark Cuban on Bluesky (verified accounts). Posts on X (Twitter), such as Elon Musk's, aren't included because X charges for access.</p>
-        <p><b>Insiders (up to 10).</b> The company's own executives, directors and large shareholders buying its stock on the open market in the last 90 days (SEC Form 4 filings). Only people whose purchases add up to at least $25,000 count, which leaves out small automatic employee share-plan purchases.</p>
-        <p>Points from every column are added and the total is capped at 100. The score shows where several public signals point the same way. It is not a prediction or investment advice.</p>
+        <p><b>Insiders (up to 10%).</b> The company's own executives, directors and large shareholders buying its stock on the open market in the last 90 days (SEC Form 4 filings). Only people whose purchases add up to at least $25,000 count, which leaves out small automatic employee share-plan purchases.</p>
+        <p>The parts from every column are added and the total is capped at 100%. The score shows where several public signals point the same way. It is not a prediction or investment advice.</p>
       </div>
     </details>
     <details>
@@ -1180,7 +1180,7 @@ if (location.hostname === "harryv12.github.io") {
         <p><b>Large caps</b>: S&amp;P 500 companies, companies above the selected market cap, and any tickers on the exclusion list. Most funds and pension plans hold them, so buying them reveals little about inside knowledge. The same option excludes <b>funds and ETFs</b> (index, bond and mutual funds), which hold many companies at once.</p>
         <p><b>Buying spike</b>: at least 3 different members buying the same stock within about a month, when that many would happen by chance less than 1 time in 20 at the stock's usual rate (a Poisson test). Large caps bought during a spike count as filtered buys while “Except during buying spikes” is on.</p>
         <p><b>Likely range</b>: filings give each trade as a wide dollar range. The likely range is the narrower span where the real amount sits 7 times in 10, learned from trades whose exact amount is known; the reported range is shown under it in the tables. Totals get their own likely range, which is narrower again because small misses on single trades partly cancel out. Charts and rankings use the best estimate in the middle of it.</p>
-        <p><b>Return</b>: gain or loss as a percentage of the money put in. <b>Points (pts)</b>: the gap between two returns. A buy up 30% while the S&amp;P 500 rose 10% over the same days is 20 points ahead.</p>
+        <p><b>Return</b>: gain or loss as a percentage of the money put in. <b>Vs S&amp;P</b>: the gap between two returns, as a percentage. A buy up 30% while the S&amp;P 500 rose 10% over the same days is +20% ahead.</p>
         <p><b>Trade date / disclosure date</b>: whether gains are measured from the trade date (their own timing) or from the filing date (what someone copying the filing could have made).</p>
         <p><b>Green and red</b>: green always means up (a gain, or a stock that rose), red always means down. On charts of trades, green marks are buys and red marks are sells.</p>
       </div>
@@ -1391,7 +1391,7 @@ if (location.hostname === "harryv12.github.io") {
   const price = (x) => x == null ? "–" : "$" + (x >= 1000 ? x.toLocaleString("en-US", { maximumFractionDigits: 0 }) : x.toFixed(2));
   const signedUsd = (x) => (x > 0 ? "+" : "") + usd(x);
   const pct = (x, d = 1) => x == null || !isFinite(x) ? "–" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x * 100).toFixed(d) + "%";
-  const pts = (x) => x == null || !isFinite(x) ? "–" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x * 100).toFixed(1) + " pts";
+  const pts = (x) => x == null || !isFinite(x) ? "–" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x * 100).toFixed(1) + "%";
   const cls = (x) => x > 0 ? "pos" : x < 0 ? "neg" : "";
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const fmtDate = (iso, opts = { month: "short", day: "numeric", year: "numeric" }) => iso ? new Date((iso.length > 10 ? iso : iso + "T00:00:00Z")).toLocaleDateString("en-GB", { ...opts, timeZone: "UTC" }) : "";
@@ -2022,8 +2022,8 @@ if (location.hostname === "harryv12.github.io") {
         <p class="note">${esc(bits.join(" · "))}</p></div>${extra || ""}</div>`;
     if (!cur.n) { $("#scorecard").innerHTML = head() + '<p class="note">No buys match the current filters.</p>'; return; }
     const small = cur.n < 10 ? `<span class="sc2-small" title="Fewer than 10 buys: a few trades can swing these numbers a lot">Small sample · ${plural(cur.n, "buy")}</span>` : "";
-    const pts = (d) => `${d >= 0 ? "+" : "−"}${Math.abs(d * 100).toFixed(1)} pts`;
-    const verdict = `${cur.diff >= 0 ? "Beat" : "Trailed"} the S&amp;P 500 by ${Math.abs(cur.diff * 100).toFixed(1)} points`;
+    const pts = (d) => `${d >= 0 ? "+" : "−"}${Math.abs(d * 100).toFixed(1)}%`;
+    const verdict = `${cur.diff >= 0 ? "Beat" : "Trailed"} the S&amp;P 500 by ${Math.abs(cur.diff * 100).toFixed(1)}%`;
     // paired bars: both timings on one shared scale, zero marked when anything is negative
     const vals = [T, P].filter((x) => x.n).flatMap((x) => [x.ret, x.spyRet]);
     const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), span = hi - lo || 1, z = -lo / span * 100;
@@ -2054,7 +2054,7 @@ if (location.hostname === "harryv12.github.io") {
       </table>
       <details class="howto"><summary>How to read this</summary><div class="body">
         <p><b>Trade date</b> buys and sells on the dates the member traded (their own timing). <b>Disclosure date</b> buys when each trade was made public and sells when the sale was: what anyone following the filings could have achieved. The Filter's “Returns measured from” setting picks which one the headline uses.</p>
-        <p>Each buy counts at the best estimate of its reported range and is held until the member reports a full sale, or to today. The S&amp;P 500 figure puts the same amounts into an S&amp;P 500 fund on the same days. Points are the gap between the two returns.</p>
+        <p>Each buy counts at the best estimate of its reported range and is held until the member reports a full sale, or to today. The S&amp;P 500 figure puts the same amounts into an S&amp;P 500 fund on the same days. "Vs S&amp;P" is the gap between the two returns, as a percentage.</p>
       </div></details>`;
   }
 
@@ -2319,11 +2319,11 @@ if (location.hostname === "harryv12.github.io") {
     const rows = followScores();
     const twoYears = FOLLOW_FROM <= today - 729 * DAY;
     $("#followNote").textContent = `Ranked by the return from replicating each member's stock buys on their disclosure dates, using buys disclosed ${twoYears ? "in the last 2 years" : "since the data starts"} (${fmtDate(FOLLOW_FROM_ISO)} to now). Members with at least ${FOLLOW_MIN} buys.`;
-    $("#followRules").innerHTML = `<p>Each member gets up to 100 points:</p>
-      <p><b>Edge, 40 points.</b> How much copying their buys beat (or trailed) the S&amp;P 500 over the same days, dollar-weighted. Short track records are adjusted toward zero, so a handful of fortunate trades cannot dominate the ranking. Beating the market by 20 points or more scores the full 40; matching it scores 20.</p>
-      <p><b>Hit rate, 25 points.</b> The share of their buys that beat the S&amp;P 500.</p>
-      <p><b>Speed, 15 points.</b> Reporting speed. The sooner a trade is public, the more of the subsequent move a follower can capture. Same-day scores 15; 60 days or later scores 0.</p>
-      <p><b>Track record, 20 points.</b> How many buys there are to judge them on. 100 buys or more scores the full 20.</p>
+    $("#followRules").innerHTML = `<p>Each member gets a score out of 100%:</p>
+      <p><b>Edge, 40%.</b> How much copying their buys beat (or trailed) the S&amp;P 500 over the same days, dollar-weighted. Short track records are adjusted toward zero, so a handful of fortunate trades cannot dominate the ranking. Beating the market by 20% or more scores the full 40; matching it scores 20.</p>
+      <p><b>Hit rate, 25%.</b> The share of their buys that beat the S&amp;P 500.</p>
+      <p><b>Speed, 15%.</b> Reporting speed. The sooner a trade is public, the more of the subsequent move a follower can capture. Same-day scores the full 15%; 60 days or later scores 0.</p>
+      <p><b>Track record, 20%.</b> How many buys there are to judge them on. 100 buys or more scores the full 20%.</p>
       <p>Past performance does not guarantee future results. Not financial advice.</p>`;
     const bar = (v, max) => `<i><b style="width:${Math.max(0, Math.min(100, v / max * 100)).toFixed(0)}%"></b></i>`;
     $("#follow").innerHTML = rows.slice(0, followLimit).map((r, k) => `<div class="frow" data-member="${r.m.i}" tabindex="0" role="button">
@@ -2335,7 +2335,7 @@ if (location.hostname === "harryv12.github.io") {
           <div class="part">Speed <em>${r.median}d</em>${bar(r.parts.speed, 15)}</div>
           <div class="part">Record <em>${r.s.n}</em>${bar(r.parts.record, 20)}</div>
         </div>
-        <div class="score"><b>${Math.round(r.score)}</b><span>points</span></div></div>`).join("") || '<p class="empty">Not enough buys to score anyone for this selection.</p>';
+        <div class="score"><b>${Math.round(r.score)}%</b><span>score</span></div></div>`).join("") || '<p class="empty">Not enough buys to score anyone for this selection.</p>';
     $("#followMore").innerHTML = rows.length > followLimit ? `<button type="button" class="btn" id="followMoreBtn">Show more</button><span>Showing ${followLimit} of ${rows.length}</span>` : "";
   }
 
@@ -4820,11 +4820,11 @@ if (location.hostname === "harryv12.github.io") {
     const tRows = [["FROM TRADE DATE"],
       ["Their buys", (p) => p.s.n ? pct(p.s.ret) : "–", () => th.ink],
       ["S&P 500, same days", (p) => p.s.n ? pct(p.s.spyRet) : "–", () => th.muted],
-      ["Difference", (p) => p.s.n ? pts(p.s.diff).replace(" pts", "") : "–", (p) => diffCol(p.s.diff), true],
+      ["Difference", (p) => p.s.n ? pts(p.s.diff) : "–", (p) => diffCol(p.s.diff), true],
       ["FROM DISCLOSURE DATE"],
       ["Their buys", (p) => p.c.n ? pct(p.c.ret) : "–", () => th.ink],
       ["S&P 500, same days", (p) => p.c.n ? pct(p.c.spyRet) : "–", () => th.muted],
-      ["Difference", (p) => p.c.n ? pts(p.c.diff).replace(" pts", "") : "–", (p) => diffCol(p.c.diff), true],
+      ["Difference", (p) => p.c.n ? pts(p.c.diff) : "–", (p) => diffCol(p.c.diff), true],
       [null],
       ["Buys counted", (p) => p.n.toLocaleString(), () => th.muted]];
     let band = 0;
@@ -5755,8 +5755,8 @@ if (location.hostname === "harryv12.github.io") {
       drawFace(ctx, imgs[rank], r.m, cx, fcy, fr, th);
       ctx.fillStyle = th.ink; ctx.font = `700 24px ${UI}`; ctx.fillText(fitText(ctx, plainName(r.m), pw - 28), cx, fcy + fr + 36);
       ctx.fillStyle = th.muted; ctx.font = `500 17px ${UI}`; ctx.fillText(fitText(ctx, tagline(r.m), pw - 28), cx, fcy + fr + 62);
-      ctx.fillStyle = th.ink; ctx.font = `800 ${rank === 0 ? 58 : 50}px ${UI}`; ctx.fillText(String(Math.round(r.score)), cx, yTop + h - 66);
-      ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1.5px"; ctx.fillText("POINTS", cx, yTop + h - 44); ctx.letterSpacing = "0px";
+      ctx.fillStyle = th.ink; ctx.font = `800 ${rank === 0 ? 58 : 50}px ${UI}`; ctx.fillText(Math.round(r.score) + "%", cx, yTop + h - 66);
+      ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1.5px"; ctx.fillText("SCORE", cx, yTop + h - 44); ctx.letterSpacing = "0px";
       ctx.fillStyle = th.ink2; ctx.font = `500 15px ${UI}`;
       ctx.fillText(fitText(ctx, `copying ${pct(r.s.ret, 0)} vs S&P ${pct(r.s.spyRet, 0)} · ${r.s.n} buys`, pw - 24), cx, yTop + h - 18);
       ctx.textAlign = "left";
