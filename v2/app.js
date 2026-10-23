@@ -226,7 +226,7 @@
           ${chk("options", "Include options", "Valued at the underlying share price.")}
         </div>
       </div></div>`;
-    fp.hidden = false; $("#filterBtn").setAttribute("aria-expanded", "true");
+    fp.hidden = false; $("#filterBtn").setAttribute("aria-expanded", "true"); fitSubbar();
     const changed = () => { saveFilter(); applyFilterSettings(); updateFilterBadge(); route(true); };
     $$("[data-fk]", fp).forEach((g) => $$("button", g).forEach((b) => b.addEventListener("click", () => { S[g.dataset.fk] = b.dataset.v; $$("button", g).forEach((x) => x.setAttribute("aria-pressed", String(x === b))); changed(); })));
     $$("[data-fc]", fp).forEach((c) => c.addEventListener("change", () => { S[c.dataset.fc] = c.checked; changed(); }));
@@ -234,7 +234,7 @@
     let tm; $$("[data-ft]", fp).forEach((c) => c.addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(() => { S[c.dataset.ft] = c.value; changed(); }, 400); }));
     $("#fpClose", fp).addEventListener("click", closeFilter);
   }
-  function closeFilter() { $("#fpanel").hidden = true; $("#filterBtn").setAttribute("aria-expanded", "false"); }
+  function closeFilter() { $("#fpanel").hidden = true; $("#filterBtn").setAttribute("aria-expanded", "false"); fitSubbar(); }
   function updateFilterBadge() { const n = filterLabels().length; $("#filterBtn").innerHTML = `Filter${n ? ` <span class="badge">${n}</span>` : ""}`; }
 
   // ---------- period (shared by every page, remembered in this browser) ----------
@@ -619,7 +619,7 @@
     app.innerHTML = `
       <h1>What Congress is trading</h1>
       <p class="lede">Stock and bond trades by members of Congress and senior officials, from their public disclosure reports. Filings up to <b>${fmtDate(lastFiled)}</b>; prices to ${fmtDate(D.prices_through)}.</p>
-      <div class="toolbar">${periodSeg()}</div>
+      <div class="toolbar pin-top">${periodSeg()}</div>
       <div id="moveBanner"></div>
       <div class="grid cols-4">
         ${statCard("Trades", win.length.toLocaleString(), periodWords())}
@@ -684,7 +684,7 @@
     }
     const rows = [...g.values()].map((e) => ({ ...e, eb: est(e.b).best, es: est(e.s).best, n: e.b.length + e.s.length, st: stats(e.b, B()) }));
     app.innerHTML = `<h1>Politicians</h1><p class="lede">Everyone with disclosed trades ${periodWords()}. Click a column to sort, a row to open their page.</p>
-      <div class="toolbar">${periodSeg()}<div class="seg" role="group" aria-label="Who"><button type="button" data-ch="all">All</button><button type="button" data-ch="H">House</button><button type="button" data-ch="S">Senate</button><button type="button" data-ch="E">Officials</button><button type="button" data-ch="C">Business</button></div>
+      <div class="toolbar pin-top">${periodSeg()}<div class="seg" role="group" aria-label="Who"><button type="button" data-ch="all">All</button><button type="button" data-ch="H">House</button><button type="button" data-ch="S">Senate</button><button type="button" data-ch="E">Officials</button><button type="button" data-ch="C">Business</button></div>
       <input type="search" id="filt" placeholder="Filter by name or state"><span class="count" id="cnt"></span></div><div class="card" id="tbl"></div>`;
     bindPeriod(app);
     let ch = S.chamber, q = "";
@@ -719,7 +719,7 @@
     const held = new Map(), H = (tk) => { if (!held.has(tk)) { let v = 0, n = 0; for (const mi of holders.get(tk) || []) { const L = leftOf(mi, tk); if (L && L.value >= 1000) { v += L.value; n++; } } held.set(tk, { v, n }); } return held.get(tk); };
     const rows = [...g.values()].map((e) => ({ ...e, eb: est(e.b).best, es: est(e.s).best }));
     app.innerHTML = `<h1>Stocks</h1><p class="lede">Every stock members and officials traded ${periodWords()}. "Still held" adds up what each of them still holds, from all their filings.</p>
-      <div class="toolbar">${periodSeg()}<input type="search" id="filt" placeholder="Filter by ticker, company or sector"><span class="count" id="cnt"></span></div><div class="card" id="tbl"></div>`;
+      <div class="toolbar pin-top">${periodSeg()}<input type="search" id="filt" placeholder="Filter by ticker, company or sector"><span class="count" id="cnt"></span></div><div class="card" id="tbl"></div>`;
     bindPeriod(app);
     let q = "";
     const draw = () => {
@@ -756,7 +756,7 @@
       <div class="profile ${esc(m.party || "I")}">${photo(m)}
         <div><h1>${esc(m.name)}</h1><div class="muted">${partyTag(m)} ${esc(seat(m))}${m.former ? " · former" : ""}</div>
         <div class="tags">${comm.slice(0, 6).map((c) => `<span class="tag">${esc(c)}</span>`).join("")}</div></div></div>
-      <div class="toolbar">${periodSeg()}</div>
+      <div class="toolbar pin-top">${periodSeg()}</div>
       <div class="localf"><span class="lbl">This page's filter</span>
         ${loc("hideBig", "Exclude large caps and funds", "S&P 500 companies, funds and ETFs")}${loc("committeeOnly", "Committee-linked only", "Trades in sectors their committees oversee")}${loc("lateOnly", "Late disclosures only", "Filed after 45 days")}${loc("options", "Include options", "Valued at the underlying share price")}
         <div class="seg" data-lt><button type="button" data-v="trade" aria-pressed="${f.timing !== "public"}">Trade date</button><button type="button" data-v="public" aria-pressed="${f.timing === "public"}">Disclosure date</button></div>
@@ -1095,7 +1095,7 @@
     app.innerHTML = `<div class="crumbs"><a href="#/stocks">Stocks</a></div>
       <div class="price-head"><div class="ph-left">${logoBox(tk, "var(--chart)", 52)}<div><h1>${esc(cleanName(st[0]))}</h1><div class="muted"><span class="tk">${esc(tk)}</span> ${esc([st[3] || st[2], st[1]].filter(Boolean).join(" · "))}${st[4] ? ` · market value ${usd(st[4])}` : ""}</div></div></div>
         <div class="px" id="px"></div></div>
-      <div class="toolbar">${periodSeg()}</div>
+      <div class="toolbar pin-top">${periodSeg()}</div>
       <div class="card"><div class="pchart" id="chart"><p class="loading">Loading prices…</p></div>
         <div class="legend"><span><i class="tri-up"></i>a buy</span><span><i class="tri-dn"></i>a sale</span><span>hover for who traded that day · click a marker to pin its card; click more to compare · × closes</span></div></div>
       <div class="grid cols-3 section">
@@ -1231,7 +1231,7 @@
     const from = Math.max(since(), Date.parse(D.start + "T00:00:00Z")), rows = followScores(from);
     app.innerHTML = `<h1>Copy-trading leaderboard</h1>
       <p class="lede">Who would have been worth copying: each politician's stock buys, bought on the day they were disclosed, ${periodWords()}. Scored out of 100%: edge over the S&amp;P 500 (40%), hit rate (25%), reporting speed (15%) and track record (20%). At least 5 buys to be ranked.</p>
-      <div class="toolbar">${periodSeg()}</div><div id="podium" class="podium"></div><div class="card section" id="tbl"></div>
+      <div class="toolbar pin-top">${periodSeg()}</div><div id="podium" class="podium"></div><div class="card section" id="tbl"></div>
       <p class="small muted">Edge: how much copying beat the S&amp;P 500 over the same days, dollar-weighted, pulled toward zero for short records so a few lucky buys can't top the list. Hit rate: share of buys that beat it. Speed: median days to report (same day full marks, 60 days or more none). Track record: 100 buys or more full marks. Past results don't predict future ones. Not investment advice.</p>`;
     bindPeriod(app);
     const MEDAL = ["#c9a227", "#9aa4ae", "#b0763c"];
@@ -1355,6 +1355,11 @@
     else if (page === "signals") pageSignals();
     else if (page === "drops") pageDrops();
     else pageHome();
+    // the page's period and its other main choices stay in a bar under the top bar while scrolling
+    const sb = $("#subbar"), row = $(".sub-row", sb), tb = $(".toolbar.pin-top", app), h1t = $("h1", app);
+    row.innerHTML = "";
+    if (tb) { row.insertAdjacentHTML("beforeend", `<span class="sb-title">${esc(h1t ? h1t.textContent : "")}</span>`); row.appendChild(tb); }
+    sb.hidden = !tb; fitSubbar();
     const h1 = $("h1", app);
     if (h1 && !["signals", "drops"].includes(page)) {
       const strip = document.createElement("div"); strip.innerHTML = filterStrip();
@@ -1364,6 +1369,9 @@
     }
     setTimeout(() => { const t = $("h1", app); document.title = t && page ? `${t.textContent} · Congress Trade Check` : "Congress Trade Check"; }, 0);
   }
+  // the bar sits right under the top bar where that stays put (wide screens); on phones it sticks to the top itself
+  function fitSubbar() { const top = $("header.top"); document.documentElement.style.setProperty("--toph", getComputedStyle(top).position === "sticky" ? `${top.offsetHeight}px` : "0px"); }
+  window.addEventListener("resize", fitSubbar, { passive: true });
   window.addEventListener("hashchange", () => route());
   $("#theme").addEventListener("click", () => {
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
