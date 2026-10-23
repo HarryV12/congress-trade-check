@@ -919,7 +919,6 @@
     const cardHtml = (g, i) => `<div class="rcard" data-i="${i}" style="--c:${g.col}">${logoBox(g.tk || "$", g.col, 40, true)}<div class="rc-txt">
         ${g.href ? `<a class="rc-name" href="${g.href}">${esc(g.name)}</a>` : `<span class="rc-name">${esc(g.name)}</span>`}
         <span class="rc-amt">${usd(g.v)}${g.chg == null ? "" : `<span class="rc-chg ${cls(g.chg)}" title="Today's price against their average buy">${g.chg >= 0 ? "▲" : "▼"} ${Math.abs(g.chg * 100).toFixed(1)}%</span>`}</span>
-        <span class="rc-meta">${g.nb} buy${g.nb === 1 ? "" : "s"} · ${Math.round(g.v / tot * 100)}% of the total</span>
         <span class="rc-tags">${g.sold >= 500 ? `<span class="rc-tag sold">${usd(g.sold)} sold${g.sold > g.v ? " · more than bought" : ""}</span>` : ""}${g.held === "sold out" ? `<span class="rc-tag sold">Sold out</span>` : g.held && g.held !== "unknown" ? `<span class="rc-tag held">${g.held} still held</span>` : ""}</span></div></div>`;
     const D = wide ? Math.min(400, W - 2 * Math.min(320, W * 0.3) - 60) : Math.min(300, W - 20);
     const face = `<div class="ring-face ${esc(m.party || "I")}" style="width:${D * 0.56}px;height:${D * 0.56}px">${photo(m)}</div>`;
