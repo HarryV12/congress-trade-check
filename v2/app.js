@@ -1304,7 +1304,7 @@
 
   // ---------- Market drops: why did the market fall? ----------
   let MOVES = null;
-  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=3&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
+  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=4&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
   let dropInd = "all", dropRange = "all", thRange = "1y";
   // "what happened", in words, from the numbers: how far, over how long, what moved most
   const coName = (tk) => stocks[tk] ? cleanName(stocks[tk][0]).replace(/\s+(Sponsored|Corporation|Oyj|AG|SE)\b.*$/i, "") : tk;
@@ -1314,7 +1314,7 @@
     const up = e.themes && MOVES && MOVES.themes ? Object.entries(e.themes).filter(([, r]) => r >= 0.01).map(([k, r]) => `${MOVES.themes[k].name.toLowerCase()} (+${pctAbs(r)})`) : [];
     return `The S&amp;P 500 fell ${pctAbs(e.spy)} and the Nasdaq 100 ${pctAbs(e.qqq)} ${spanTxt(e.start, e.end)}. ${e.sectors[0] ? `${esc(e.sectors[0][0])} was hit hardest (${pct(e.sectors[0][1])}).` : ""} ${e.big.length ? `Among big companies, ${e.big.slice(0, 3).map(([tk, r]) => `${esc(coName(tk))} (${pct(r, 0)})`).join(", ")} fell most.` : ""}${up.length ? ` Not everything fell: ${up.join(", ")} rose.` : ""}`;
   };
-  const moveWhat = (t, e) => `${esc(t.name)} ${e.dir === "up" ? "jumped" : "fell"} ${pctAbs(e.move)} ${spanTxt(e.start, e.end)}, while the S&amp;P 500 ${e.spy >= 0 ? "rose" : "fell"} ${pctAbs(e.spy)}. ${e.most.length ? `${e.most.slice(0, 3).map(([tk, r]) => `${esc(coName(tk))} (${pct(r, 0)})`).join(", ")} moved most.` : ""}`;  // the market or industry, and the chart's time span, chosen on Market drops
+  const moveWhat = (t, e) => `${esc(t.name)} ${e.dir === "up" ? (Math.abs(e.move) >= 0.05 ? "jumped" : "rose") : "fell"} ${pctAbs(e.move)} ${spanTxt(e.start, e.end)}, while the S&amp;P 500 ${e.spy >= 0 ? "rose" : "fell"} ${pctAbs(e.spy)}. ${e.most.length ? `${e.most.slice(0, 3).map(([tk, r]) => `${esc(coName(tk))} (${pct(r, 0)})`).join(", ")} moved most.` : ""}`;  // the market or industry, and the chart's time span, chosen on Market drops
   async function pageDrops() {
     setNav("drops");
     app.innerHTML = `<h1>Why did the market drop?</h1><p class="loading">Loading…</p>`;
@@ -1554,7 +1554,7 @@
       return `<div class="ana-box"><h5>Independent analysis <span class="muted small">what caused it, step by step, with the numbers from the price data</span></h5><ul>${out.map((o) => `<li>${o}</li>`).join("")}</ul></div>`;
     };
     const fillAnalysis = (root) => $$("[data-ana]", root).forEach((el) => {
-      const [key, k] = el.dataset.ana.split("|"), e = key === "all" ? eps[+k] : TH[key].events[+k];
+      const [key, k] = el.dataset.ana.split("|"), e = key === "all" ? eps[+k] : k === "now" ? TH[key].now : TH[key].events[+k];
       if (e) el.innerHTML = anaHtml(key, e);
     });
     fillAnalysis(app);
@@ -1577,6 +1577,14 @@
         axis += `<line x1="${xx}" x2="${xx}" y1="${Ht - 36}" y2="${Ht - 32}" stroke="var(--line-strong)"/>${label ? `<text x="${xx}" y="${Ht - 20}" font-size="10" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], { month: "short" })}</text>` : ""}${jan ? `<text x="${xx}" y="${Ht - 4}" font-size="12" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${dates[i].slice(0, 4)}</text>` : ""}`;
       }
       const ev = t.events.filter((e) => e.end >= dates[i0]);
+      // this week, always shown first, whether or not the move was sharp
+      const nw = t.now ? { ...t.now, dir: t.now.move >= 0 ? "up" : "down", why: [] } : null;
+      if (nw) t.now.dir = nw.dir;
+      const nowCard = nw ? `<div class="thmove thnow ${nw.dir}"><div class="tm-head"><span class="tm-big ${cls(nw.move)}">${nw.dir === "up" ? "▲" : "▼"} ${pct(nw.move, 1).replace(/^[+−]/, "")}</span>
+          <span><b>This week · ${fmtDate(nw.start, { day: "numeric", month: "short" })} – ${fmtDate(nw.end, { day: "numeric", month: "short", year: "numeric" })}</b><br><span class="muted small">S&amp;P 500 ${pct(nw.spy)} · past month ${esc(t.name)} ${pct(nw.month)}</span></span></div>
+          <div class="bigfalls">${nw.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 1)}</b></a>`).join("")}</div>
+          <div class="why-sum small"><p><b>What happened:</b> ${moveWhat(t, nw)}</p>${nw.summary ? `<p><b>Why:</b> ${esc(nw.summary)}</p>` : ""}<div class="ana" data-ana="${key}|now"></div></div>
+          ${nw.what.length ? `<details class="srcs"><summary>Sources: ${nw.what.length} news articles</summary><ul>${nw.what.map(hl).join("")}</ul></details>` : ""}</div>` : "";
       $("#thBody").innerHTML = `<div class="toolbar"><div class="seg" role="group" aria-label="Industry period">${TH_SPANS.map(([v, l]) => `<button type="button" data-tr="${v}" aria-pressed="${v === thRange}">${l}</button>`).join("")}</div>
           <span class="count">${esc(t.name)} ${pct(vb[n])} · S&amp;P 500 ${pct(vs[n])} over this period</span></div>
         <div class="grid cols-2">
@@ -1591,6 +1599,8 @@
           <path d="${path(vb)}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>
           <line class="cx" x1="0" x2="0" y1="14" y2="${Ht - 36}" stroke="var(--ink-2)" stroke-dasharray="3 3" visibility="hidden"/><circle class="cdot" r="4" fill="var(--chart)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`, `${t.name} against the S&P 500`)}<div class="tip" hidden></div></div>
         <div class="legend small"><span><i class="sw" style="background:var(--chart)"></i>${esc(t.name)} basket</span><span><i class="sw" style="background:#eb6834"></i>S&amp;P 500</span><span><i class="sw" style="background:var(--good)"></i>sharp jump</span><span><i class="sw" style="background:var(--bad)"></i>sharp fall</span><span class="tks">${t.tickers.map((x2) => tkLink(x2)).join(" ")}</span></div>
+        ${nowCard}
+        <h4 class="th-sub">Sharp moves in this period</h4>
         <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}" id="thm-${k}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
             <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
           <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 0)}</b></a>`).join("")}</div>
