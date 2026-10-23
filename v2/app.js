@@ -995,7 +995,7 @@
 
   function drawRing(el, items, m) {
     const W = el.clientWidth || 900, wide = W >= 760, tot = items.reduce((a, g) => a + g.v, 0) || 1;
-    const cardHtml = (g, i) => `<div class="rcard" data-i="${i}" style="--c:${g.soft}">${logoBox(g.tk || g.badge, g.col, 40, !g.brand, g.brand)}<div class="rc-txt">
+    const cardHtml = (g, i) => `<div class="rcard" data-i="${i}" style="--c:${g.soft}">${logoBox(g.tk || g.badge, g.col, 40, !g.brand, g.brand || (g.tk ? null : ["", null, null, g.badge]))}<div class="rc-txt">
         ${g.href ? `<a class="rc-name" href="${g.href}">${esc(g.name)}</a>` : `<span class="rc-name">${esc(g.name)}</span>`}
         <span class="rc-amt">${usd(g.v)}${g.chg == null ? "" : `<span class="rc-chg ${cls(g.chg)}" title="Today's price against their average buy">${g.chg >= 0 ? "▲" : "▼"} ${Math.abs(g.chg * 100).toFixed(1)}%</span>`}</span>
         <span class="rc-tags">${g.sold >= 500 ? `<span class="rc-tag sold">${usd(g.sold)} sold${g.sold > g.v ? " · more than bought" : ""}</span>` : ""}${g.held === "sold out" ? `<span class="rc-tag sold">Sold out</span>` : g.held && g.held !== "unknown" ? `<span class="rc-tag held">${g.held} still held</span>` : ""}</span></div></div>`;
