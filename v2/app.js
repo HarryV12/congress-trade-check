@@ -1527,18 +1527,48 @@
           ${["up", "down"].map((d) => { const list = ev.filter((e) => e.dir === d);
             return `<div class="mini"><span class="lbl">Sharp ${d === "up" ? "jumps" : "falls"}</span><b class="${d}">${list.length}</b><span class="muted small">5 days ${d} ${Math.round(t.cut * 100)}% or more${list[0] ? ` · latest ${fmtDate(list[0].start)}` : " in this period"}</span>
               <span class="mdates">${list.map((e) => `<span class="mdate ${d}" title="${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""}: ${esc(t.name)} ${pct(e.move)}, S&amp;P 500 ${pct(e.spy)}">${fmtDate(e.start, { day: "numeric", month: "short", year: "2-digit" })} <b>${pct(e.move, 0)}</b></span>`).join("")}</span></div>`; }).join("")}</div>
-        <div class="chart">${svgBox(Wt, Ht, `
+        <div class="chart" id="thChart">${svgBox(Wt, Ht, `
           ${[lo2, 0, hi2].map((v) => `<line x1="10" x2="${Wt - 60}" y1="${Yt(v).toFixed(1)}" y2="${Yt(v).toFixed(1)}" stroke="var(--line)"/><text x="${Wt - 54}" y="${(Yt(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">${pct(v, 0)}</text>`).join("")}
           ${axis}
           ${ev.map((e) => { const a1 = Math.max(0, (at(e.start) ?? 0) - 1), b1 = at(e.end) ?? n; return `<rect x="${Xt(a1).toFixed(1)}" y="14" width="${Math.max(4, Xt(b1) - Xt(a1)).toFixed(1)}" height="${Ht - 50}" fill="${e.dir === "up" ? "var(--good)" : "var(--bad)"}" fill-opacity=".22"><title>${fmtDate(e.start)}: ${esc(t.name)} ${pct(e.move)} (S&P ${pct(e.spy)})</title></rect>`; }).join("")}
           <path d="${path(vs)}" fill="none" stroke="#eb6834" stroke-width="1.6" stroke-dasharray="5 4"/>
-          <path d="${path(vb)}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>`, `${t.name} against the S&P 500`)}</div>
+          <path d="${path(vb)}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>
+          <line class="cx" x1="0" x2="0" y1="14" y2="${Ht - 36}" stroke="var(--ink-2)" stroke-dasharray="3 3" visibility="hidden"/><circle class="cdot" r="4" fill="var(--chart)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`, `${t.name} against the S&P 500`)}<div class="tip" hidden></div></div>
         <div class="legend small"><span><i class="sw" style="background:var(--chart)"></i>${esc(t.name)} basket</span><span><i class="sw" style="background:#eb6834"></i>S&amp;P 500</span><span><i class="sw" style="background:var(--good)"></i>sharp jump</span><span><i class="sw" style="background:var(--bad)"></i>sharp fall</span><span class="tks">${t.tickers.map((x2) => tkLink(x2)).join(" ")}</span></div>
-        <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
+        <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}" id="thm-${k}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
             <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
           <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 0)}</b></a>`).join("")}</div>
           ${e.what.length ? `<h4>What happened</h4><ul>${e.what.slice(0, 3).map(hl).join("")}</ul>` : ""}${e.why.length ? `<h4>Why</h4><ul>${e.why.slice(0, 3).map(hl).join("")}</ul>` : ""}</div>`).join("") || `<p class="muted">No sharp moves in this period.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
       const older = $("#thOlder"); if (older) older.addEventListener("click", () => showTheme(key, true));
+      // hover anywhere on the chart: that day's move, the week's, the S&P 500, the stocks that moved most that day,
+      // and, inside a shaded band, that jump or fall with its first headline; click a band to read it below
+      const chEl = $("#thChart"), svg = $("svg", chEl), tip = $(".tip", chEl), cx = $(".cx", chEl), dot = $(".cdot", chEl);
+      const dchg = (arr, i, k = 1) => arr[i] && arr[i - k] ? arr[i] / arr[i - k] - 1 : null;
+      const evAt = (i) => ev.find((e) => { const a1 = (at(e.start) ?? 0) - 1, b1 = at(e.end) ?? n; return i >= a1 && i <= b1; });
+      const pos = (ev2) => { const r = svg.getBoundingClientRect(), xx = ((ev2.touches ? ev2.touches[0].clientX : ev2.clientX) - r.left) / r.width * Wt; return Math.max(0, Math.min(n, Math.round((xx - 10) / (Wt - 70) * n))); };
+      const move = (ev2) => {
+        const k = pos(ev2), i = i0 + k, r = svg.getBoundingClientRect(), e = evAt(k);
+        cx.setAttribute("x1", Xt(k)); cx.setAttribute("x2", Xt(k)); cx.setAttribute("visibility", "visible");
+        dot.setAttribute("cx", Xt(k)); dot.setAttribute("cy", Yt(vb[k])); dot.setAttribute("visibility", "visible");
+        const movers = t.tickers.map((tk) => [tk, dchg(P.px[tk] || [], i)]).filter((m) => m[1] != null).sort((a2, b2) => Math.abs(b2[1]) - Math.abs(a2[1])).slice(0, 3);
+        tip.innerHTML = `<div class="muted">${fmtDate(dates[i], { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</div>
+          <div>${esc(t.name)} <b class="${cls(dchg(x, i))}">${pct(dchg(x, i))}</b> that day · <b class="${cls(dchg(x, i, 5))}">${pct(dchg(x, i, 5))}</b> that week</div>
+          <div class="small">S&amp;P 500 ${pct(dchg(spy, i))} that day · ${pct(vb[k])} for the basket since the start of this period</div>
+          ${movers.length ? `<div class="small">Moved most: ${movers.map(([tk, m]) => `<b>${esc(tk)}</b> <span class="${cls(m)}">${pct(m)}</span>`).join(" · ")}</div>` : ""}
+          ${e ? `<div class="tip-ev ${e.dir}"><b>${e.dir === "up" ? "▲ Sharp jump" : "▼ Sharp fall"} ${pct(e.move)}</b> · ${fmtDate(e.start, { day: "numeric", month: "short" })}${e.end !== e.start ? `–${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""} · S&amp;P ${pct(e.spy)}
+            ${e.what[0] ? `<div class="small" style="white-space:normal">${esc(e.what[0].title)} <span class="muted">${esc(e.what[0].source)}</span></div>` : ""}${e.why[0] ? `<div class="small" style="white-space:normal"><span class="muted">Why:</span> ${esc(e.why[0].title)}</div>` : ""}<div class="small muted">click to read more below</div></div>` : ""}`;
+        tip.hidden = false;
+        const left = Xt(k) / Wt * r.width, tw = tip.offsetWidth;
+        tip.style.left = `${Math.max(0, Math.min(r.width - tw, left + (left > r.width / 2 ? -tw - 14 : 14)))}px`; tip.style.top = "6px";
+        svg.style.cursor = e ? "pointer" : "";
+      };
+      svg.addEventListener("mousemove", move); svg.addEventListener("touchstart", move, { passive: true }); svg.addEventListener("touchmove", move, { passive: true });
+      svg.addEventListener("mouseleave", () => { tip.hidden = true; cx.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); });
+      svg.addEventListener("click", (ev2) => {
+        const e = evAt(pos(ev2)); if (!e) return;
+        const k = ev.indexOf(e); if (!every && k >= 6) { showTheme(key, true); }
+        const el = $(`#thm-${k}`); if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1600); }
+      });
       $$("[data-tr]").forEach((b) => b.addEventListener("click", () => { thRange = b.dataset.tr; showTheme(key); }));
     };
     const choose = (key) => {

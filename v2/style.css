@@ -398,3 +398,6 @@ h2.section { margin-bottom: 0; }
 .mdate.up { background: var(--good-soft); } .mdate.down { background: var(--bad-soft); }
 .mdate b { font-family: var(--font-mono); } .mdate.up b { color: var(--good); } .mdate.down b { color: var(--bad); }
 .mini .mdate b { font: 700 11px var(--font-mono); }
+.tip-ev { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); max-width: 340px; } .tip-ev.up > b { color: var(--good); } .tip-ev.down > b { color: var(--bad); }
+#thChart .tip { max-width: 360px; white-space: normal; z-index: 5; }
+.thmove.flash { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .3s; }
