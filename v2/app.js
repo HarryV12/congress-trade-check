@@ -1382,7 +1382,6 @@
             <div class="dblock"><h4>Hardest-hit sectors</h4>${bars(e.sectors.map(([s2, r]) => [esc(s2), r]), mx)}</div>
             ${thr.length ? `<div class="dblock"><h4>By industry</h4>${bars(thr, tmx, true)}</div>` : ""}
             <div class="dblock"><h4>Big companies that fell most</h4><div class="bigfalls">${e.big.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 28) : ""}<span class="tk">${esc(tk)}</span><b class="down">${pct(r, 0)}</b></a>`).join("")}</div></div>
-            ${before(e)}
           </div>
           ${e.what.length || e.why.length ? `<details class="srcs"><summary>Sources: ${e.what.length + e.why.length} news articles</summary><div class="news2"><div><h3>That week</h3><ul>${e.what.map(hl).join("")}</ul></div>
             ${e.why.length ? `<div><h3>The week after</h3><ul>${e.why.map(hl).join("")}</ul></div>` : ""}</div></details>` : ""}</div>`;
