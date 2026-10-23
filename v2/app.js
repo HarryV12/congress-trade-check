@@ -1374,9 +1374,9 @@
     app.innerHTML = `<h1>Why did the market drop?</h1>
       <p class="lede">Every sharp fall in the S&amp;P 500 and Nasdaq 100 since ${fmtDate(D.start, { month: "short", year: "numeric" })}: how far it fell, what fell most, how long it took to win back, and the headlines that day and the week after.</p>
       <div class="toolbar pin-top"><div class="seg" role="group" aria-label="Market or industry"><button type="button" data-ind="all">Whole market</button>${TH ? Object.entries(TH).map(([k, t]) => `<button type="button" data-ind="${k}">${esc(t.name)}</button>`).join("") : ""}</div></div>
+      ${TH ? `<div class="card th-top"><h2 id="thTitle">By industry</h2><div id="thBody"></div></div>` : ""}
       <div class="grid cols-4" id="nowCards"></div>
       <div id="recentCards"></div>
-      ${TH ? `<div class="card section"><h2 id="thTitle">By industry</h2><div id="thBody"></div></div>` : ""}
       <div class="card section"><h2>The S&amp;P 500, every drop and jump <span class="muted">red above: drops · green below: jumps · darker, bigger move · hover for what happened, click a drop to read it</span></h2>
         <div class="toolbar"><div class="seg" role="group" aria-label="Chart period">${[["1w", "1 week"], ["1m", "1 month"], ["3m", "3 months"], ["6m", "6 months"], ["1y", "1 year"], ["all", `Since ${D.start.slice(0, 4)}`]].map(([v, l]) => `<button type="button" data-cr="${v}" aria-pressed="${v === dropRange}">${l}</button>`).join("")}</div></div>
         <div class="chart" id="dropChart"></div>
