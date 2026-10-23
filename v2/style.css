@@ -419,3 +419,5 @@ details.srcs > summary:hover { color: var(--accent); } details.srcs .news2 { mar
 .ana-box > summary:hover b { color: var(--accent); }
 .ana-box ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
 .ana-box li { line-height: 1.5; }
+.ana-box h5 { margin: 0; font-size: 14px; } .ana-box h5 .muted { font-weight: 500; }
+.ana-box .arrow { color: var(--accent); font-weight: 700; }

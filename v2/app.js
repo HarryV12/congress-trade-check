@@ -1304,7 +1304,7 @@
 
   // ---------- Market drops: why did the market fall? ----------
   let MOVES = null;
-  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
+  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=3&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
   let dropInd = "all", dropRange = "all", thRange = "1y";
   // "what happened", in words, from the numbers: how far, over how long, what moved most
   const coName = (tk) => stocks[tk] ? cleanName(stocks[tk][0]).replace(/\s+(Sponsored|Corporation|Oyj|AG|SE)\b.*$/i, "") : tk;
@@ -1531,12 +1531,7 @@
       const isAll = key === "all", x = isAll ? spy : seriesOf(key), ia = di.get(e.start), ib = di.get(e.end);
       if (ia == null || ib == null || ia < 2) return "";
       const a0 = ia - 1, days = ib - a0, move = x[ib] / x[a0] - 1, spyMove = spy[ib] / spy[a0] - 1, name = isAll ? "the S&amp;P 500" : esc(TH[key].name);
-      const out = [];
-      // 1. how unusual
-      const sg = sd5(key, x), z = Math.abs(move) / (sg * Math.sqrt(Math.max(1, days) / 5));
-      const pool = isAll ? eps.map((d) => d.spy) : TH[key].events.filter((d) => d.dir === e.dir).map((d) => d.move);
-      const asBig = pool.filter((r) => Math.abs(r) >= Math.abs(move) - 1e-9).length;
-      out.push(`<b>How unusual:</b> a ${pct(move)} move over ${days} trading day${days === 1 ? "" : "s"} is ${z.toFixed(1)}× ${name}${/s$/.test(name) ? "'" : "'s"} typical swing for that length of time (a normal week moves about ±${pctAbs(sg)}). ${asBig <= 1 ? `It was the biggest such ${e.dir === "up" ? "jump" : "fall"} since ${D.start.slice(0, 4)}.` : `${asBig - 1} other${asBig - 1 === 1 ? "" : "s"} since ${D.start.slice(0, 4)} ${asBig - 1 === 1 ? "was" : "were"} as big or bigger.`}`);
+      const out = (e.detail || []).map((d) => esc(d).replace(/ → /g, ' <span class="arrow">→</span> '));
       // 2. the whole market, or this industry?
       if (isAll) {
         const each = sp500.map((tk) => mv(tk, a0, ib)).filter((r) => r != null), down = each.filter((r) => r < 0).length, avg = each.reduce((a, r) => a + r, 0) / (each.length || 1);
@@ -1549,27 +1544,15 @@
       // 3. what came before
       const pre = a0 >= 63 && x[a0 - 63] ? x[a0] / x[a0 - 63] - 1 : null;
       let hi = 0; for (let i = Math.max(0, a0 - 252); i <= a0; i++) if (x[i] > hi) hi = x[i];
-      if (pre != null) out.push(`<b>Before it:</b> ${name} had ${pre >= 0 ? "gained" : "lost"} ${pctAbs(pre)} in the three months before and was ${pctAbs(x[a0] / hi - 1)} below its 1-year high. ${e.dir !== "up" && pre > 0.15 ? "A fall after a big run-up often includes profit-taking, not only bad news." : e.dir === "up" && pre < -0.1 ? "A jump after a slump is often a rebound as sellers run out." : ""}`);
+      if (pre != null) out.push(`<b>What came before:</b> ${name} had ${pre >= 0 ? "gained" : "lost"} ${pctAbs(pre)} in the three months before and was ${pctAbs(x[a0] / hi - 1)} below its 1-year high. ${e.dir !== "up" && pre > 0.15 ? "A fall after a big run-up often includes profit-taking, not only bad news." : e.dir === "up" && pre < -0.1 ? "A jump after a slump is often a rebound as sellers run out." : ""}`);
       // 4. other markets over the same days
       const cross = [["TLT", "long-term Treasury bonds", (r) => r < -0.01 ? " (yields rose)" : r > 0.01 ? " (yields fell)" : ""], ["HYG", "high-yield corporate bonds", (r) => r < -0.015 ? " (credit worries)" : ""], ["GLD", "gold", () => ""], ["XLE", "energy stocks", () => ""], ...(isAll ? [["IWM", "small companies", () => ""]] : [])]
         .map(([tk, nm, note]) => { const r = mv(tk, a0, ib); return r == null ? null : `${nm} ${pct(r)}${note(r)}`; }).filter(Boolean);
-      if (cross.length) {
+      if (cross.length && !(e.detail || []).length) {  // the written points already cover other markets
         const tlt = mv("TLT", a0, ib);
         out.push(`<b>Other markets, same days:</b> ${cross.join(", ")}. ${tlt != null && tlt < -0.015 && move < 0 ? "Falling bond prices mean rising interest rates, which weigh most on expensive growth stocks." : tlt != null && tlt > 0.015 && move < 0 ? "Investors moved into safe government bonds: a flight to safety." : ""}`);
       }
-      // 5. what happened next
-      if (ib + 5 <= L) {
-        const k20 = Math.min(L, ib + 20), after = x[k20] / x[ib] - 1, back = x[k20] >= x[a0];
-        out.push(`<b>Afterwards:</b> ${k20 - ib} trading days after the ${e.dir === "up" ? "peak" : "low"}, ${name} was ${pct(after)} from it${e.dir !== "up" ? (back ? ", already back above where the fall began" : `, still ${pctAbs(x[k20] / x[a0] - 1)} below where the fall began`) : (x[k20] < x[a0] ? ", giving the whole jump back" : "")}.`);
-      } else out.push(`<b>Afterwards:</b> too recent to say.`);
-      // 6. members of Congress beforehand
-      const tks = new Set(isAll ? e.big.map((b) => b[0]) : TH[key].tickers), t0 = Date.parse(e.start + "T00:00:00Z");
-      const L30 = trades.filter((t) => tks.has(t.t) && t.time < t0 && t.time >= t0 - 30 * DAY && t.side !== "O" && !isBiz(members[t.m]));
-      if (L30.length) {
-        const b = L30.filter((t) => t.side === "B"), sl = L30.filter((t) => t.side === "S");
-        out.push(`<b>Congress beforehand:</b> in the 30 days before, ${((n3) => `${n3} member${n3 === 1 ? "" : "s"} and official${n3 === 1 ? "" : "s"}`)(new Set(L30.map((t) => t.m)).size)} bought ${b.length ? usd(est(b).best) : "$0"} and sold ${sl.length ? usd(est(sl).best) : "$0"} of ${isAll ? "the companies that then fell most" : "these stocks"} (${b.length} buy${b.length === 1 ? "" : "s"}, ${sl.length} sale${sl.length === 1 ? "" : "s"}).`);
-      }
-      return `<details class="ana-box"${isAll ? " open" : ""}><summary><b>Independent analysis</b> <span class="muted small">from the price data, not the news</span></summary><ul>${out.map((o) => `<li>${o}</li>`).join("")}</ul></details>`;
+      return `<div class="ana-box"><h5>Independent analysis <span class="muted small">what caused it, step by step, with the numbers from the price data</span></h5><ul>${out.map((o) => `<li>${o}</li>`).join("")}</ul></div>`;
     };
     const fillAnalysis = (root) => $$("[data-ana]", root).forEach((el) => {
       const [key, k] = el.dataset.ana.split("|"), e = key === "all" ? eps[+k] : TH[key].events[+k];
