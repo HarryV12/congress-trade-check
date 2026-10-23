@@ -154,6 +154,15 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .logo b { font-family: var(--font-mono); font-weight: 700; color: #fff; }
 .logo .ms { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; width: 52%; height: 52%; } .logo .ms i { display: block; }
 .sig { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px; white-space: nowrap; cursor: help; }
+button.sig { border: 0; font-family: inherit; cursor: pointer; } button.sig:hover, button.sig:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+.whys { display: grid; gap: 3px; } .why { font-size: 12px; line-height: 1.35; } .why.pos { color: var(--good); } .why.neg { color: var(--bad); }
+.hpop { position: fixed; z-index: 60; width: min(380px, calc(100vw - 16px)); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .18); font-size: 13px; }
+.hp-head { display: grid; gap: 2px; margin-bottom: 8px; }
+.hp-score { display: flex; align-items: center; justify-content: space-between; } .hp-score b { font: 800 24px var(--font-mono); }
+.hp-bar { height: 6px; border-radius: 3px; background: var(--chip); margin: 6px 0 10px; overflow: hidden; } .hp-bar i { display: block; height: 100%; background: var(--accent); }
+.hpop ul { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 5px; }
+.hpop li { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; } .hpop li .mono { font-weight: 700; text-align: right; }
+.hpop li.pos .mono { color: var(--good); } .hpop li.neg .mono { color: var(--bad); } .hpop p { margin: 0; }
 .sig.s1 { background: var(--chip); color: var(--muted); } .sig.s2 { background: var(--accent-soft); color: var(--accent); } .sig.s3 { background: var(--good-soft); color: var(--good); }
 .small { font-size: 13px; } .ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }

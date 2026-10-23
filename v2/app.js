@@ -43,6 +43,7 @@
       T: { r: r[F.r], sr: r[F.sr], ep: r[F.ep], se: r[F.se], ew: r[F.ew], xw: r[F.xw] }, P: { r: r[F.rf], sr: r[F.srf], ep: r[F.epf], se: r[F.sef], ew: r[F.efw], xw: r[F.xfw] },
       ep: r[F.ep], delay: r[F.fd] ? Math.round((Date.parse(r[F.fd] + "T00:00:00Z") - Date.parse(r[F.d] + "T00:00:00Z")) / DAY) : null };
   });
+  trades.forEach((t, i) => { t.id = i; });
   const eff = (t, r) => r == null ? null : (t.opt === "P" ? -r : r);  // a put gains when the stock falls
   const est = (list) => {  // best estimate, its likely range (7 times in 10) and the filings' own bounds
     let best = 0, v = 0, min = 0, max = 0;
@@ -108,10 +109,11 @@
     CMCSA: ["#6138F5", "nbc"], T: ["#00A8E0", "att"], VZ: ["#CD040B", "verizon"], BA: ["#0D2D6C", "boeing"], GS: ["#6B9BD1", "goldmansachs"],
     BAC: ["#E31837", "bankofamerica"], WFC: ["#D71E28", "wellsfargo"], PFE: ["#0093D0", "pfizer"], CVX: ["#0054A4", "chevron"],
   };
-  const PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#e87ba4", "#6f4cc3", "#d4a017", "#2bb3c0", "#c0392b", "#5b8c2a", "#8e96a3"];
-  const logoBox = (tk, col, size = 34) => {
-    const b = BRAND[tk], bg = b ? (b[2] || b[0]) : col;
-    if (b && b[1] === "ms") return `<span class="logo" style="width:${size}px;height:${size}px;background:#fff;border:1px solid var(--line)"><span class="ms"><i style="background:#F25022"></i><i style="background:#7FBA00"></i><i style="background:#00A4EF"></i><i style="background:#FFB900"></i></span></span>`;
+  // muted, clearly different colours for the slices of a breakdown (the Biggest buys ring)
+  const MUTED = ["#5b7fa6", "#c28a52", "#6b9e78", "#b0697a", "#8576b0", "#a99a4c", "#4f9a9c", "#a5725e", "#7d8c55", "#9a6a99", "#6a8fbd", "#8e9198"];
+  const logoBox = (tk, col, size = 34, own = false) => {  // own: use col as the background, not the brand colour
+    const b = BRAND[tk], bg = own ? col : b ? (b[2] || b[0]) : col;
+    if (b && b[1] === "ms" && !own) return `<span class="logo" style="width:${size}px;height:${size}px;background:#fff;border:1px solid var(--line)"><span class="ms"><i style="background:#F25022"></i><i style="background:#7FBA00"></i><i style="background:#00A4EF"></i><i style="background:#FFB900"></i></span></span>`;
     if (b && b[1]) return `<span class="logo" style="width:${size}px;height:${size}px;background:${bg}"><img src="https://cdn.jsdelivr.net/npm/simple-icons@11.14.0/icons/${b[1]}.svg" alt="" loading="lazy"></span>`;
     return `<span class="logo" style="width:${size}px;height:${size}px;background:${bg}"><b style="font-size:${size * ((tk || "").length > 3 ? 0.3 : 0.38)}px">${esc((tk || "•").slice(0, 4))}</b></span>`;
   };
@@ -279,28 +281,128 @@
   const leftText = (L) => L == null ? `<span class="muted" title="Only sales are on file: shares bought before ${fmtDate(D.start, { month: "short", year: "numeric" })} aren't known">unknown</span>` : L.value < 1000 ? `<span class="down">sold out</span>` : `≈${usd(L.value)}${L.annual ? ` <span class="muted" title="Counted from their annual report's year-end holdings">◆</span>` : ""}`;
   const leftPlain = (L) => L == null ? "unknown" : L.value < 1000 ? "sold out" : `≈${usd(L.value)}`;
 
-  // ---------- hype check: does a buy mean much? ----------
-  // A tiny buy in a basket of twenty is a weak signal however it's shared online. Each buy gets a strength from what's
-  // public: its size, its size against the person's usual trade, how many other stocks they bought the same week,
-  // and whether other members were buying too.
+  // ---------- hype check: how much does a buy mean? ----------
+  // A politician's buy gets shared online as a tip, but many are tiny buys in a basket of twenty placed by an account
+  // manager. Each buy starts at 50% and each public fact moves it up or down: its size and its size against the
+  // person's usual trade, whether it was bought alone or in a basket (and alongside lots of sales: a rebalance),
+  // whether they kept adding to it or sold it soon after, other members buying, their committee, the account, the
+  // company's size, the price run before the buy, how late it was filed, their own track record, and (once the
+  // Public signals data has loaded) the company's insiders buying and federal contracts.
   const usualSize = new Map();
   { const by = new Map(); for (const t of trades) if (t.lo) { if (!by.has(t.m)) by.set(t.m, []); by.get(t.m).push(t.amt); }
     for (const [m, v] of by) { v.sort((a, b) => a - b); usualSize.set(m, v[Math.floor(v.length / 2)]); } }
-  const weekBuys = new Map();  // "m|week" -> different stocks bought that week
-  for (const t of trades) if (t.side === "B" && t.t) { const k = t.m + "|" + Math.floor(t.time / (7 * DAY)); if (!weekBuys.has(k)) weekBuys.set(k, new Set()); weekBuys.get(k).add(t.t); }
-  function hype(t) {
-    if (!t || t.side !== "B") return null;
-    const why = [], usual = usualSize.get(t.m) || t.amt, basket = (weekBuys.get(t.m + "|" + Math.floor(t.time / (7 * DAY))) || new Set()).size;
-    let s = 0;
-    if (t.amt < 16000) why.push(`small: ${rangeText(t)}, the lowest bracket`); else if (t.amt >= 250000) { s += 2; why.push(`large: ${rangeText(t)}`); } else s += 1;
-    if (t.amt >= usual * 3) { s += 1; why.push(`${(t.amt / usual).toFixed(1)}× their usual trade`); } else if (t.amt <= usual) why.push("no bigger than their usual trade");
-    if (basket >= 10) { s -= 1; why.push(`one of ${basket} stocks they bought that week (looks like a managed account or rebalance)`); } else if (basket <= 2) { s += 1; why.push("bought on its own, not in a basket"); }
-    if (t.spike) { s += 1; why.push(`${t.spike.k} members bought it within a month`); }
-    if (t.own === "DC") why.push("in a child's account");
-    const level = s >= 3 ? 3 : s >= 1 ? 2 : 1;
-    return { level, label: ["", "Weak signal", "Some signal", "Strong signal"][level], why };
+  const wk = (t) => t.m + "|" + Math.floor(t.time / (7 * DAY));
+  const weekBuys = new Map(), weekSells = new Map(), byMT = new Map();  // stocks bought / sold that week; a person's trades in a stock
+  for (const t of trades) {
+    if (!t.t) continue;
+    const w = t.side === "B" ? weekBuys : t.side === "S" ? weekSells : null;
+    if (w) { const k = wk(t); if (!w.has(k)) w.set(k, new Set()); w.get(k).add(t.t); }
+    const k2 = t.m + "|" + t.t; if (!byMT.has(k2)) byMT.set(k2, []); byMT.get(k2).push(t);
   }
-  const hypeTag = (h) => h ? `<span class="sig s${h.level}" title="${esc(h.why.join(" · "))}">${h.label}</span>` : "";
+  for (const l of byMT.values()) l.sort((a, b) => a.time - b.time);
+  const record = new Map();  // each person's stock buys against the S&P 500, from the trade date
+  { const by = new Map(); for (const t of trades) if (t.side === "B" && securities(t)) { if (!by.has(t.m)) by.set(t.m, []); by.get(t.m).push(t); }
+    for (const [m, l] of by) record.set(m, stats(l, "T")); }
+  const hypeCache = new Map();
+  function hype(t) {
+    if (!t || t.side !== "B" || !t.t || !stocks[t.t]) return null;
+    if (hypeCache.has(t.id)) return hypeCache.get(t.id);
+    const f = [], add = (v, txt) => f.push({ v, txt });
+    const st = stocks[t.t], usual = usualSize.get(t.m) || t.amt, basket = (weekBuys.get(wk(t)) || new Set()).size, sold = (weekSells.get(wk(t)) || new Set()).size;
+    // size
+    if (t.amt < 16000) add(-12, `Small: ${rangeText(t)}, the lowest bracket on the form`);
+    else if (t.amt < 50001) add(-3, `Modest: ${rangeText(t)}`);
+    else if (t.amt < 250001) add(6, `Sizeable: ${rangeText(t)}`);
+    else if (t.amt < 1000001) add(12, `Large: ${rangeText(t)}`);
+    else add(18, `Very large: ${rangeText(t)}`);
+    const x = t.amt / usual;
+    if (x >= 5) add(12, `${x.toFixed(0)}× their usual trade (${usd(usual)})`);
+    else if (x >= 2) add(6, `${x.toFixed(1)}× their usual trade (${usd(usual)})`);
+    else if (x <= 0.5) add(-5, `Smaller than their usual trade (${usd(usual)})`);
+    // basket or rebalance
+    if (basket >= 15) add(-18, `One of ${basket} stocks they bought that week: looks like a managed account`);
+    else if (basket >= 8) add(-10, `One of ${basket} stocks they bought that week`);
+    else if (basket <= 2) add(6, "Bought on its own, not in a basket");
+    if (sold >= 5) add(-8, `They also sold ${sold} other stocks that week: looks like rebalancing`);
+    // the person's history in this stock
+    const mine = byMT.get(t.m + "|" + t.t) || [], before = mine.filter((u) => u.time < t.time), after = mine.filter((u) => u.time > t.time);
+    const buyDays = new Set(mine.filter((u) => u.side === "B").map((u) => u.d.slice(0, 7))).size;
+    const soonSale = after.find((u) => u.side === "S" && u.time - t.time <= 90 * DAY);
+    if (soonSale) add(-15, `Sold ${t.t} again ${Math.round((soonSale.time - t.time) / DAY)} days later`);
+    else if (buyDays >= 3) add(6, `Kept adding: bought ${t.t} in ${buyDays} different months`);
+    else if (!before.length) add(4, "A new position for them");
+    const L = leftOf(t.m, t.t);
+    if (L && L.value >= 1000 && !soonSale) add(3, `Still holds about ${usd(L.value)}`);
+    // others and the committee
+    if (t.spike) add(10, `${t.spike.k} members bought it within a month (usually ${t.spike.usual < 1 ? "under 1" : t.spike.usual.toFixed(1)} a month)`);
+    if (t.c && t.c.length) add(8, `Their committee oversees this industry (${esc(cname(t.c[0]))})`);
+    // the account
+    if (t.own === "DC") add(-6, "In a child's account");
+    else if (t.own === "SP") add(-1, "In their spouse's account");
+    else if (!ownUnknown(t) && (t.own || "self") === "self") add(2, "In their own account");
+    // the security and the company
+    if (t.cls === "fund") add(-15, "A fund or ETF: a broad bet, not a pick");
+    else if (st[4] >= 200e9) add(-8, `Mega-cap (${usd(st[4])}): one of the most widely held stocks`);
+    else if (st[4] && st[4] < 2e9) add(6, `Small company (${usd(st[4])}): less followed by the market`);
+    if (t.cls === "option" && t.opt === "C") add(8, "Call options: a leveraged bet the price will rise");
+    // the price run before the buy
+    const s = SERIES[t.t], w0 = t.T.ew;
+    if (s && w0 != null && w0 >= 4 && s[w0] && s[w0 - 4]) {
+      const run = s[w0] / s[w0 - 4] - 1;
+      if (run >= 0.2) add(-5, `Bought after a ${pct(run, 0)} run in the month before: following the crowd`);
+      else if (run <= -0.15) add(3, `Bought after a ${pct(run, 0)} fall in the month before`);
+    }
+    // timing of the filing
+    if (t.delay > 45) add(-4, `Filed ${t.delay} days later, after the 45-day deadline: much of any move is already gone`);
+    else if (t.delay != null && t.delay <= 10) add(3, `Filed quickly, ${t.delay} days after the trade`);
+    // their record
+    const r = record.get(t.m);
+    if (r && r.n >= 20 && r.diff != null) {
+      if (r.diff >= 0.05) add(6, `Their buys have beaten the S&P 500 by ${pct(r.diff)} (${r.n} buys)`);
+      else if (r.diff <= -0.05) add(-6, `Their buys have trailed the S&P 500 by ${pct(r.diff)} (${r.n} buys)`);
+    }
+    // the company's own insiders and government contracts (Public signals data)
+    const g = SIG_BY && SIG_BY.get(t.t);
+    if (g && g.insiders) add(8, `The company's own insiders bought ${usd(g.insider_value)} in the last ${SIGNALS.insider_days} days`);
+    if (g && g.contracts > 1e6) add(3, `${usd(g.contracts)} in federal contracts in the last ${SIGNALS.contract_days} days`);
+    const score = Math.max(0, Math.min(100, Math.round(50 + f.reduce((a, b) => a + b.v, 0))));
+    const level = score >= 65 ? 3 : score >= 40 ? 2 : 1;
+    const h = { score, level, label: ["", "Weak", "Some", "Strong"][level], f: f.sort((a, b) => Math.abs(b.v) - Math.abs(a.v)) };
+    if (SIG_BY) hypeCache.set(t.id, h);
+    return h;
+  }
+  let SIG_BY = null;
+  const hypeTag = (t) => { const h = hype(t); return h ? `<button type="button" class="sig s${h.level}" data-hype="${t.id}" aria-label="Signal ${h.score}%, show why">${h.label} · ${h.score}%</button>` : ""; };
+  const hypeReasons = (h, n = 3) => h.f.slice(0, n).map((x) => `<span class="why ${x.v > 0 ? "pos" : "neg"}">${x.v > 0 ? "+" : "−"} ${x.txt}</span>`).join("");
+  // the breakdown opens beside a signal tag on hover, and stays open on click or tap
+  (function hypePopover() {
+    const pop = document.createElement("div"); pop.className = "hpop"; pop.hidden = true; pop.setAttribute("role", "dialog"); document.body.appendChild(pop);
+    let pinned = null;
+    const show = (btn) => {
+      const t = trades[+btn.dataset.hype], h = hype(t); if (!h) return;
+      const m = members[t.m];
+      pop.innerHTML = `<div class="hp-head"><b>${esc(m.name)} · ${esc(t.t)}</b><span class="muted small">${fmtDate(t.d)} · ${rangeText(t)}</span></div>
+        <div class="hp-score"><span class="sig s${h.level}">${h.label} signal</span><b>${h.score}%</b></div><div class="hp-bar"><i style="width:${h.score}%"></i></div>
+        <ul>${h.f.map((x) => `<li class="${x.v > 0 ? "pos" : "neg"}"><span class="mono">${x.v > 0 ? "+" : "−"}${Math.abs(x.v)}</span>${x.txt}</li>`).join("")}</ul>
+        <p class="muted small">Starts at 50% and each fact moves it up or down. It says how much this buy is likely to mean, not whether the stock will rise.</p>`;
+      pop.hidden = false;
+      const r = btn.getBoundingClientRect(), w = pop.offsetWidth, hh = pop.offsetHeight;
+      let x = Math.min(innerWidth - w - 8, Math.max(8, r.left + r.width / 2 - w / 2)), y = r.bottom + 8;
+      if (y + hh > innerHeight - 8) y = Math.max(8, r.top - hh - 8);
+      pop.style.left = `${x}px`; pop.style.top = `${y}px`;
+    };
+    const hide = () => { pop.hidden = true; pinned = null; };
+    document.addEventListener("mouseover", (e) => { const b = e.target.closest && e.target.closest("[data-hype]"); if (b && !pinned) show(b); });
+    document.addEventListener("mouseout", (e) => { const b = e.target.closest && e.target.closest("[data-hype]"); if (b && !pinned && !(e.relatedTarget && b.contains(e.relatedTarget))) pop.hidden = true; });
+    document.addEventListener("click", (e) => {
+      const b = e.target.closest && e.target.closest("[data-hype]");
+      if (b) { e.preventDefault(); e.stopPropagation(); if (pinned === b) hide(); else { pinned = b; show(b); } return; }
+      if (pinned && !pop.contains(e.target)) hide();
+    }, true);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+    window.addEventListener("scroll", () => { if (!pop.hidden) hide(); }, { passive: true });
+    window.addEventListener("hashchange", hide);
+  })();
 
   // ---------- a sortable table with "show more" ----------
   function table(el, cols, rows, opts = {}) {
@@ -313,7 +415,7 @@
         ${list.length > shown ? `<div class="more"><button class="btn" type="button">Show more (${(list.length - shown).toLocaleString()} left)</button></div>` : ""}
         ${!list.length ? `<p class="muted">${opts.empty || "Nothing in this period."}</p>` : ""}`;
       $$("th.sort", el).forEach((th) => th.addEventListener("click", () => { if (sortKey === th.dataset.k) dir = -dir; else { sortKey = th.dataset.k; dir = -1; } draw(); }));
-      const more = $(".more button", el); if (more) more.addEventListener("click", () => { shown += 100; draw(); });
+      const more = $(".more button", el); if (more) more.addEventListener("click", () => { shown += opts.step || 100; draw(); });
       if (opts.href) $$("tr.click", el).forEach((tr) => tr.addEventListener("click", (e) => { if (!e.target.closest("a")) location.hash = tr.dataset.href; }));
     };
     draw();
@@ -528,7 +630,8 @@
         ${card("Most bought stocks", "by number of buyers", `<div id="topStocks" class="bars"></div>`)}
         ${card("Most active", "by dollars traded", `<div id="topPeople"></div>`)}
       </div>
-      <div class="section">${card("Hype check", "buys that get shared as big news but mean little", `<p class="small muted">A politician buying a stock gets shared online as a signal, but many are tiny buys in a basket of twenty or more, often placed by an account manager. These recent buys are the weakest signals. Hover a reason for more.</p><div id="hype"></div>`)}</div>
+      <div class="section">${card("Hype check", "how much recent buys really mean", `<p class="small muted">A politician buying a stock gets shared online as a tip, but many are tiny buys in a basket of twenty, placed by an account manager, or sold again weeks later. Every buy gets a signal strength out of 100%, built from about fifteen public facts: its size against their usual trade, whether it was bought alone or in a basket, whether they kept adding or sold soon after, other members buying, their committee, the company's size and its insiders, the price run before the buy, how late it was filed and their track record. Hover or tap a signal to see every reason.</p>
+        <div class="toolbar"><div class="seg" role="group" aria-label="Which buys"><button type="button" data-hy="weak" aria-pressed="true">Weakest (most overhyped)</button><button type="button" data-hy="strong" aria-pressed="false">Strongest</button></div><span class="count">buys disclosed in the last 45 days</span></div><div id="hype"></div>`)}</div>
       <div class="card section"><h2>Latest disclosures <span class="muted">newest filings first</span></h2><div id="latest"></div></div>`;
     bindPeriod(app);
     loadMoves().then((M) => {
@@ -546,13 +649,17 @@
       { key: "b", label: "Bought", cls: "r", html: (g) => `<span class="up">${g.b.length ? usd(est(g.b).best) : "–"}</span>`, sort: (g) => est(g.b).best },
       { key: "s", label: "Sold", cls: "r", html: (g) => `<span class="down">${g.s.length ? usd(est(g.s).best) : "–"}</span>`, sort: (g) => est(g.s).best },
     ], [...byM.values()].map((g) => ({ ...g, vol: est(g.b).best + est(g.s).best })).sort((a, b) => b.vol - a.vol).slice(0, 8), { page: 8 });
-    const recent = trades.filter((t) => t.side === "B" && t.fd && t.t && stocks[t.t] && !isBiz(members[t.m]) && today - t.ftime < 45 * DAY).map((t) => ({ t, h: hype(t) })).filter((x) => x.h.level === 1).sort((a, b) => b.t.ftime - a.t.ftime);
-    table($("#hype"), [
+    const recent = trades.filter((t) => t.side === "B" && t.fd && t.t && stocks[t.t] && !isBiz(members[t.m]) && today - t.ftime < 45 * DAY).map((t) => ({ t, h: hype(t) })).filter((x) => x.h);
+    const drawHype = (mode) => table($("#hype"), [
       { key: "who", label: "Person", html: (x) => who(members[x.t.m]) },
       { key: "t", label: "Stock", html: (x) => `${tkLink(x.t.t)} <span class="hide-sm">${esc(stockName(x.t))}</span>` },
       { key: "amt", label: "Amount", cls: "r", html: (x) => rangeText(x.t), sort: (x) => x.t.amt },
-      { key: "why", label: "Why it means little", cls: "hide-sm", hideSm: true, html: (x) => `<span class="small">${esc(x.h.why.join(" · "))}</span>` },
-    ], recent, { page: 8, empty: "No weak-signal buys disclosed in the last 45 days." });
+      { key: "h", label: "Signal", html: (x) => hypeTag(x.t), sort: (x) => x.h.score },
+      { key: "why", label: "Main reasons", cls: "hide-sm", hideSm: true, html: (x) => `<div class="whys">${hypeReasons(x.h)}</div>` },
+    ], recent.filter((x) => mode === "weak" ? x.h.level === 1 : x.h.level === 3).sort((a, b) => mode === "weak" ? a.h.score - b.h.score : b.h.score - a.h.score),
+    { page: 8, step: 8, empty: `No ${mode === "weak" ? "weak" : "strong"}-signal buys disclosed in the last 45 days.` });
+    drawHype("weak");
+    $$("[data-hy]").forEach((b) => b.addEventListener("click", () => { $$("[data-hy]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); drawHype(b.dataset.hy); }));
     const latest = trades.filter((t) => t.fd && t.side !== "O" && pass(t)).sort((a, b) => b.ftime - a.ftime || b.amt - a.amt).slice(0, 400);
     table($("#latest"), [
       { key: "fd", label: "Filed", cls: "num", html: (t) => fmtDate(t.fd, { day: "numeric", month: "short" }), sort: (t) => t.ftime },
@@ -560,9 +667,9 @@
       { key: "side", label: "", html: (t) => `<span class="pill ${t.side}">${t.side === "B" ? "Buy" : "Sell"}</span>` },
       { key: "t", label: "Stock", html: (t) => `${tkLink(t.t)} <span class="hide-sm">${esc(stockName(t))}</span>${t.spike ? ` <span class="sig s3" title="${t.spike.k} members bought it within a month">Spike</span>` : ""}` },
       { key: "amt", label: "Amount", cls: "r", html: (t) => rangeText(t), sort: (t) => t.amt },
-      { key: "h", label: "Signal", cls: "hide-sm", hideSm: true, html: (t) => hypeTag(hype(t)) },
+      { key: "h", label: "Signal", cls: "hide-sm", hideSm: true, html: (t) => hypeTag(t) },
       { key: "left", label: "Still holds", cls: "r hide-sm", hideSm: true, html: (t) => t.t && stocks[t.t] ? leftText(leftOf(t.m, t.t)) : "–" },
-    ], latest, { page: 25 });
+    ], latest, { page: 10, step: 10 });
   }
 
   function pagePoliticians() {
@@ -732,10 +839,10 @@
     for (const t of buys) { const k = t.t && stocks[t.t] ? t.t : t.a; const g = byH.get(k) || { k, t, b: [], s: 0 }; g.b.push(t); byH.set(k, g); }
     for (const t of sells) { const k = t.t && stocks[t.t] ? t.t : t.a; if (byH.has(k)) byH.get(k).s += t.amt; }
     const top = [...byH.values()].map((g) => ({ ...g, v: est(g.b).best })).sort((a, b) => b.v - a.v).slice(0, 12);
-    top.forEach((g, i) => { g.col = (BRAND[g.t.t] || [])[0] || PALETTE[i % PALETTE.length]; });
+    top.forEach((g, i) => { g.col = MUTED[i % MUTED.length]; });
     const tot = top.reduce((a, g) => a + g.v, 0);
     $("#ring").innerHTML = top.length ? `<div class="ring-chart">${donutSvg(top.map((g) => ({ label: g.t.t || g.k, value: g.v, color: g.col })))}<div class="ring-face ${esc(m.party || "I")}">${photo(m)}</div></div>
-      <div class="ring-list">${top.map((g) => `<div class="ring-row" style="--c:${g.col}">${logoBox(g.t.t || "", g.col)}<div class="ell"><b class="ell">${g.t.t && stocks[g.t.t] ? `<a href="#/stock/${encodeURIComponent(g.t.t)}">${esc(cleanName(stocks[g.t.t][0]))}</a>` : esc(g.k)}</b>
+      <div class="ring-list">${top.map((g) => `<div class="ring-row" style="--c:${g.col}">${logoBox(g.t.t || "", g.col, 34, true)}<div class="ell"><b class="ell">${g.t.t && stocks[g.t.t] ? `<a href="#/stock/${encodeURIComponent(g.t.t)}">${esc(cleanName(stocks[g.t.t][0]))}</a>` : esc(g.k)}</b>
         <span class="small ${g.s > g.v ? "down" : "muted"}">${g.s >= 500 ? `sold ${usd(g.s)}${g.s > g.v ? " · more than bought" : ""}` : "none sold"}${g.t.t && stocks[g.t.t] ? ` · holds ${leftPlain(leftOf(m.i, g.t.t))}` : ""}</span></div>
         <span class="mono">${usd(g.v)}<span class="muted small"> ${Math.round(g.v / tot * 100)}%</span></span></div>`).join("")}</div>` : `<p class="muted">No buys ${periodWords()}.</p>`;
 
@@ -773,7 +880,7 @@
         { key: "t", label: "Asset", html: (t) => `${t.t && stocks[t.t] ? tkLink(t.t) + " " : ""}${esc(stockName(t))}${t.cls === "option" ? ` <span class="muted">(${t.opt === "P" ? "put" : t.opt === "C" ? "call" : "option"})</span>` : ""}`, sort: (t) => t.t || t.a },
         { key: "amt", label: "Amount", cls: "r", html: (t) => rangeText(t), sort: (t) => t.amt },
         { key: "r", label: "Since trade", cls: "r hide-sm", hideSm: true, html: (t) => { const r = eff(t, t[base].r); return r == null ? "–" : `<span class="${cls(r)}">${pct(r)}</span>`; }, sort: (t) => t[base].r ?? -9 },
-        { key: "h", label: "Signal", cls: "hide-sm", hideSm: true, html: (t) => hypeTag(hype(t)) },
+        { key: "h", label: "Signal", cls: "hide-sm", hideSm: true, html: (t) => hypeTag(t), sort: (t) => (hype(t) || { score: -1 }).score },
         { key: "left", label: "Still holds", cls: "r hide-sm", hideSm: true, html: (t) => t.t && stocks[t.t] ? leftText(leftOf(t.m, t.t)) : "–" },
         { key: "fd", label: "Filed", cls: "num hide-sm", hideSm: true, html: (t) => fmtDate(t.fd), sort: (t) => t.ftime },
       ], list, { sort: "d", page: 50, empty: `No trades ${periodWords()} with this page's filter.` });
@@ -844,7 +951,7 @@
     for (const t of list) { const g = by.get(t.m) || { m: members[t.m], b: [], s: [] }; (t.side === "B" ? g.b : g.s).push(t); by.set(t.m, g); }
     const rows = [...by.values()].map((g) => {
       const pb = g.b.filter((t) => t.ep && t.amt), sh = pb.reduce((a, t) => a + t.amt / t.ep, 0);
-      const best = g.b.map(hype).filter(Boolean).sort((a, b) => b.level - a.level)[0] || null;
+      const best = g.b.filter(hype).sort((a, b) => hype(b).score - hype(a).score)[0] || null;  // their strongest buy
       return { ...g, eb: est(g.b).best, es: est(g.s).best, avg: sh ? pb.reduce((a, t) => a + t.amt, 0) / sh : null, L: leftOf(g.m.i, tk), h: best };
     });
     let hv = 0, hn = 0; for (const mi of new Set(trades.filter((t) => t.t === tk).map((t) => t.m))) { const L = leftOf(mi, tk); if (L && L.value >= 1000) { hv += L.value; hn++; } }
@@ -860,7 +967,7 @@
       { key: "avg", label: "Avg buy", cls: "r hide-sm", hideSm: true, html: (g) => g.avg ? price(g.avg) : "–", sort: (g) => g.avg || 0 },
       { key: "chg", label: "Since", cls: "r", html: (g) => g.avg && last ? `<span class="${cls(last / g.avg - 1)}">${pct(last / g.avg - 1)}</span>` : "–", sort: (g) => g.avg && last ? last / g.avg : -9 },
       { key: "left", label: "Still holds", cls: "r", html: (g) => leftText(g.L), sort: (g) => g.L ? g.L.value : -1 },
-      { key: "h", label: "Signal", cls: "hide-sm", hideSm: true, html: (g) => hypeTag(g.h), sort: (g) => g.h ? g.h.level : 0 },
+      { key: "h", label: "Best signal", cls: "hide-sm", hideSm: true, html: (g) => g.h ? hypeTag(g.h) : "", sort: (g) => g.h ? hype(g.h).score : -1 },
     ], rows, { sort: "eb", href: (g) => `#/member/${encodeURIComponent(g.m.id)}`, empty: `Nobody traded ${tk} ${periodWords()}.` });
     priceChart($("#chart"), P, tk, list);
   }
@@ -991,7 +1098,7 @@
       <div class="section card"><h2>What makes up each score <span class="muted">the 15 highest; click one for its page</span></h2><div class="legend">${PARTS.map(([, l, c]) => `<span><i class="sw" style="background:${c}"></i>${l}</span>`).join("")}</div>
         <div class="stack-rows">${top.map((r) => `<a class="stack-row" href="#/stock/${encodeURIComponent(r.t)}">${logoBox(r.t, "var(--chart)", 26)}<span class="ell small"><b>${esc(r.t)}</b> ${esc(cleanName(r.name))}</span><span class="stackbar">${PARTS.map(([k, l, c]) => (r.points[k] || 0) > 0 ? `<i style="width:${r.points[k]}%;background:${c}" title="${l}: ${Math.round(r.points[k])}%"></i>` : "").join("")}</span><b class="mono">${Math.round(r.score)}%</b></a>`).join("")}</div></div>
       <div class="grid cols-2 section">
-        ${card("Net buying vs federal contracts", "each dot a stock; bigger, higher score", `<div id="scatter"></div>`)}
+        ${card("Government contracts", `stocks members are buying that the federal government is also paying, last ${G.contract_days} days`, `<p class="small muted">Contract money awarded to each company (from USAspending.gov), and how many members bought more of it than they sold. A company winning big contracts while members on the committees that oversee it are buying is worth a closer look.</p><div id="contracts" class="bars"></div>`)}
         ${card("Lobbying spend", "the scored stocks that lobby most", `<div id="lobby" class="bars"></div>`)}
       </div>
       <div class="grid cols-2 section">
@@ -1003,14 +1110,8 @@
         ${card("Named in leaders' posts", `last ${G.leader_days} days`, `<div id="posts"></div>`)}
       </div>
       <div class="card section"><h2>Every scored stock</h2><div id="tbl"></div></div>`;
-    const pts = rows.slice(0, 60), W = 560, H = 300, Lm = 46, Rm = 14, Tm = 14, Bm = 36;
-    const cmax = Math.max(1, ...pts.map((r) => r.contracts || 0)), lx = (v) => v > 0 ? Math.log10(v) : 0, x0 = 5, x1 = Math.max(x0 + 1, lx(cmax));
-    const vmax = Math.max(1, ...pts.map((r) => Math.abs(r.vote || 0)));
-    const X = (r) => Lm + (Math.max(x0, lx(r.contracts || 0)) - x0) / (x1 - x0) * (W - Lm - Rm), Y = (r) => Tm + (vmax - (r.vote || 0)) / (2 * vmax) * (H - Tm - Bm);
-    $("#scatter").innerHTML = svgBox(W, H, `<line x1="${Lm}" x2="${W - Rm}" y1="${Tm + (H - Tm - Bm) / 2}" y2="${Tm + (H - Tm - Bm) / 2}" stroke="var(--line-strong)"/>
-      <text x="${Lm}" y="${H - 8}" font-size="12" fill="var(--muted)">no contracts</text><text x="${W - Rm}" y="${H - 8}" font-size="12" fill="var(--muted)" text-anchor="end">${usd(cmax)} in contracts →</text>
-      <text x="6" y="${Tm + 10}" font-size="12" fill="var(--muted)">net buying ↑</text><text x="6" y="${H - Bm - 4}" font-size="12" fill="var(--muted)">net selling ↓</text>
-      ${pts.map((r) => `<a href="#/stock/${encodeURIComponent(r.t)}"><circle cx="${X(r).toFixed(1)}" cy="${Y(r).toFixed(1)}" r="${(4 + r.score / 12).toFixed(1)}" fill="var(--chart)" fill-opacity=".5" stroke="var(--surface)"><title>${esc(r.t)} · score ${Math.round(r.score)}% · contracts ${usd(r.contracts || 0)} · ${r.members} net buyers</title></circle>${r.score >= 55 ? `<text x="${(X(r) + 9).toFixed(1)}" y="${(Y(r) + 4).toFixed(1)}" font-size="11" fill="var(--ink-2)" font-family="var(--font-mono)">${esc(r.t)}</text>` : ""}</a>`).join("")}`, "Net buying against federal contracts");
+    const con = rows.filter((r) => r.contracts > 0).sort((a, b) => b.contracts - a.contracts).slice(0, 10), cmx = con[0] ? con[0].contracts : 1;
+    $("#contracts").innerHTML = con.length ? con.map((r) => `<div class="bar-row"><span class="ell">${tkLink(r.t)} ${esc(cleanName(r.name))}</span><span class="mono muted">${usd(r.contracts)} · ${r.members} net buyer${r.members === 1 ? "" : "s"}</span><div class="track"><div class="fill" style="width:${Math.max(1, r.contracts / cmx * 100).toFixed(1)}%;background:#0e8a9c"></div></div></div>`).join("") : `<p class="muted">None of the scored stocks won federal contracts in the last ${G.contract_days} days.</p>`;
     const lob = rows.filter((r) => r.lobbying > 0).sort((a, b) => b.lobbying - a.lobbying).slice(0, 10), lmx = lob[0] ? lob[0].lobbying : 1;
     $("#lobby").innerHTML = lob.map((r) => `<div class="bar-row"><span class="ell">${tkLink(r.t)} <span class="muted small">${esc((r.issues || []).slice(0, 2).join(", "))}</span></span><span class="mono muted">${usd(r.lobbying)}</span><div class="track"><div class="fill" style="width:${(r.lobbying / lmx * 100).toFixed(1)}%;background:#d9480f"></div></div></div>`).join("") || `<p class="muted">None.</p>`;
     const ins = rows.filter((r) => r.insiders).sort((a, b) => b.insider_value - a.insider_value);
@@ -1106,4 +1207,6 @@
   updateFilterBadge();
   bindSearch();
   route();
+  // the hype check also uses Public signals (company insiders, federal contracts): redraw once it has loaded
+  loadSignals().then((G) => { SIG_BY = new Map(((G && G.stocks) || []).map((r) => [r.t, r])); hypeCache.clear(); if ($("[data-hype]", app)) route(true); });
 })();
