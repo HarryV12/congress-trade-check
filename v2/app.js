@@ -1305,7 +1305,7 @@
   // ---------- Market drops: why did the market fall? ----------
   let MOVES = null;
   const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
-  let dropInd = "all", dropRange = "all";  // the market or industry, and the chart's time span, chosen on Market drops
+  let dropInd = "all", dropRange = "all", thRange = "1y";  // the market or industry, and the chart's time span, chosen on Market drops
   async function pageDrops() {
     setNav("drops");
     app.innerHTML = `<h1>Why did the market drop?</h1><p class="loading">Loading…</p>`;
@@ -1354,16 +1354,16 @@
       <p class="lede">Every sharp fall in the S&amp;P 500 and Nasdaq 100 since ${fmtDate(D.start, { month: "short", year: "numeric" })}: how far it fell, what fell most, how long it took to win back, and the headlines that day and the week after.</p>
       <div class="toolbar pin-top"><div class="seg" role="group" aria-label="Market or industry"><button type="button" data-ind="all">Whole market</button>${TH ? Object.entries(TH).map(([k, t]) => `<button type="button" data-ind="${k}">${esc(t.name)}</button>`).join("") : ""}</div></div>
       <div class="grid cols-4" id="nowCards"></div>
+      ${TH ? `<div class="card section"><h2 id="thTitle">By industry</h2><div id="thBody"></div></div>` : ""}
       <div class="card section"><h2>The S&amp;P 500, every drop and jump <span class="muted">red above: drops · green below: jumps · darker, bigger move · hover for what happened, click a drop to read it</span></h2>
         <div class="toolbar"><div class="seg" role="group" aria-label="Chart period">${[["1w", "1 week"], ["1m", "1 month"], ["3m", "3 months"], ["6m", "6 months"], ["1y", "1 year"], ["all", `Since ${D.start.slice(0, 4)}`]].map(([v, l]) => `<button type="button" data-cr="${v}" aria-pressed="${v === dropRange}">${l}</button>`).join("")}</div></div>
         <div class="chart" id="dropChart"></div>
         ${open.length ? `<p class="small"><b class="down">Not yet won back:</b> ${open.map((e) => `${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })} (${pct(e.spy)})`).join(" · ")}</p>` : ""}</div>
-      ${TH ? `<div class="card section"><h2 id="thTitle">By industry</h2><div id="thBody"></div></div>` : ""}
       <h2 class="section">Every market drop</h2>
       <div class="drops">${eps.map((e, k) => {
         const idx = [["S&amp;P 500", e.spy], ["Nasdaq 100", e.qqq], ...(e.dia != null ? [["Dow", e.dia]] : [])], mx = Math.max(...idx.map((x) => Math.abs(x[1] || 0)), ...e.sectors.map((x) => Math.abs(x[1])), 0.01);
         const thr = e.themes && TH ? Object.entries(e.themes).map(([kk, r]) => [esc(TH[kk].name), r]) : [], tmx = Math.max(0.01, ...thr.map((x) => Math.abs(x[1])));
-        return `<div class="card drop${k === 0 ? " latest" : ""}" id="drop-${k}">
+        return `<div class="card drop${k === 0 ? " latest" : ""}" id="drop-${k}"${k >= 3 ? " hidden" : ""}>
           <div class="drop-top"><div><span class="muted small">${k === 0 ? "Latest · " : ""}${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""} · ${e.days} trading day${e.days === 1 ? "" : "s"}</span>
             <h2>S&amp;P 500 <span class="down">${pct(e.spy)}</span> <span class="muted small">Nasdaq ${pct(e.qqq)}</span></h2></div>
             <span class="rec ${e.recover == null ? "open" : ""}">${e.level ? e.recover == null ? "Not yet recovered" : `Recovered in ${e.recover} days` : ""}</span></div>
@@ -1377,6 +1377,7 @@
           <div class="news2"><div><h3>What happened</h3><ul>${e.what.map(hl).join("") || `<li class="muted">No headlines found.</li>`}</ul></div>
             ${e.why.length ? `<div><h3>Why: the week after</h3><ul>${e.why.map(hl).join("")}</ul></div>` : ""}</div></div>`;
       }).join("") || `<p class="muted">No market drop data yet.</p>`}</div>
+      ${eps.length > 3 ? `<div class="more"><button type="button" class="btn" id="moreDrops">Show ${eps.length - 3} more drops</button></div>` : ""}
       <div class="grid cols-2 section">
         ${card("How to read a drop", "", `<p class="small">The day's headlines say <i>what</i> fell. The <i>why</i> usually takes a few days: analysts' notes, earnings calls and data releases explain it in the week after, so each drop has both. A drop that is mostly one industry (semiconductors, say) is usually news about that industry; one that hits everything is usually rates, data, policy or a shock like a war.</p>`)}
         ${card("What professional investors watch", "", `<ul class="plain small">
@@ -1450,11 +1451,13 @@
           tip.style.left = `${Math.max(0, Math.min(r.width - tw, left + (left > r.width / 2 ? -tw - 12 : 12)))}px`; tip.style.top = "20px";
         });
         g.addEventListener("mouseleave", () => { tip.hidden = true; });
-        g.addEventListener("click", () => { const el = $(`#drop-${k}`); if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1600); } });
+        g.addEventListener("click", () => { const el = $(`#drop-${k}`); if (el) { if (el.hidden) showAllDrops(); el.scrollIntoView({ behavior: "smooth", block: "start" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1600); } });
       });
     };
     drawMain();
     $$("[data-cr]").forEach((b) => b.addEventListener("click", () => { dropRange = b.dataset.cr; $$("[data-cr]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); drawMain(); }));
+    const showAllDrops = () => { $$(".drops > .drop[hidden]").forEach((d) => { d.hidden = false; }); const b = $("#moreDrops"); if (b) b.parentElement.remove(); };
+    if ($("#moreDrops")) $("#moreDrops").addEventListener("click", showAllDrops);
     // where things stand now, for the whole market or one industry: today's move, how far below the year's high, the
     // latest drop so far, and when past drops this deep were won back (an estimate from history, not a forecast)
     const L = dates.length - 1, qqq = P ? P.px.QQQ : [], chg = (x, i, k = 1) => x[i] && x[i - k] ? x[i] / x[i - k] - 1 : null;
@@ -1500,32 +1503,43 @@
       $$("[data-go]").forEach((b) => b.addEventListener("click", () => choose(b.dataset.go)));
     };
     if (!TH) { drawNow("all"); return; }
-    // one industry: its basket against the S&P 500, its sharp moves marked, then each move as a card
-    const showTheme = (key, every = false) => {  // every: every move, not just the newest six
-      const t = TH[key], ser = t.series, n = ser.length, Wt = 1000, Ht = 240, base = ser[0][1];
-      const sp0 = spy[di.get(ser[0][0])] || null, vals2 = ser.map((x) => x[1] / base - 1), spv = ser.map((x) => { const i = di.get(x[0]); return sp0 && i != null && spy[i] ? spy[i] / sp0 - 1 : null; });
-      const all = [...vals2, ...spv.filter((v) => v != null)], lo2 = Math.min(0, ...all), hi2 = Math.max(0, ...all), pad = (hi2 - lo2) * 0.08 || 0.05;
-      const Xt = (i) => 10 + i / (n - 1) * (Wt - 70), Yt = (v) => 12 + (hi2 + pad - v) / (hi2 - lo2 + 2 * pad) * (Ht - 42);
-      const path = (vs) => { let d = "", on = false; vs.forEach((v, i) => { if (v == null) { on = false; return; } d += `${on ? "L" : "M"}${Xt(i).toFixed(1)},${Yt(v).toFixed(1)}`; on = true; }); return d; };
-      const near = (d) => { const i = ser.findIndex((x) => x[0] >= d); return i < 0 ? n - 1 : i; };
-      const yrs2 = []; for (let i = 1; i < n; i++) if (ser[i][0].slice(0, 4) !== ser[i - 1][0].slice(0, 4)) yrs2.push(i);
-      const ev = t.events, ups = ev.filter((e) => e.dir === "up").length;
-      $("#thBody").innerHTML = `<div class="grid cols-2">
+    // one industry over its own period: its basket against the S&P 500 day by day, its sharp moves marked, how many
+    // there were and when, then each move as a card (newest six first)
+    const TH_SPANS = [["1m", "1 month", 21], ["3m", "3 months", 63], ["6m", "6 months", 126], ["1y", "1 year", 252], ["all", `Since ${D.start.slice(0, 4)}`, 0]];
+    const showTheme = (key, every = false) => {  // every: every move in the period, not just the newest six
+      const t = TH[key], x = seriesOf(key), Ld = dates.length - 1, span = (TH_SPANS.find((r) => r[0] === thRange) || TH_SPANS[4])[2];
+      const i0 = span ? Math.max(1, Ld - span) : 0, Wt = 1000, Ht = 250, n = Ld - i0;
+      const vb = x.slice(i0).map((v) => v / x[i0] - 1), vs = spy.slice(i0).map((v) => v && spy[i0] ? v / spy[i0] - 1 : null);
+      const allv = [...vb, ...vs.filter((v) => v != null)], lo2 = Math.min(0, ...allv), hi2 = Math.max(0, ...allv), pad = (hi2 - lo2) * 0.08 || 0.02;
+      const Xt = (i) => 10 + i / Math.max(1, n) * (Wt - 70), Yt = (v) => 14 + (hi2 + pad - v) / (hi2 - lo2 + 2 * pad) * (Ht - 50);
+      const path = (v) => { let d = "", on = false; v.forEach((y, i) => { if (y == null) { on = false; return; } d += `${on ? "L" : "M"}${Xt(i).toFixed(1)},${Yt(y).toFixed(1)}`; on = true; }); return d; };
+      const at = (d) => { const i = di.get(d); return i == null ? null : i - i0; };
+      let axis = "";
+      for (let i = i0 + 1; i <= Ld; i++) {
+        if (dates[i].slice(0, 7) === dates[i - 1].slice(0, 7)) continue;
+        const jan = dates[i].slice(5, 7) === "01", xx = Xt(i - i0).toFixed(1), label = n <= 260 || +dates[i].slice(5, 7) % 2 === 1;
+        axis += `<line x1="${xx}" x2="${xx}" y1="${Ht - 36}" y2="${Ht - 32}" stroke="var(--line-strong)"/>${label ? `<text x="${xx}" y="${Ht - 20}" font-size="10" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], { month: "short" })}</text>` : ""}${jan ? `<text x="${xx}" y="${Ht - 4}" font-size="12" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${dates[i].slice(0, 4)}</text>` : ""}`;
+      }
+      const ev = t.events.filter((e) => e.end >= dates[i0]);
+      $("#thBody").innerHTML = `<div class="toolbar"><div class="seg" role="group" aria-label="Industry period">${TH_SPANS.map(([v, l]) => `<button type="button" data-tr="${v}" aria-pressed="${v === thRange}">${l}</button>`).join("")}</div>
+          <span class="count">${esc(t.name)} ${pct(vb[n])} · S&amp;P 500 ${pct(vs[n])} over this period</span></div>
+        <div class="grid cols-2">
           ${["up", "down"].map((d) => { const list = ev.filter((e) => e.dir === d);
-            return `<div class="mini"><span class="lbl">Sharp ${d === "up" ? "jumps" : "falls"}</span><b class="${d}">${list.length}</b><span class="muted small">5 days ${d} ${Math.round(t.cut * 100)}% or more${list[0] ? ` · latest ${fmtDate(list[0].start)}` : ""}</span>
+            return `<div class="mini"><span class="lbl">Sharp ${d === "up" ? "jumps" : "falls"}</span><b class="${d}">${list.length}</b><span class="muted small">5 days ${d} ${Math.round(t.cut * 100)}% or more${list[0] ? ` · latest ${fmtDate(list[0].start)}` : " in this period"}</span>
               <span class="mdates">${list.map((e) => `<span class="mdate ${d}" title="${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""}: ${esc(t.name)} ${pct(e.move)}, S&amp;P 500 ${pct(e.spy)}">${fmtDate(e.start, { day: "numeric", month: "short", year: "2-digit" })} <b>${pct(e.move, 0)}</b></span>`).join("")}</span></div>`; }).join("")}</div>
         <div class="chart">${svgBox(Wt, Ht, `
           ${[lo2, 0, hi2].map((v) => `<line x1="10" x2="${Wt - 60}" y1="${Yt(v).toFixed(1)}" y2="${Yt(v).toFixed(1)}" stroke="var(--line)"/><text x="${Wt - 54}" y="${(Yt(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">${pct(v, 0)}</text>`).join("")}
-          ${yrs2.map((i) => `<text x="${Xt(i).toFixed(1)}" y="${Ht - 8}" font-size="12" fill="var(--muted)" text-anchor="middle">${ser[i][0].slice(0, 4)}</text>`).join("")}
-          ${ev.map((e) => { const a = near(e.start), b = near(e.end); return `<rect x="${Xt(a).toFixed(1)}" y="12" width="${Math.max(4, Xt(b) - Xt(a)).toFixed(1)}" height="${Ht - 42}" fill="${e.dir === "up" ? "var(--good)" : "var(--bad)"}" fill-opacity=".22"><title>${fmtDate(e.start)}: ${esc(t.name)} ${pct(e.move)} (S&P ${pct(e.spy)})</title></rect>`; }).join("")}
-          <path d="${path(spv)}" fill="none" stroke="#eb6834" stroke-width="1.6" stroke-dasharray="5 4"/>
-          <path d="${path(vals2)}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>`, `${t.name} against the S&P 500`)}</div>
-        <div class="legend small"><span><i class="sw" style="background:var(--chart)"></i>${esc(t.name)} basket</span><span><i class="sw" style="background:#eb6834"></i>S&amp;P 500</span><span><i class="sw" style="background:var(--good)"></i>sharp jump</span><span><i class="sw" style="background:var(--bad)"></i>sharp fall</span><span class="tks">${t.tickers.map((x) => tkLink(x)).join(" ")}</span></div>
+          ${axis}
+          ${ev.map((e) => { const a1 = Math.max(0, (at(e.start) ?? 0) - 1), b1 = at(e.end) ?? n; return `<rect x="${Xt(a1).toFixed(1)}" y="14" width="${Math.max(4, Xt(b1) - Xt(a1)).toFixed(1)}" height="${Ht - 50}" fill="${e.dir === "up" ? "var(--good)" : "var(--bad)"}" fill-opacity=".22"><title>${fmtDate(e.start)}: ${esc(t.name)} ${pct(e.move)} (S&P ${pct(e.spy)})</title></rect>`; }).join("")}
+          <path d="${path(vs)}" fill="none" stroke="#eb6834" stroke-width="1.6" stroke-dasharray="5 4"/>
+          <path d="${path(vb)}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>`, `${t.name} against the S&P 500`)}</div>
+        <div class="legend small"><span><i class="sw" style="background:var(--chart)"></i>${esc(t.name)} basket</span><span><i class="sw" style="background:#eb6834"></i>S&amp;P 500</span><span><i class="sw" style="background:var(--good)"></i>sharp jump</span><span><i class="sw" style="background:var(--bad)"></i>sharp fall</span><span class="tks">${t.tickers.map((x2) => tkLink(x2)).join(" ")}</span></div>
         <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
             <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
           <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 0)}</b></a>`).join("")}</div>
-          ${e.what.length ? `<h4>What happened</h4><ul>${e.what.slice(0, 3).map(hl).join("")}</ul>` : ""}${e.why.length ? `<h4>Why</h4><ul>${e.why.slice(0, 3).map(hl).join("")}</ul>` : ""}</div>`).join("") || `<p class="muted">No sharp moves since ${fmtDate(D.start, { month: "short", year: "numeric" })}.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
+          ${e.what.length ? `<h4>What happened</h4><ul>${e.what.slice(0, 3).map(hl).join("")}</ul>` : ""}${e.why.length ? `<h4>Why</h4><ul>${e.why.slice(0, 3).map(hl).join("")}</ul>` : ""}</div>`).join("") || `<p class="muted">No sharp moves in this period.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
       const older = $("#thOlder"); if (older) older.addEventListener("click", () => showTheme(key, true));
+      $$("[data-tr]").forEach((b) => b.addEventListener("click", () => { thRange = b.dataset.tr; showTheme(key); }));
     };
     const choose = (key) => {
       dropInd = key; $$("[data-ind]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.ind === key)));
