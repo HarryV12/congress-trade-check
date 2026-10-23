@@ -121,13 +121,14 @@
   };
 
   // ---------- the Filter: the same settings as the classic site, saved in the same place (so both sites share them) ----------
-  const FDEF = { chamber: "all", committee: "all", owner: "all", timing: "trade", hideBig: true, sp500: true, capMax: "0", exclude: "NVDA, AAPL, GOOGL",
+  const FDEF = { chamber: "all", committee: "all", owner: "all", timing: "trade", hideBig: true, sp500: true, capMax: "0", exclude: "",
     committeeOnly: true, lateOnly: false, options: true, spikes: true };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem("ctc-state") || "{}") || {}; } catch (e) { /* storage blocked */ }
   const S = { ...FDEF, ...Object.fromEntries(Object.keys(FDEF).filter((k) => k in saved).map((k) => [k, saved[k]])) };
   if (S.committee !== "all" && !D.committees[S.committee]) S.committee = "all";
-  const saveFilter = () => { try { const cur = JSON.parse(localStorage.getItem("ctc-state") || "{}") || {}; localStorage.setItem("ctc-state", JSON.stringify({ ...cur, ...S, v: Math.max(cur.v || 0, 13) })); } catch (e) { /* storage blocked */ } };
+  if (!(saved.v >= 14) && /^\s*NVDA,\s*AAPL,\s*GOOGL\s*$/i.test(S.exclude || "")) S.exclude = "";  // the old default list is cleared
+  const saveFilter = () => { try { const cur = JSON.parse(localStorage.getItem("ctc-state") || "{}") || {}; localStorage.setItem("ctc-state", JSON.stringify({ ...cur, ...S, v: Math.max(cur.v || 0, 14) })); } catch (e) { /* storage blocked */ } };
   let excl = new Set();
   const applyFilterSettings = () => { excl = new Set(String(S.exclude || "").toUpperCase().split(/[\s,;]+/).filter(Boolean)); };
   applyFilterSettings();

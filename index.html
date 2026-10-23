@@ -1323,8 +1323,8 @@ if (location.hostname === "harryv12.github.io") {
   // ---------- state ----------
   const defaults = { members: [], committee: "all", chamber: "all", ticker: "", timing: "trade", owner: "all",
     feedSide: "all", feedDays: "30", feedKept: false, range: "all", hideBig: true, sp500: true, capMax: "0",
-    exclude: "NVDA, AAPL, GOOGL", committeeOnly: true, lateOnly: false, options: true, crypto: true, side: "all", view: "kept",
-    leaderSort: "ret", leaderDir: -1, tradeSort: "d", tradeDir: -1, units: "pct", spikes: true, v: 13,
+    exclude: "", committeeOnly: true, lateOnly: false, options: true, crypto: true, side: "all", view: "kept",
+    leaderSort: "ret", leaderDir: -1, tradeSort: "d", tradeDir: -1, units: "pct", spikes: true, v: 14,
     lines: { kept: true, spy: true, inv: true, every: true, big: true } };
   const postDefaults = { style: "chart", who: "all", trade: "", filing: "", ticker: "", member: "", committee: "", window: "182", sells: true, side: "B", days: "30", sort: "amt", kept: false, noBig: false, debt: "all", hby: "member", bby: "member", bond: "", theme: "light", pv: 11 };
   let S = { ...defaults }, P = { ...postDefaults };
@@ -1342,6 +1342,8 @@ if (location.hostname === "harryv12.github.io") {
     if (!(saved.v >= 12)) { S.lines = { ...defaults.lines }; S.v = 12; }
     // v13: Account starts on All (own, spouse, children and joint accounts)
     if (!(saved.v >= 13)) { S.owner = "all"; S.v = 13; }
+    // v14: nothing is always excluded by default (the old default list NVDA, AAPL, GOOGL is cleared)
+    if (!(saved.v >= 14)) { if (/^\s*NVDA,\s*AAPL,\s*GOOGL\s*$/i.test(S.exclude || "")) S.exclude = ""; S.v = 14; }
     delete S.member;
     const savedPost = JSON.parse(localStorage.getItem("ctc-post") || "{}");
     // earlier versions had three post types
