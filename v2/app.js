@@ -1308,21 +1308,85 @@
   async function pageDrops() {
     setNav("drops");
     app.innerHTML = `<h1>Why did the market drop?</h1><p class="loading">Loading…</p>`;
-    const M = await loadMoves(); if (location.hash !== "#/drops") return;
-    const eps = (M && M.episodes) || [];
+    const [M, P] = await Promise.all([loadMoves(), loadPrices()]); if (location.hash !== "#/drops") return;
+    const eps = (M && M.episodes) || [], TH = M && M.themes;
     const hl = (it) => `<li><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a> <span class="muted small">${esc(it.source)} · ${fmtDate(it.date, { day: "numeric", month: "short" })}</span></li>`;
-    const before = (e) => {  // members' sales of the hardest-hit stocks in the 30 days before the drop
+    // the S&P 500 day by day, and how long each drop took to win back
+    const dates = P ? P.dates : [], spy = P ? P.px.SPY : [], di = new Map(dates.map((d, i) => [d, i]));
+    for (const e of eps) {
+      const a = di.get(e.start), b = di.get(e.end);
+      if (a == null || b == null || !spy[a - 1]) continue;
+      e.ia = a; e.ib = b; e.level = spy[a - 1];
+      let r = null; for (let i = b + 1; i < dates.length; i++) if (spy[i] >= e.level) { r = i; break; }
+      e.recover = r == null ? null : Math.round((Date.parse(dates[r]) - Date.parse(e.start)) / DAY);
+    }
+    // members who sold the hardest-hit stocks in the 30 days before: faces and what they sold
+    const before = (e) => {
       const tks = new Set(e.big.map((b) => b[0])), a = Date.parse(e.start + "T00:00:00Z");
       const L = trades.filter((t) => t.side === "S" && tks.has(t.t) && t.time < a && t.time >= a - 30 * DAY && !isBiz(members[t.m]));
       const u = [...new Map(L.map((t) => [t.m + t.t, t])).values()];
-      return u.length ? `<div class="small"><b>Sold by members in the 30 days before:</b> ${u.slice(0, 6).map((t) => `${esc(members[t.m].name)} (${tkLink(t.t)} ${rangeText(t)})`).join(", ")}${u.length > 6 ? ` and ${u.length - 6} more` : ""}</div>` : "";
+      return u.length ? `<div class="dblock"><h4>Sold by members in the 30 days before</h4><div class="sellers">${u.slice(0, 8).map((t) => `<a class="seller" href="#/member/${encodeURIComponent(members[t.m].id)}" title="${esc(members[t.m].name)} sold ${esc(t.t)} ${esc(rangeText(t))} on ${fmtDate(t.d)}"><span class="who ${esc(members[t.m].party || "I")}">${photo(members[t.m])}</span><span class="tk">${esc(t.t)}</span></a>`).join("")}${u.length > 8 ? `<span class="muted small">+${u.length - 8}</span>` : ""}</div></div>` : "";
     };
-    const W = 1000, H = 170, spyv = D.spy.filter((v) => v != null), lo = Math.min(...spyv), hi = Math.max(...spyv), X = (i) => 8 + i / (NW - 1) * (W - 16), Y = (v) => 8 + (hi - v) / (hi - lo) * (H - 30);
-    const spyLine = D.spy.map((v, i) => v == null ? "" : `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+    // a row of bars: label, bar, value (falls in red; with mid set, falls go left and rises right)
+    const bars = (rows, max, diverging = false) => rows.map(([label, r]) => {
+      const w = Math.min(100, Math.abs(r) / (max || 1) * 100);
+      return `<div class="dbar${diverging ? " div" : ""}"><span class="dl">${label}</span><span class="dt">${diverging ? `<i class="${r < 0 ? "neg" : "pos"}" style="width:${(w / 2).toFixed(1)}%"></i>` : `<i class="${r < 0 ? "neg" : "pos"}" style="width:${w.toFixed(1)}%"></i>`}</span><b class="${cls(r)}">${pct(r, 1)}</b></div>`;
+    }).join("");
+
+    // headline numbers
+    const worst = eps.reduce((m, e) => !m || e.spy < m.spy ? e : m, null), recs = eps.map((e) => e.recover).filter((x) => x != null).sort((a, b) => a - b);
+    const open = eps.filter((e) => e.level && e.recover == null);
+    // the chart: the S&P 500 every day, each drop shaded and labelled with its fall; hover for its story, click to jump to it
+    const Wc = 1000, Hc = 300, i0 = 0, i1 = dates.length - 1, vals = spy.filter((v) => v != null), lo = Math.min(...vals) * 0.97, hi = Math.max(...vals) * 1.01;
+    const Xc = (i) => 10 + (i - i0) / (i1 - i0) * (Wc - 70), Yc = (v) => 22 + (hi - v) / (hi - lo) * (Hc - 52);
+    const line = spy.map((v, i) => v == null ? "" : `${i ? "L" : "M"}${Xc(i).toFixed(1)},${Yc(v).toFixed(1)}`).join("");
+    const yrs = []; for (let i = 1; i < dates.length; i++) if (dates[i].slice(0, 4) !== dates[i - 1].slice(0, 4)) yrs.push(i);
+    const ticks = [0, 1, 2, 3].map((k) => lo + (hi - lo) * k / 3);
+    const sev = (r) => r <= -0.05 ? 0.42 : r <= -0.03 ? 0.3 : 0.18;
+    let lastLbl = -1e9;
+    const shaded = eps.filter((e) => e.ia != null).sort((a, b) => a.ia - b.ia).map((e) => {
+      const x = Xc(e.ia - 1), w = Math.max(4, Xc(e.ib) - x), big = (e.spy <= -0.04 || e.qqq <= -0.07) && x + w / 2 - lastLbl > 36;
+      if (big) lastLbl = x + w / 2;
+      return `<g class="dz" data-ep="${eps.indexOf(e)}"><rect x="${x.toFixed(1)}" y="16" width="${w.toFixed(1)}" height="${Hc - 46}" fill="var(--bad)" fill-opacity="${sev(e.spy)}"/>
+        ${big ? `<text x="${(x + w / 2).toFixed(1)}" y="12" font-size="11" text-anchor="middle" fill="var(--bad)" font-family="var(--font-mono)" font-weight="700">${pct(e.spy, 0)}</text>` : ""}</g>`;
+    }).join("");
     app.innerHTML = `<h1>Why did the market drop?</h1>
-      <p class="lede">Every sharp fall since ${fmtDate(D.start, { month: "short", year: "numeric" })}: days the S&amp;P 500 fell 1.5% or more (or the Nasdaq 100 2%), weeks it fell 3% or more (Nasdaq 4%), and slower slides over two weeks. For each: how far it fell, what fell most, the headlines that day, and the explanations that came out in the week after.</p>
-      <div class="card">${svgBox(W, H, `${eps.map((e) => { const a = weekOf(e.start), b = weekOf(e.end); return `<rect x="${X(a - 0.5).toFixed(1)}" y="0" width="${Math.max(3, X(b + 0.5) - X(a - 0.5)).toFixed(1)}" height="${H - 22}" fill="var(--bad)" fill-opacity=".2"><title>${fmtDate(e.start)}: S&P 500 ${pct(e.spy)}, Nasdaq ${pct(e.qqq)}</title></rect>`; }).join("")}<path d="${spyLine}" fill="none" stroke="var(--chart)" stroke-width="2"/><text x="8" y="${H - 5}" font-size="12" fill="var(--muted)">S&amp;P 500, weekly · red: the drops below</text>`, "S&P 500 with the drops shaded")}</div>
+      <p class="lede">Every sharp fall in the S&amp;P 500 and Nasdaq 100 since ${fmtDate(D.start, { month: "short", year: "numeric" })}: how far it fell, what fell most, how long it took to win back, and the headlines that day and the week after.</p>
+      <div class="grid cols-4">
+        ${statCard("Sharp drops", eps.length, `since ${fmtDate(D.start, { month: "short", year: "numeric" })}`)}
+        ${statCard("Deepest", worst ? pct(worst.spy) : "–", worst ? `S&amp;P 500, ${fmtDate(worst.start, { month: "short", year: "numeric" })} · Nasdaq ${pct(worst.qqq)}` : "", "down")}
+        ${statCard("Typical recovery", recs.length ? `${recs[Math.floor(recs.length / 2)]} days` : "–", recs.length ? `back to the level before the drop · longest ${recs[recs.length - 1]} days` : "")}
+        ${statCard("Latest", eps[0] ? pct(eps[0].spy) : "–", eps[0] ? `${fmtDate(eps[0].start, { day: "numeric", month: "short" })} · ${eps[0].recover == null ? "not yet recovered" : `recovered in ${eps[0].recover} days`}` : "", eps[0] ? cls(eps[0].spy) : "")}
+      </div>
+      <div class="card section"><h2>The S&amp;P 500, every drop marked <span class="muted">darker red, deeper fall · hover a drop for what happened, click to read it</span></h2>
+        <div class="chart" id="dropChart">${svgBox(Wc, Hc, `
+          ${ticks.map((v) => `<line x1="10" x2="${Wc - 60}" y1="${Yc(v).toFixed(1)}" y2="${Yc(v).toFixed(1)}" stroke="var(--line)"/><text x="${Wc - 54}" y="${(Yc(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">$${Math.round(v)}</text>`).join("")}
+          ${yrs.map((i) => `<text x="${Xc(i).toFixed(1)}" y="${Hc - 8}" font-size="12" fill="var(--muted)" text-anchor="middle">${dates[i].slice(0, 4)}</text>`).join("")}
+          ${shaded}<path d="${line}" fill="none" stroke="var(--chart)" stroke-width="1.8" stroke-linejoin="round"/>`, "S&P 500 with every drop marked")}<div class="tip" hidden></div></div>
+        ${open.length ? `<p class="small"><b class="down">Not yet won back:</b> ${open.map((e) => `${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })} (${pct(e.spy)})`).join(" · ")}</p>` : ""}</div>
+      ${TH ? `<div class="card section"><h2>By industry <span class="muted">sharp falls and jumps, whether or not the whole market moved</span></h2>
+        <div class="toolbar"><div class="seg" role="group" aria-label="Industry">${Object.entries(TH).map(([k, t], i) => `<button type="button" data-th="${k}" aria-pressed="${i === 0}">${esc(t.name)}</button>`).join("")}</div></div>
+        <div id="thBody"></div></div>` : ""}
+      <h2 class="section">Every market drop</h2>
+      <div class="drops">${eps.map((e, k) => {
+        const idx = [["S&amp;P 500", e.spy], ["Nasdaq 100", e.qqq], ...(e.dia != null ? [["Dow", e.dia]] : [])], mx = Math.max(...idx.map((x) => Math.abs(x[1] || 0)), ...e.sectors.map((x) => Math.abs(x[1])), 0.01);
+        const thr = e.themes && TH ? Object.entries(e.themes).map(([kk, r]) => [esc(TH[kk].name), r]) : [], tmx = Math.max(0.01, ...thr.map((x) => Math.abs(x[1])));
+        return `<div class="card drop${k === 0 ? " latest" : ""}" id="drop-${k}">
+          <div class="drop-top"><div><span class="muted small">${k === 0 ? "Latest · " : ""}${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""} · ${e.days} trading day${e.days === 1 ? "" : "s"}</span>
+            <h2>S&amp;P 500 <span class="down">${pct(e.spy)}</span> <span class="muted small">Nasdaq ${pct(e.qqq)}</span></h2></div>
+            <span class="rec ${e.recover == null ? "open" : ""}">${e.level ? e.recover == null ? "Not yet recovered" : `Recovered in ${e.recover} days` : ""}</span></div>
+          <div class="drop-grid">
+            <div class="dblock"><h4>How far it fell</h4>${bars(idx, mx)}<p class="small muted">Worst day ${fmtDate(e.worst_day.date, { day: "numeric", month: "short" })}: S&amp;P ${pct(e.worst_day.spy)}, Nasdaq ${pct(e.worst_day.qqq)}</p></div>
+            <div class="dblock"><h4>Hardest-hit sectors</h4>${bars(e.sectors.map(([s2, r]) => [esc(s2), r]), mx)}</div>
+            ${thr.length ? `<div class="dblock"><h4>By industry</h4>${bars(thr, tmx, true)}</div>` : ""}
+            <div class="dblock"><h4>Big companies that fell most</h4><div class="bigfalls">${e.big.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 28) : ""}<span class="tk">${esc(tk)}</span><b class="down">${pct(r, 0)}</b></a>`).join("")}</div></div>
+            ${before(e)}
+          </div>
+          <div class="news2"><div><h3>What happened</h3><ul>${e.what.map(hl).join("") || `<li class="muted">No headlines found.</li>`}</ul></div>
+            ${e.why.length ? `<div><h3>Why: the week after</h3><ul>${e.why.map(hl).join("")}</ul></div>` : ""}</div></div>`;
+      }).join("") || `<p class="muted">No market drop data yet.</p>`}</div>
       <div class="grid cols-2 section">
+        ${card("How to read a drop", "", `<p class="small">The day's headlines say <i>what</i> fell. The <i>why</i> usually takes a few days: analysts' notes, earnings calls and data releases explain it in the week after, so each drop has both. A drop that is mostly one industry (semiconductors, say) is usually news about that industry; one that hits everything is usually rates, data, policy or a shock like a war.</p>`)}
         ${card("What professional investors watch", "", `<ul class="plain small">
           <li><b>The Federal Reserve</b>: rate decisions, meeting minutes and the chair's speeches. Higher-for-longer rates hit expensive tech and growth stocks hardest.</li>
           <li><b>Economic data</b>: inflation (CPI, PCE), the monthly jobs report, GDP and retail sales, on a fixed calendar.</li>
@@ -1330,16 +1394,52 @@
           <li><b>Big-company earnings</b>: Nvidia, Microsoft, Apple and the other megacaps move the whole index; one chipmaker's warning can sink the rest.</li>
           <li><b>Fear gauges</b>: the VIX volatility index, credit spreads, oil and the dollar.</li>
           <li><b>Policy and geopolitics</b>: tariffs, chip export rules, wars, elections.</li>
-          <li><b>News</b>: Reuters, Bloomberg, The Wall Street Journal, the Financial Times and CNBC, where the headlines below come from.</li></ul>`)}
-        ${card("How to read a drop", "", `<p class="small">The day's headlines say <i>what</i> fell. The <i>why</i> usually takes a few days: analysts' notes, earnings calls and data releases explain it in the week after, so each drop below has both. A drop that is mostly one industry (semiconductors, say) is usually news about that industry; one that hits everything is usually rates, data, policy or a shock like a war.</p>`)}
+          <li><b>News</b>: Reuters, Bloomberg, The Wall Street Journal, the Financial Times and CNBC, where the headlines come from.</li></ul>`)}
       </div>
-      <div class="drops">${eps.map((e, k) => `<div class="card drop${k === 0 ? " latest" : ""}"><div class="drop-head"><span class="muted small">${k === 0 ? "Latest · " : ""}${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""}</span><h2>S&amp;P 500 <span class="${cls(e.spy)}">${pct(e.spy)}</span> · Nasdaq 100 <span class="${cls(e.qqq)}">${pct(e.qqq)}</span>${e.dia != null ? ` · Dow <span class="${cls(e.dia)}">${pct(e.dia)}</span>` : ""}</h2>
-          <span class="small muted">Worst day ${fmtDate(e.worst_day.date, { day: "numeric", month: "short" })}: S&amp;P ${pct(e.worst_day.spy)}, Nasdaq ${pct(e.worst_day.qqq)}</span></div>
-        <div class="drop-body"><div class="drop-side"><div class="small"><b>Fell most:</b> ${e.sectors.map(([s, r]) => `${esc(s)} <span class="down">${pct(r, 0)}</span>`).join(" · ")}</div>
-          <div class="chips">${e.big.map(([tk, r]) => `<span>${tkLink(tk)} <span class="down small">${pct(r, 0)}</span></span>`).join("")}</div>${before(e)}</div>
-          <div class="news"><h3>What happened</h3><ul>${e.what.map(hl).join("") || `<li class="muted">No headlines found.</li>`}</ul>
-          ${e.why.length ? `<h3>Why: the week after</h3><ul>${e.why.map(hl).join("")}</ul>` : ""}</div></div></div>`).join("") || `<p class="muted">No market drop data yet.</p>`}</div>
-      <p class="small muted">Headlines from Google News, kept to well-known financial outlets; links open the publisher. Moves are closing prices, from the close before the drop to its lowest close.</p>`;
+      <p class="small muted">Headlines from Google News, kept to well-known financial outlets; links open the publisher. Moves are closing prices, from the close before the drop to its lowest close. Recovered: the first close back at the level before the drop.</p>`;
+    // hover and click on the chart
+    const ch = $("#dropChart"), svg = $("svg", ch), tip = $(".tip", ch);
+    $$(".dz", ch).forEach((g) => {
+      const e = eps[+g.dataset.ep], k = +g.dataset.ep;
+      g.addEventListener("mouseenter", () => {
+        tip.innerHTML = `<div class="muted">${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""}</div><div>S&amp;P 500 <b class="down">${pct(e.spy)}</b> · Nasdaq <b class="down">${pct(e.qqq)}</b></div>
+          <div class="small">${e.sectors.slice(0, 2).map(([s2, r]) => `${esc(s2)} ${pct(r, 0)}`).join(" · ")}</div>${e.what[0] ? `<div class="small" style="max-width:300px;white-space:normal">${esc(e.what[0].title)}</div>` : ""}
+          <div class="small muted">${e.recover == null ? "not yet recovered" : `recovered in ${e.recover} days`}</div>`;
+        tip.hidden = false;
+        const r = svg.getBoundingClientRect(), gx = g.getBoundingClientRect(), left = gx.left - r.left, tw = tip.offsetWidth;
+        tip.style.left = `${Math.max(0, Math.min(r.width - tw, left + (left > r.width / 2 ? -tw - 12 : 12)))}px`; tip.style.top = "20px";
+      });
+      g.addEventListener("mouseleave", () => { tip.hidden = true; });
+      g.addEventListener("click", () => { const el = $(`#drop-${k}`); if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1600); } });
+    });
+    if (!TH) return;
+    // one industry: its basket against the S&P 500, its sharp moves marked, then each move as a card
+    const showTheme = (key) => {
+      const t = TH[key], ser = t.series, n = ser.length, Wt = 1000, Ht = 240, base = ser[0][1];
+      const sp0 = spy[di.get(ser[0][0])] || null, vals2 = ser.map((x) => x[1] / base - 1), spv = ser.map((x) => { const i = di.get(x[0]); return sp0 && i != null && spy[i] ? spy[i] / sp0 - 1 : null; });
+      const all = [...vals2, ...spv.filter((v) => v != null)], lo2 = Math.min(0, ...all), hi2 = Math.max(0, ...all), pad = (hi2 - lo2) * 0.08 || 0.05;
+      const Xt = (i) => 10 + i / (n - 1) * (Wt - 70), Yt = (v) => 12 + (hi2 + pad - v) / (hi2 - lo2 + 2 * pad) * (Ht - 42);
+      const path = (vs) => { let d = "", on = false; vs.forEach((v, i) => { if (v == null) { on = false; return; } d += `${on ? "L" : "M"}${Xt(i).toFixed(1)},${Yt(v).toFixed(1)}`; on = true; }); return d; };
+      const near = (d) => { const i = ser.findIndex((x) => x[0] >= d); return i < 0 ? n - 1 : i; };
+      const yrs2 = []; for (let i = 1; i < n; i++) if (ser[i][0].slice(0, 4) !== ser[i - 1][0].slice(0, 4)) yrs2.push(i);
+      const ev = t.events, ups = ev.filter((e) => e.dir === "up").length;
+      $("#thBody").innerHTML = `<div class="grid cols-3"><div class="mini"><span class="lbl">Since ${fmtDate(ser[0][0], { month: "short", year: "numeric" })}</span><b class="${cls(vals2[n - 1])}">${pct(vals2[n - 1], 0)}</b><span class="muted small">S&amp;P 500 ${pct(spv[n - 1], 0)}</span></div>
+          <div class="mini"><span class="lbl">Sharp jumps</span><b class="up">${ups}</b><span class="muted small">5 days up ${pct(t.cut, 0)} or more</span></div>
+          <div class="mini"><span class="lbl">Sharp falls</span><b class="down">${ev.length - ups}</b><span class="muted small">5 days down ${pct(t.cut, 0)} or more</span></div></div>
+        <div class="chart">${svgBox(Wt, Ht, `
+          ${[lo2, 0, hi2].map((v) => `<line x1="10" x2="${Wt - 60}" y1="${Yt(v).toFixed(1)}" y2="${Yt(v).toFixed(1)}" stroke="var(--line)"/><text x="${Wt - 54}" y="${(Yt(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">${pct(v, 0)}</text>`).join("")}
+          ${yrs2.map((i) => `<text x="${Xt(i).toFixed(1)}" y="${Ht - 8}" font-size="12" fill="var(--muted)" text-anchor="middle">${ser[i][0].slice(0, 4)}</text>`).join("")}
+          ${ev.map((e) => { const a = near(e.start), b = near(e.end); return `<rect x="${Xt(a).toFixed(1)}" y="12" width="${Math.max(4, Xt(b) - Xt(a)).toFixed(1)}" height="${Ht - 42}" fill="${e.dir === "up" ? "var(--good)" : "var(--bad)"}" fill-opacity=".22"><title>${fmtDate(e.start)}: ${esc(t.name)} ${pct(e.move)} (S&P ${pct(e.spy)})</title></rect>`; }).join("")}
+          <path d="${path(spv)}" fill="none" stroke="#eb6834" stroke-width="1.6" stroke-dasharray="5 4"/>
+          <path d="${path(vals2)}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>`, `${t.name} against the S&P 500`)}</div>
+        <div class="legend small"><span><i class="sw" style="background:var(--chart)"></i>${esc(t.name)} basket</span><span><i class="sw" style="background:#eb6834"></i>S&amp;P 500</span><span><i class="sw" style="background:var(--good)"></i>sharp jump</span><span><i class="sw" style="background:var(--bad)"></i>sharp fall</span><span class="tks">${t.tickers.map((x) => tkLink(x)).join(" ")}</span></div>
+        <div class="thmoves">${ev.map((e) => `<div class="thmove ${e.dir}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
+            <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
+          <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 0)}</b></a>`).join("")}</div>
+          ${e.what.length ? `<h4>What happened</h4><ul>${e.what.slice(0, 3).map(hl).join("")}</ul>` : ""}${e.why.length ? `<h4>Why</h4><ul>${e.why.slice(0, 3).map(hl).join("")}</ul>` : ""}</div>`).join("") || `<p class="muted">No sharp moves since ${fmtDate(D.start, { month: "short", year: "numeric" })}.</p>`}</div>`;
+    };
+    $$("[data-th]").forEach((b) => b.addEventListener("click", () => { $$("[data-th]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); showTheme(b.dataset.th); }));
+    showTheme(Object.keys(TH)[0]);
   }
 
   // ---------- routing ----------

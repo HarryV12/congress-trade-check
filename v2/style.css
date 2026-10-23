@@ -342,3 +342,46 @@ a.tpill.S:hover { box-shadow: inset 0 0 18px 3px color-mix(in srgb, var(--bad) 4
 .sb-title { font-weight: 800; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
 #app { padding-top: 16px; }
 @media (max-width: 860px) { .sb-title { display: none; } .sub-row .toolbar { flex-wrap: nowrap; overflow-x: auto; } .sub-row .toolbar input[type="search"] { min-width: 150px; } }
+
+/* market drops: industries */
+.thchips { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; }
+.thchip { font: 600 11px var(--font-mono); padding: 1px 7px; border-radius: 999px; background: var(--chip); }
+.thchip.up { color: var(--good); background: var(--good-soft); } .thchip.down { color: var(--bad); background: var(--bad-soft); }
+#thBody .drops { margin-top: 14px; } #thBody .legend .tk { margin-right: 2px; }
+h2.section { margin-bottom: 0; }
+
+/* market drops, redesigned: bars and pictures instead of paragraphs */
+.drop-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.drop-top h2 { margin: 2px 0 0; }
+.rec { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--good-soft); color: var(--good); white-space: nowrap; }
+.rec.open { background: var(--bad-soft); color: var(--bad); }
+.drop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 20px; margin-top: 14px; }
+.dblock h4, .thmove h4 { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.dbar { display: grid; grid-template-columns: minmax(70px, 38%) minmax(0, 1fr) 54px; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 5px; }
+.dl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
+.dt { position: relative; height: 10px; background: var(--chip); border-radius: 5px; overflow: hidden; }
+.dt i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 5px; } .dt i.neg { background: var(--bad); } .dt i.pos { background: var(--good); }
+.dbar.div .dt i.neg { left: auto; right: 50%; } .dbar.div .dt i.pos { left: 50%; } .dbar.div .dt::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line-strong); }
+.dbar b { font: 600 12px var(--font-mono); text-align: right; }
+.bigfalls { display: flex; flex-wrap: wrap; gap: 6px; }
+.bf { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font-size: 12px; }
+.bf:hover { text-decoration: none; border-color: var(--accent); } .bf b { font: 600 12px var(--font-mono); }
+.sellers { display: flex; flex-wrap: wrap; gap: 6px; } .seller { display: inline-flex; align-items: center; gap: 4px; } .seller:hover { text-decoration: none; }
+.news2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.news2 h3 { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+.news2 ul, .thmove ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+.drop.flash { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .3s; }
+#dropChart .dz { cursor: pointer; } #dropChart .dz:hover rect { fill-opacity: .6; }
+.mini { background: var(--bg); border-radius: 12px; padding: 10px 14px; display: grid; } .mini .lbl { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.mini b { font: 700 24px var(--font-mono); }
+#thBody .chart { margin-top: 12px; } #thBody .legend .tks { margin-left: auto; }
+.thmoves { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 14px; }
+.thmove { border: 1px solid var(--line); border-top: 4px solid var(--bad); border-radius: 12px; padding: 12px 14px; display: grid; gap: 10px; align-content: start; } .thmove.up { border-top-color: var(--good); }
+.tm-head { display: flex; gap: 12px; align-items: center; } .tm-big { font: 800 26px var(--font-mono); }
+.thmove ul { font-size: 13px; } .thmove h4 { margin: 0; }
+/* the pinned bar stays on one line: the search box shrinks first, the count never wraps */
+.sub-row .toolbar { flex-wrap: nowrap; gap: 8px; }
+.sub-row .toolbar input[type="search"] { flex: 1 1 140px; min-width: 110px; max-width: 240px; padding-top: 6px; padding-bottom: 6px; }
+.sub-row .count { white-space: nowrap; margin-left: auto; }
+.sub-row .seg { flex: none; }
+.sub-row { padding-top: 6px; padding-bottom: 6px; }
