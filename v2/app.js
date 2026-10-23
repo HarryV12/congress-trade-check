@@ -1376,7 +1376,7 @@
           <div class="drop-top"><div><span class="muted small">${k === 0 ? "Latest · " : ""}${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""} · ${e.days} trading day${e.days === 1 ? "" : "s"}</span>
             <h2>S&amp;P 500 <span class="down">${pct(e.spy)}</span> <span class="muted small">Nasdaq ${pct(e.qqq)}</span></h2></div>
             <span class="rec ${e.recover == null ? "open" : ""}">${e.level ? e.recover == null ? "Not yet recovered" : `Recovered in ${e.recover} days` : ""}</span></div>
-          <div class="why-sum"><p><b>What happened:</b> ${dropWhat(e)}</p>${e.summary ? `<p><b>Why:</b> ${esc(e.summary)}</p>` : ""}</div>
+          <div class="why-sum"><p><b>What happened:</b> ${dropWhat(e)}</p>${e.summary ? `<p><b>Why:</b> ${esc(e.summary)}</p>` : ""}<div class="ana" data-ana="all|${k}"></div></div>
           <div class="drop-grid">
             <div class="dblock"><h4>How far it fell</h4>${bars(idx, mx)}<p class="small muted">Worst day ${fmtDate(e.worst_day.date, { day: "numeric", month: "short" })}: S&amp;P ${pct(e.worst_day.spy)}, Nasdaq ${pct(e.worst_day.qqq)}</p></div>
             <div class="dblock"><h4>Hardest-hit sectors</h4>${bars(e.sectors.map(([s2, r]) => [esc(s2), r]), mx)}</div>
@@ -1512,6 +1512,70 @@
       }).join("")}</div>`;
       $$("[data-go]").forEach((b) => b.addEventListener("click", () => choose(b.dataset.go)));
     };
+    // independent analysis: our own reading of each move from the price data, not from the news. How unusual the
+    // move was, whether it was the whole market or the industry itself, what came before it, what bonds, credit,
+    // gold and energy did over the same days, what happened next, and what members of Congress traded beforehand
+    const sigma5 = new Map(), betaOf = new Map();
+    const sd5 = (key, x) => { if (!sigma5.has(key)) { const r = []; for (let i = 5; i <= L; i++) if (x[i] && x[i - 5]) r.push(x[i] / x[i - 5] - 1); const m = r.reduce((a, v) => a + v, 0) / r.length; sigma5.set(key, Math.sqrt(r.reduce((a, v) => a + (v - m) ** 2, 0) / r.length)); } return sigma5.get(key); };
+    const beta = (key, x, at) => {  // the basket's sensitivity to the S&P 500 over the year before the move
+      const k2 = key + "|" + at; if (betaOf.has(k2)) return betaOf.get(k2);
+      let sxy = 0, sxx = 0, mx = 0, my = 0, n2 = 0; const pts = [];
+      for (let i = Math.max(1, at - 250); i < at; i++) if (x[i] && x[i - 1] && spy[i] && spy[i - 1]) pts.push([spy[i] / spy[i - 1] - 1, x[i] / x[i - 1] - 1]);
+      for (const [a, b] of pts) { mx += a; my += b; n2++; } mx /= n2 || 1; my /= n2 || 1;
+      for (const [a, b] of pts) { sxy += (a - mx) * (b - my); sxx += (a - mx) ** 2; }
+      const bt = sxx ? sxy / sxx : 1; betaOf.set(k2, bt); return bt;
+    };
+    const mv = (tk, a, b) => { const x = P.px[tk]; return x && x[a] && x[b] ? x[b] / x[a] - 1 : null; };
+    const sp500 = Object.keys(P.px).filter((tk) => stocks[tk] && stocks[tk][5]);
+    const anaHtml = (key, e) => {
+      const isAll = key === "all", x = isAll ? spy : seriesOf(key), ia = di.get(e.start), ib = di.get(e.end);
+      if (ia == null || ib == null || ia < 2) return "";
+      const a0 = ia - 1, days = ib - a0, move = x[ib] / x[a0] - 1, spyMove = spy[ib] / spy[a0] - 1, name = isAll ? "the S&amp;P 500" : esc(TH[key].name);
+      const out = [];
+      // 1. how unusual
+      const sg = sd5(key, x), z = Math.abs(move) / (sg * Math.sqrt(Math.max(1, days) / 5));
+      const pool = isAll ? eps.map((d) => d.spy) : TH[key].events.filter((d) => d.dir === e.dir).map((d) => d.move);
+      const asBig = pool.filter((r) => Math.abs(r) >= Math.abs(move) - 1e-9).length;
+      out.push(`<b>How unusual:</b> a ${pct(move)} move over ${days} trading day${days === 1 ? "" : "s"} is ${z.toFixed(1)}× ${name}${/s$/.test(name) ? "'" : "'s"} typical swing for that length of time (a normal week moves about ±${pctAbs(sg)}). ${asBig <= 1 ? `It was the biggest such ${e.dir === "up" ? "jump" : "fall"} since ${D.start.slice(0, 4)}.` : `${asBig - 1} other${asBig - 1 === 1 ? "" : "s"} since ${D.start.slice(0, 4)} ${asBig - 1 === 1 ? "was" : "were"} as big or bigger.`}`);
+      // 2. the whole market, or this industry?
+      if (isAll) {
+        const each = sp500.map((tk) => mv(tk, a0, ib)).filter((r) => r != null), down = each.filter((r) => r < 0).length, avg = each.reduce((a, r) => a + r, 0) / (each.length || 1);
+        out.push(`<b>How broad:</b> ${down} of ${each.length} S&amp;P 500 companies fell (${Math.round(down / (each.length || 1) * 100)}%); the average company moved ${pct(avg)}, against ${pct(move)} for the index. ${down / (each.length || 1) >= 0.75 ? "Nearly everything fell: a market-wide sell-off (rates, the economy, policy or a shock), not one industry." : avg >= 0 ? "The average company actually rose: the fall came from a handful of the biggest stocks." : avg > move + 0.01 ? "The typical company fell less than the index: the drop was concentrated in the biggest stocks." : "A mixed drop: some industries fell hard while others held up."}`);
+      } else {
+        const bt = beta(key, x, ia), expected = bt * spyMove, own = move - expected;
+        const each = TH[key].tickers.map((tk) => [tk, mv(tk, a0, ib)]).filter((r) => r[1] != null), same = each.filter((r) => (r[1] < 0) === (move < 0)).length;
+        out.push(`<b>Market or industry:</b> ${name} usually moves ${bt.toFixed(1)}× as much as the S&amp;P 500 (its beta over the year before). The S&amp;P's ${pct(spyMove)} therefore explains about ${pct(expected)}; the other <b>${pct(own)}</b> was specific to ${name}${Math.abs(own) > Math.abs(expected) ? ", so it was mostly industry news, not the wider market" : ", so it was mostly the wider market"}. ${same} of ${each.length} stocks in the basket moved the same way.`);
+      }
+      // 3. what came before
+      const pre = a0 >= 63 && x[a0 - 63] ? x[a0] / x[a0 - 63] - 1 : null;
+      let hi = 0; for (let i = Math.max(0, a0 - 252); i <= a0; i++) if (x[i] > hi) hi = x[i];
+      if (pre != null) out.push(`<b>Before it:</b> ${name} had ${pre >= 0 ? "gained" : "lost"} ${pctAbs(pre)} in the three months before and was ${pctAbs(x[a0] / hi - 1)} below its 1-year high. ${e.dir !== "up" && pre > 0.15 ? "A fall after a big run-up often includes profit-taking, not only bad news." : e.dir === "up" && pre < -0.1 ? "A jump after a slump is often a rebound as sellers run out." : ""}`);
+      // 4. other markets over the same days
+      const cross = [["TLT", "long-term Treasury bonds", (r) => r < -0.01 ? " (yields rose)" : r > 0.01 ? " (yields fell)" : ""], ["HYG", "high-yield corporate bonds", (r) => r < -0.015 ? " (credit worries)" : ""], ["GLD", "gold", () => ""], ["XLE", "energy stocks", () => ""], ...(isAll ? [["IWM", "small companies", () => ""]] : [])]
+        .map(([tk, nm, note]) => { const r = mv(tk, a0, ib); return r == null ? null : `${nm} ${pct(r)}${note(r)}`; }).filter(Boolean);
+      if (cross.length) {
+        const tlt = mv("TLT", a0, ib);
+        out.push(`<b>Other markets, same days:</b> ${cross.join(", ")}. ${tlt != null && tlt < -0.015 && move < 0 ? "Falling bond prices mean rising interest rates, which weigh most on expensive growth stocks." : tlt != null && tlt > 0.015 && move < 0 ? "Investors moved into safe government bonds: a flight to safety." : ""}`);
+      }
+      // 5. what happened next
+      if (ib + 5 <= L) {
+        const k20 = Math.min(L, ib + 20), after = x[k20] / x[ib] - 1, back = x[k20] >= x[a0];
+        out.push(`<b>Afterwards:</b> ${k20 - ib} trading days after the ${e.dir === "up" ? "peak" : "low"}, ${name} was ${pct(after)} from it${e.dir !== "up" ? (back ? ", already back above where the fall began" : `, still ${pctAbs(x[k20] / x[a0] - 1)} below where the fall began`) : (x[k20] < x[a0] ? ", giving the whole jump back" : "")}.`);
+      } else out.push(`<b>Afterwards:</b> too recent to say.`);
+      // 6. members of Congress beforehand
+      const tks = new Set(isAll ? e.big.map((b) => b[0]) : TH[key].tickers), t0 = Date.parse(e.start + "T00:00:00Z");
+      const L30 = trades.filter((t) => tks.has(t.t) && t.time < t0 && t.time >= t0 - 30 * DAY && t.side !== "O" && !isBiz(members[t.m]));
+      if (L30.length) {
+        const b = L30.filter((t) => t.side === "B"), sl = L30.filter((t) => t.side === "S");
+        out.push(`<b>Congress beforehand:</b> in the 30 days before, ${((n3) => `${n3} member${n3 === 1 ? "" : "s"} and official${n3 === 1 ? "" : "s"}`)(new Set(L30.map((t) => t.m)).size)} bought ${b.length ? usd(est(b).best) : "$0"} and sold ${sl.length ? usd(est(sl).best) : "$0"} of ${isAll ? "the companies that then fell most" : "these stocks"} (${b.length} buy${b.length === 1 ? "" : "s"}, ${sl.length} sale${sl.length === 1 ? "" : "s"}).`);
+      }
+      return `<details class="ana-box"${isAll ? " open" : ""}><summary><b>Independent analysis</b> <span class="muted small">from the price data, not the news</span></summary><ul>${out.map((o) => `<li>${o}</li>`).join("")}</ul></details>`;
+    };
+    const fillAnalysis = (root) => $$("[data-ana]", root).forEach((el) => {
+      const [key, k] = el.dataset.ana.split("|"), e = key === "all" ? eps[+k] : TH[key].events[+k];
+      if (e) el.innerHTML = anaHtml(key, e);
+    });
+    fillAnalysis(app);
     if (!TH) { drawNow("all"); return; }
     // one industry over its own period: its basket against the S&P 500 day by day, its sharp moves marked, how many
     // there were and when, then each move as a card (newest six first)
@@ -1548,8 +1612,9 @@
         <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}" id="thm-${k}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
             <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
           <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 0)}</b></a>`).join("")}</div>
-          <div class="why-sum small"><p><b>What happened:</b> ${moveWhat(t, e)}</p>${e.summary ? `<p><b>Why:</b> ${esc(e.summary)}</p>` : ""}</div>
+          <div class="why-sum small"><p><b>What happened:</b> ${moveWhat(t, e)}</p>${e.summary ? `<p><b>Why:</b> ${esc(e.summary)}</p>` : ""}<div class="ana" data-ana="${key}|${k}"></div></div>
           ${e.what.length || e.why.length ? `<details class="srcs"><summary>Sources: ${e.what.length + e.why.length} news articles</summary><ul>${[...e.what, ...e.why].map(hl).join("")}</ul></details>` : ""}</div>`).join("") || `<p class="muted">No sharp moves in this period.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
+      fillAnalysis($("#thBody"));
       const older = $("#thOlder"); if (older) older.addEventListener("click", () => showTheme(key, true));
       // hover anywhere on the chart: that day's move, the week's, the S&P 500, the stocks that moved most that day,
       // and, inside a shaded band, that jump or fall with its first headline; click a band to read it below

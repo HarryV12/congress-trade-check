@@ -412,3 +412,10 @@ details.srcs > summary:hover { color: var(--accent); } details.srcs .news2 { mar
 .thmove.up, .thmove.down, .mdate.up, .mdate.down, .ind-last.up, .ind-last.down { color: var(--ink); }
 .thmove .why-sum, .thmove .why-sum b { color: var(--ink); }
 .ind-last.up b, .ind-last.down b { color: inherit; }
+
+/* independent analysis under "Why" */
+.ana-box { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.ana-box > summary { cursor: pointer; list-style-position: outside; }
+.ana-box > summary:hover b { color: var(--accent); }
+.ana-box ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+.ana-box li { line-height: 1.5; }
