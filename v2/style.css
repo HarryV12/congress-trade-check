@@ -392,3 +392,9 @@ h2.section { margin-bottom: 0; }
 .ind:hover { border-color: var(--accent); } .ind > b { font-size: 15px; margin-bottom: 4px; }
 .ind-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); } .ind-row b { font: 600 13px var(--font-mono); }
 .ind-last { font: 600 12px var(--font-mono); margin-top: 4px; } .ind-last.up { color: var(--good); } .ind-last.down { color: var(--bad); }
+
+.mdates { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.mdate { font-size: 11px; padding: 2px 7px; border-radius: 999px; white-space: nowrap; cursor: default; }
+.mdate.up { background: var(--good-soft); } .mdate.down { background: var(--bad-soft); }
+.mdate b { font-family: var(--font-mono); } .mdate.up b { color: var(--good); } .mdate.down b { color: var(--bad); }
+.mini .mdate b { font: 700 11px var(--font-mono); }
