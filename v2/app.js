@@ -1334,7 +1334,26 @@
     }).join("");
 
     // headline numbers
-    const worst = eps.reduce((m, e) => !m || e.spy < m.spy ? e : m, null), recs = eps.map((e) => e.recover).filter((x) => x != null).sort((a, b) => a - b);
+    // where things stand now: today's move, how far below the high, the latest drop so far, and when past drops this size were won back
+    const qqq = P ? P.px.QQQ : [], L = dates.length - 1, chg = (x, i, k = 1) => x[i] && x[i - k] ? x[i] / x[i - k] - 1 : null;
+    const hiOf = (x) => { let m = 0, at = L; for (let i = Math.max(0, L - 252); i <= L; i++) if (x[i] > m) { m = x[i]; at = i; } return [m, at]; };
+    const [spyHi, spyHiAt] = hiOf(spy), [qqqHi] = hiOf(qqq);
+    const cur = eps[0], isOpen = cur && cur.level && cur.recover == null;
+    let low = null, lowAt = null;
+    if (cur && cur.ia != null) for (let i = cur.ia; i <= L; i++) if (spy[i] != null && (low == null || spy[i] < low)) { low = spy[i]; lowAt = i; }
+    const deepest = cur && low ? low / cur.level - 1 : null, nowVs = cur && cur.level ? spy[L] / cur.level - 1 : null, bounce = low ? spy[L] / low - 1 : null;
+    // past drops of a similar depth (half to twice as deep) that were won back: days from their low to winning it back,
+    // counted on from this drop's low so far
+    const alike = deepest == null ? [] : eps.filter((e) => e !== cur && e.recover != null && e.spy <= deepest * 0.5 && e.spy >= deepest * 2)
+      .map((e) => Math.max(1, Math.round(e.recover - (Date.parse(e.end) - Date.parse(e.start)) / DAY))).sort((a, b) => a - b);
+    const med = alike.length ? alike[Math.floor(alike.length / 2)] : null, eta = lowAt != null && med != null ? new Date(Date.parse(dates[lowAt] + "T00:00:00Z") + med * DAY).toISOString().slice(0, 10) : null;
+    const dayTxt = (n) => `${n} day${n === 1 ? "" : "s"}`;
+    const nowCards = [
+      statCard(`Today · ${fmtDate(dates[L], { day: "numeric", month: "short" })}`, pct(chg(spy, L)), `S&amp;P 500 · Nasdaq 100 ${pct(chg(qqq, L))} · this week ${pct(chg(spy, L, 5))}`, cls(chg(spy, L))),
+      statCard("Below the high", pct(spy[L] / spyHi - 1), `S&amp;P 500 from its high of ${fmtDate(dates[spyHiAt], { day: "numeric", month: "short" })} · Nasdaq 100 ${pct(qqq[L] / qqqHi - 1)}`, cls(spy[L] / spyHi - 1)),
+      cur ? statCard(isOpen ? "Latest drop so far" : "Latest drop", pct(deepest), isOpen ? `at its lowest ${fmtDate(dates[lowAt], { day: "numeric", month: "short" })}, since ${fmtDate(cur.start, { day: "numeric", month: "short" })} · now ${pct(nowVs)} vs before it, ${pct(bounce)} off the low` : `${fmtDate(cur.start, { day: "numeric", month: "short" })} · won back in ${dayTxt(cur.recover)}`, "down") : "",
+      cur ? statCard(isOpen ? "Likely recovery" : "Recovered", isOpen ? (eta ? `≈ ${fmtDate(eta, { day: "numeric", month: "short" })}` : "–") : dayTxt(cur.recover), isOpen ? (alike.length ? `from their low, past drops this deep took ${alike[0]}–${dayTxt(alike[alike.length - 1])} to win back; half within ${dayTxt(med)} (${alike.length} drops). An estimate, not a forecast.` : "no past drop this deep to compare") : `back to the level before the drop on ${fmtDate(dates[cur.ia + 0] && cur.recover != null ? new Date(Date.parse(cur.start + "T00:00:00Z") + cur.recover * DAY).toISOString().slice(0, 10) : cur.end, { day: "numeric", month: "short" })}`) : "",
+    ].join("");
     const open = eps.filter((e) => e.level && e.recover == null);
     // the chart: the S&P 500 every day, each drop shaded and labelled with its fall; hover for its story, click to jump to it
     const Wc = 1000, Hc = 300, i0 = 0, i1 = dates.length - 1, vals = spy.filter((v) => v != null), lo = Math.min(...vals) * 0.97, hi = Math.max(...vals) * 1.01;
@@ -1352,12 +1371,7 @@
     }).join("");
     app.innerHTML = `<h1>Why did the market drop?</h1>
       <p class="lede">Every sharp fall in the S&amp;P 500 and Nasdaq 100 since ${fmtDate(D.start, { month: "short", year: "numeric" })}: how far it fell, what fell most, how long it took to win back, and the headlines that day and the week after.</p>
-      <div class="grid cols-4">
-        ${statCard("Sharp drops", eps.length, `since ${fmtDate(D.start, { month: "short", year: "numeric" })}`)}
-        ${statCard("Deepest", worst ? pct(worst.spy) : "–", worst ? `S&amp;P 500, ${fmtDate(worst.start, { month: "short", year: "numeric" })} · Nasdaq ${pct(worst.qqq)}` : "", "down")}
-        ${statCard("Typical recovery", recs.length ? `${recs[Math.floor(recs.length / 2)]} days` : "–", recs.length ? `back to the level before the drop · longest ${recs[recs.length - 1]} days` : "")}
-        ${statCard("Latest", eps[0] ? pct(eps[0].spy) : "–", eps[0] ? `${fmtDate(eps[0].start, { day: "numeric", month: "short" })} · ${eps[0].recover == null ? "not yet recovered" : `recovered in ${eps[0].recover} days`}` : "", eps[0] ? cls(eps[0].spy) : "")}
-      </div>
+      <div class="grid cols-4">${nowCards}</div>
       <div class="card section"><h2>The S&amp;P 500, every drop marked <span class="muted">darker red, deeper fall · hover a drop for what happened, click to read it</span></h2>
         <div class="chart" id="dropChart">${svgBox(Wc, Hc, `
           ${ticks.map((v) => `<line x1="10" x2="${Wc - 60}" y1="${Yc(v).toFixed(1)}" y2="${Yc(v).toFixed(1)}" stroke="var(--line)"/><text x="${Wc - 54}" y="${(Yc(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">$${Math.round(v)}</text>`).join("")}
