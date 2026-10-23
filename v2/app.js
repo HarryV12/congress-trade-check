@@ -108,9 +108,13 @@
     MCD: ["#DA291C", "mcdonalds"], KO: ["#F40009", "cocacola"], PEP: ["#2151A1", "pepsi"], NKE: ["#111111", "nike"], WMT: ["#0071CE", "walmart"], TGT: ["#CC0000", "target"],
     CMCSA: ["#6138F5", "nbc"], T: ["#00A8E0", "att"], VZ: ["#CD040B", "verizon"], BA: ["#0D2D6C", "boeing"], GS: ["#6B9BD1", "goldmansachs"],
     BAC: ["#E31837", "bankofamerica"], WFC: ["#D71E28", "wellsfargo"], PFE: ["#0093D0", "pfizer"], CVX: ["#0054A4", "chevron"],
+    DIS: ["#113CCF", null, null, "D"], COST: ["#E31837", null, null, "C"], HD: ["#F96302", null, null, "HD"], LOW: ["#004990", null, null, "L"],
+    JPM: ["#5C3D2E", null, null, "JPM"], UNH: ["#002677", null, null, "U"], LLY: ["#D52B1E", null, null, "L"], JNJ: ["#D51900", null, null, "J"],
+    ABT: ["#0099D8", null, null, "A"], XOM: ["#ED1B2D", null, null, "X"], CPAY: ["#E8541E", null, null, "C"], GWW: ["#D50032", null, null, "G"], FIS: ["#3BAA35", null, null, "FIS"],
   };
-  const logoBox = (tk, col, size = 34, own = false) => {  // own: use col as the background, not the brand colour
-    const b = BRAND[tk], bg = own ? col : b ? (b[2] || b[0]) : col;
+  const logoBox = (tk, col, size = 34, own = false, brand = null) => {  // own: use col as the background; brand: in place of BRAND[tk]
+    const b = brand || BRAND[tk], bg = own ? col : b ? (b[2] || b[0]) : col;
+    if (b && !b[1] && b[3]) tk = b[3];
     if (b && b[1] === "ms") return `<span class="logo" style="width:${size}px;height:${size}px;background:#fff;border:1px solid var(--line)"><span class="ms"><i style="background:#F25022"></i><i style="background:#7FBA00"></i><i style="background:#00A4EF"></i><i style="background:#FFB900"></i></span></span>`;
     if (b && b[1]) return `<span class="logo" style="width:${size}px;height:${size}px;background:${bg}"><img src="https://cdn.jsdelivr.net/npm/simple-icons@11.14.0/icons/${b[1]}.svg" alt="" loading="lazy" onerror="this.outerHTML='<b style=&quot;font-size:${Math.round(size * (tk.length > 3 ? 0.3 : 0.38))}px&quot;>${esc(tk.slice(0, 4))}</b>'"></span>`;
     return `<span class="logo" style="width:${size}px;height:${size}px;background:${bg}"><b style="font-size:${size * ((tk || "").length > 3 ? 0.3 : 0.38)}px">${esc((tk || "•").slice(0, 4))}</b></span>`;
@@ -831,22 +835,35 @@
     ].join("");
 
     // biggest buys: a ring with the person's photo, each slice labelled with a card (logo, amount, sold, still held)
-    const byH = new Map();
-    for (const t of buys) { const k = t.t && stocks[t.t] ? t.t : t.a; const g = byH.get(k) || { k, t, b: [], s: 0 }; g.b.push(t); byH.set(k, g); }
-    for (const t of sells) { const k = t.t && stocks[t.t] ? t.t : t.a; if (byH.has(k)) { byH.get(k).s += t.amt; (byH.get(k).sl ||= []).push(t); } }
-    const top = [...byH.values()].map((g) => ({ ...g, v: est(g.b).best })).sort((a, b) => b.v - a.v).slice(0, 15);
-    ringColours(top.map((g) => g.t.t)).forEach((c, i) => { top[i].col = c; });
+    const byH = new Map(), withSt = (t) => ({ ...t, st: stocks[t.t] });
+    for (const t of buys) { const k = holdingKey(t); if (!k) continue; const g = byH.get(k) || { k, t, b: [], s: 0 }; g.b.push(t); byH.set(k, g); }
+    for (const t of sells) { const k = holdingKey(t); if (byH.has(k)) { byH.get(k).s += t.amt; (byH.get(k).sl ||= []).push(t); } }
+    const allH = [...byH.values()].map((g) => ({ ...g, v: est(g.b).best, info: holdingInfo(withSt(g.t)) })).sort((a, b) => b.v - a.v), top = allH.slice(0, 15);
+    let pi = 0;
+    for (const g of top) { g.brand = brandOf(g.t); g.col = g.brand ? g.brand[0] : HOLD_PALETTE[pi++ % HOLD_PALETTE.length]; g.soft = mixHex(g.col, "#6b7584", 0.3); }
     const ringEl = $("#ring");
     if (!top.length) ringEl.innerHTML = `<p class="muted">No buys ${periodWords()}.</p>`;
     else {
       const items = top.map((g) => {
         const tk = g.t.t && stocks[g.t.t] ? g.t.t : "", L = tk ? leftOf(m.i, tk) : null;
         const pb = g.b.filter((t) => t.ep && t.amt), avg = pb.length ? pb.reduce((a, t) => a + t.amt, 0) / pb.reduce((a, t) => a + t.amt / t.ep, 0) : null, now = tk ? lastPrice(tk) : null;
-        return { tk, col: g.col, v: g.v, sold: g.s, nb: g.b.length, ns: (g.sl || []).length, avg, chg: avg && now ? now / avg - 1 : null,
-          name: tk ? cleanName(stocks[tk][0]) : readableAsset(g.k), href: tk ? `#/stock/${encodeURIComponent(tk)}` : "",
+        return { tk, col: g.col, soft: g.soft, brand: g.brand, badge: g.info.badge, v: g.v, sold: g.s, nb: g.b.length, ns: (g.sl || []).length, avg, chg: avg && now ? now / avg - 1 : null,
+          name: g.info.name, href: tk ? `#/stock/${encodeURIComponent(tk)}` : "",
           held: !tk ? "" : L == null ? "unknown" : L.value < 1000 ? "sold out" : `≈${usd(L.value)}` };
       });
       drawRing(ringEl, items, m);
+      const eb = est(buys), es = est(sells), net = eb.best - es.best, kinds = { stock: 0, fund: 0, bond: 0 };
+      for (const g of allH) kinds[g.info.kind] += g.v;
+      const share = (v) => Math.round(v / (eb.best || 1) * 100) + "%", likely = (e) => e.exact ? usd(e.best) : `${usd(e.lo)}–${usd(e.hi)}`, shown = top.reduce((a, g) => a + g.v, 0);
+      const third = kinds.bond / (eb.best || 1) >= 0.1 ? ["bond", usd(kinds.bond), "Went into bonds and notes", `Bonds and bank notes took ${share(kinds.bond)} of the buying; stocks ${share(kinds.stock)}, funds ${share(kinds.fund)}.`]
+        : kinds.fund / (eb.best || 1) >= 0.1 ? ["up", usd(kinds.fund), "Went into funds and ETFs", `Funds and ETFs took ${share(kinds.fund)} of the buying; single stocks ${share(kinds.stock)}.`]
+        : ["up", share(shown), `In these ${top.length}`, `Of all the buying ${periodWords()}, ${share(shown)} went into the ${top.length === 1 ? "holding" : `${top.length} holdings`} shown.`];
+      const facts = [
+        ["bought", usd(eb.best), "Bought", `Best estimate from ${buys.length.toLocaleString()} buy${buys.length === 1 ? "" : "s"}${eb.exact ? "" : `, likely ${likely(eb)}`}. The filings' ranges alone allow ${usd(eb.min)}–${usd(eb.max)}.`],
+        ["sold", usd(es.best), "Sold in the same period", sells.length ? `${sells.length.toLocaleString()} sale${sells.length === 1 ? "" : "s"}${es.exact ? "" : `, likely ${likely(es)}`}. Net, about ${usd(Math.abs(net))} more ${net >= 0 ? "went in than came out" : "came out than went in"}.` : "No sales in this period."],
+        third,
+      ];
+      ringEl.insertAdjacentHTML("afterend", `<div class="rfacts">${facts.map(([c, big, head, body]) => `<div class="rfact"><div class="rf-big ${c}">${big}</div><b>${head}</b><p>${body}</p></div>`).join("")}</div>`);
       let rt; const onResize = () => { clearTimeout(rt); rt = setTimeout(() => { if (ringEl.isConnected) drawRing(ringEl, items, m); else window.removeEventListener("resize", onResize); }, 150); };
       window.addEventListener("resize", onResize, { passive: true });
     }
@@ -895,34 +912,96 @@
     draw();
   }
 
-  // ---------- the biggest-buys ring ----------
-  // Colourful like the classic site's image: each company's own brand colour, unless it is missing or too close to one
-  // already used, then the next clear colour from a fixed list.
-  const RING_PAL = ["#2f6fd6", "#d9480f", "#1f9d6b", "#c0268f", "#7c3aed", "#d4a017", "#0e8a9c", "#b42323", "#5b8c2a", "#e8862e", "#3d4b5c", "#8a5a2b", "#e05a87", "#2bb3c0", "#6b6f78"];
-  const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const near = (a, b) => { const x = rgb(a), y = rgb(b); return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) < 70; };
-  function ringColours(tks) {
-    const used = [];
-    return tks.map((tk) => {
-      const br = BRAND[tk] && /^#[0-9a-f]{6}$/i.test(BRAND[tk][0]) ? BRAND[tk][0] : null;
-      const c = br && !used.some((u) => near(u, br)) ? br : RING_PAL.find((p) => !used.some((u) => near(u, p))) || RING_PAL[used.length % RING_PAL.length];
-      used.push(c); return c;
-    });
+  // ---------- the biggest-buys ring: the classic site's colours, names and badges ----------
+  const mixHex = (a, b, f) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - f) + parseInt(b.slice(i, i + 2), 16) * f).toString(16).padStart(2, "0")).join("");
+  const HOLD_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#e87ba4", "#6f4cc3", "#d4a017", "#2bb3c0", "#c0392b", "#5b8c2a", "#8e96a3"];
+  // one key per holding: the ticker, or the description without account numbers and share-class words
+  // descriptions without a ticker: drop owner codes in front ("DC Visa Inc"), account numbers, share-class words
+  const plainDesc = (t) => (t.a || "").toUpperCase().replace(/^[^A-Z0-9$]+/, "").replace(/^(SP|DC|JT)\s+/, "").replace(/\s+E\d{6,}.*$/, "")
+    .replace(/\bET\b/, "ETF").replace(/[,\s]+(UNSOLICITED|CL [A-Z]|COM|CMN|SHS|COMMON STOCK)\b.*$/, "").trim();
+  const holdingKey = (t) => (/^GOOG/.test(t.t || "") ? "GOOGL" : t.t) || plainDesc(t).slice(0, 48);  // Alphabet's share classes count as one
+  // brand by ticker (Alphabet's other share lines count as Alphabet), or by fund family for funds without one
+  const brandOf = (t) => BRAND[t.t] || (/^GOOG/.test(t.t || "") ? BRAND.GOOGL : null)
+    || (/VANGUARD/i.test(t.a || "") ? ["#96151D", null, null, "V"] : /ISHARES/i.test(t.a || "") ? ["#3A3F47", null, null, "iS"]
+    : /SPDR/i.test(t.a || "") ? ["#1F3A93", null, null, "S"] : null);
+  const titleCase = (x) => x.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase()).replace(/\bEtf\b/g, "ETF").replace(/\bS&p\b/g, "S&P");
+  function holdingInfo(t) {
+    const up = (t.a || "").toUpperCase();
+    const bond = !t.st && !/\bETF\b/.test(up) && /\bDUE\b|\d%|\bREV\b|\bBDS?\b|\bNOTES?\b|\bBONDS?\b|\bMUNI|\bLINKED\b|\bSTRUCTURED\b/.test(up);
+    const fund = !bond && (t.cls === "fund" || /\b(ETF|FUND|INDEX|TRUST|ISHARES|VANGUARD|SPDR)\b/.test(up));
+    let name;
+    if (t.st) name = cleanName(t.st[0]).replace(/\s*-?\s*(American )?Depositary Shares?.*$/i, "").replace(/[,.]?\s+(Inc|Corp|Corporation|Ltd|Plc|Co)\.?$/i, "");
+    else if (/DIVIDEND APPRECIATION/.test(up)) name = "Vanguard Dividend ETF";
+    else if (/VANGUARD S&P 500/.test(up)) name = "Vanguard S&P 500 ETF";
+    else if (/COMMODITY/.test(up)) name = "Commodities ETF";
+    else if (/INTERNATIONAL TREASURY/.test(up)) name = "Intl. Treasury ETF";
+    else if (/U\.?S\.? TREASURY/.test(up)) name = "U.S. Treasury ETF";
+    else if (/\bLINKED\b|\bSTRUCTURED\b/.test(up)) name = titleCase(plainDesc(t).replace(/\b(FINANCE|BANK|LLC|PLC|INC|CORP|LINKED|NOTES?)\b.*$/, "").trim().split(" ").slice(0, 3).join(" ") || "Bank") + " linked note";
+    else if (bond) name = readableIssuer(plainDesc(t).split(/\s\d/)[0].replace(/\s+(B\/E|BE\/R|SER(IES)?\b|RFDG|DUE\b).*$/i, "").split(" ").slice(0, 4).join(" ")) + " bond";
+    else name = titleCase(plainDesc(t).split(" ").slice(0, 4).join(" "));
+    const badge = bond ? "$" : t.t ? t.t.slice(0, 4) : name.split(" ").filter((w) => /^[A-Z]/.test(w)).slice(0, 2).map((w) => w[0]).join("") || "•";
+    return { kind: bond ? "bond" : fund ? "fund" : "stock", name, badge };
   }
-  // bond and note names as written on the forms are hard to read: tidy the common abbreviations
-  const readableAsset = (a) => String(a || "").replace(/\s+/g, " ").trim().toLowerCase().replace(/\b(\w)/g, (c) => c.toUpperCase())
-    .replace(/\bCnty\b/g, "County").replace(/\bRev\b/g, "Revenue").replace(/\bSch\b/g, "School").replace(/\bDist\b/g, "District").replace(/\bAuth\b/g, "Authority")
-    .replace(/\bHsg\b/g, "Housing").replace(/\bHosp\b/g, "Hospital").replace(/\bFin\b/g, "Finance").replace(/\bBds?\b/g, "Bond").replace(/\bNts?\b/g, "Note")
-    .replace(/\bGo\b/g, "GO").replace(/\bLlc\b/g, "LLC").replace(/\bPlc\b/g, "plc").replace(/\bUs\b/g, "US").replace(/\bS&p\b/g, "S&P");
+  // bond issuers as filings abbreviate them ("MICHIGAN ST HOSP FI") written out ("Michigan State Hospital Finance").
+  // Word by word; "St" is "State" after a state name and "St." (Saint) elsewhere; state abbreviations other than
+  // the first word become the state's name. Words cut off by the filing's length limit can't be recovered.
+  const US_STATES = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+    "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri",
+    "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
+    "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia",
+    "Wisconsin", "Wyoming"];
+  const STATE_ABBR = { ALA: "Alabama", AL: "Alabama", ALASKA: "Alaska", ARIZ: "Arizona", AZ: "Arizona", ARK: "Arkansas", CALIF: "California", CA: "California",
+    COLO: "Colorado", CONN: "Connecticut", CT: "Connecticut", FLA: "Florida", FL: "Florida", GA: "Georgia", ILL: "Illinois", IL: "Illinois", IND: "Indiana",
+    KAN: "Kansas", KANS: "Kansas", KS: "Kansas", KY: "Kentucky", MASS: "Massachusetts", MD: "Maryland", MICH: "Michigan", MI: "Michigan", MINN: "Minnesota",
+    MN: "Minnesota", MISS: "Mississippi", MO: "Missouri", MONT: "Montana", NEB: "Nebraska", NEV: "Nevada", NJ: "New Jersey", NC: "North Carolina",
+    NY: "New York", OKLA: "Oklahoma", OK: "Oklahoma", ORE: "Oregon", PA: "Pennsylvania", SC: "South Carolina", TENN: "Tennessee", TN: "Tennessee",
+    TEX: "Texas", TX: "Texas", VA: "Virginia", VT: "Vermont", WASH: "Washington", WA: "Washington", WIS: "Wisconsin", WISC: "Wisconsin", WI: "Wisconsin",
+    WYO: "Wyoming", NH: "New Hampshire", RI: "Rhode Island", WV: "West Virginia", NM: "New Mexico", DC: "D.C." };
+  const WORD_ABBR = { HOSP: "Hospital", HOSPS: "Hospitals", FI: "Finance", FIN: "Finance", FING: "Financing", FINL: "Financial", AUTH: "Authority",
+    CNTY: "County", CNTYS: "Counties", SCH: "School", SCHS: "Schools", DIST: "District", DISTS: "Districts", REV: "Revenue", RV: "Revenue", REVS: "Revenue",
+    GO: "General Obligation", HSG: "Housing", WTR: "Water", WTRWKS: "Waterworks", SPLY: "Supply", PUB: "Public", IMPT: "Improvement", IMPTS: "Improvements",
+    BLDG: "Building", UNIV: "University", UNI: "University", EDL: "Educational", EDUC: "Education", HLTH: "Health", HLTHCARE: "Healthcare", HEALTHCARE: "Healthcare",
+    FAC: "Facility", FACS: "Facilities", DEV: "Development", REDEV: "Redevelopment", AGY: "Agency", CMNTY: "Community", CMNTYS: "Communities", MTG: "Mortgage",
+    MUN: "Municipal", MUNI: "Municipal", TWP: "Township", BORO: "Borough", TRANSN: "Transportation", TRANS: "Transportation", TRNSMSN: "Transmission",
+    CNTRCT: "Contract", RFDG: "Refunding", REF: "Refunding", SER: "Series", SR: "Senior", PWR: "Power", ELEC: "Electric", UTIL: "Utility", UTILS: "Utilities",
+    TPK: "Turnpike", TPKE: "Turnpike", TWY: "Tollway", BRDG: "Bridge", BRDGS: "Bridges", TUNL: "Tunnel", ARPT: "Airport", INTL: "International",
+    GOVT: "Government", GEN: "General", OBLIG: "Obligation", MLTIFAM: "Multifamily", MLTI: "Multi", APTS: "Apartments", SETTLMT: "Settlement",
+    PMT: "Payment", MSTR: "Master", TOB: "Tobacco", RCPTS: "Receipts", CTF: "Certificates", CTFS: "Certificates", PARTN: "Participation", WKS: "Works",
+    DEPT: "Department", SVCS: "Services", SVC: "Service", MED: "Medical", CTR: "Center", CTRS: "Centers", CMWLTH: "Commonwealth", ASSN: "Association",
+    PKG: "Parking", SWR: "Sewer", SYS: "System", METRO: "Metropolitan", METROP: "Metropolitan", NATL: "National", NAT: "Natural", RES: "Resources",
+    RESH: "Research", ENVIR: "Environmental", ENV: "Environmental", COLL: "College", CMNTYCOLL: "Community College", LN: "Loan", LNS: "Loans",
+    STUD: "Student", HWY: "Highway", HWYS: "Highways", PORT: "Port", RR: "Railroad", TRAN: "Transit", INDL: "Industrial", INDT: "Independent",
+    CONS: "Consolidated", CONSOL: "Consolidated", PROJ: "Project", PJ: "Project", PREPAY: "Prepayment", DB: "Bond", BDS: "Bonds", BD: "Bond",
+    ST: "State", STS: "Streets", JR: "Junior", LTD: "Limited", TX: "Tax", INCR: "Increment", ASSMT: "Assessment", SPL: "Special", EXCH: "Exchange",
+    COOP: "Cooperative", ENERGY: "Energy", AVIATION: "Aviation", COMWLTH: "Commonwealth", COMMWLTH: "Commonwealth", COMMN: "Commission",
+    WASTEWTR: "Wastewater", PURP: "Purpose", INDPT: "Independent", STR: "Street", ED: "Education", EDUCL: "Educational", MGMT: "Management",
+    CORR: "Correctional", RECR: "Recreation", HOUS: "Housing", GTD: "Guaranteed", INS: "Insured", LEASE: "Lease", SANTN: "Sanitation" };
+  function readableIssuer(name) {
+    const words = name.replace(/\bN Y\b/gi, "NY").replace(/\bN Mex\b/gi, "NM").replace(/\bW Va\b/gi, "WV").replace(/&/g, " & ").split(/\s+/).filter(Boolean);
+    const out = [];
+    words.forEach((w, i) => {
+      const up = w.toUpperCase().replace(/[.,]$/, "");
+      const prev = out.length ? out[out.length - 1] : "";
+      if (up === "ST") out.push(US_STATES.includes(prev) || US_STATES.some((x) => x.endsWith(" " + prev)) ? "State" : i === 0 || /^[A-Z]/.test(words[i + 1] || "") && !US_STATES.includes(prev) && i < 2 ? "St." : "State");
+      else if (i > 0 && STATE_ABBR[up] && !(up === "MO" && /^[A-Z][a-z]/.test(words[i + 1] || "") && false)) out.push(STATE_ABBR[up]);
+      else if (up === "UNI" && /^SCH/i.test(words[i + 1] || "")) out.push("Unified");  // "UNI SCH DIST": Unified School District
+      else if (WORD_ABBR[up] && !(up === "TX" && i > 0 && out.includes("Texas"))) out.push(WORD_ABBR[up]);
+      else out.push(w.length <= 3 && w === w.toUpperCase() && !/\d/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    });
+    // a state written twice in a row ("Texas Texas") or "State State" collapses to one
+    // a word or two-word place written twice in a row ("New York New York City") is kept once
+    return out.filter((w, i) => w !== out[i - 1]).join(" ").replace(/\b([A-Z][a-z]+(?: [A-Z][a-z]+)?) \1\b/g, "$1").replace(/\s+&\s+/g, " & ");
+  }
+
   function drawRing(el, items, m) {
     const W = el.clientWidth || 900, wide = W >= 760, tot = items.reduce((a, g) => a + g.v, 0) || 1;
-    const cardHtml = (g, i) => `<div class="rcard" data-i="${i}" style="--c:${g.col}">${logoBox(g.tk || "$", g.col, 40, true)}<div class="rc-txt">
+    const cardHtml = (g, i) => `<div class="rcard" data-i="${i}" style="--c:${g.soft}">${logoBox(g.tk || g.badge, g.col, 40, !g.brand, g.brand)}<div class="rc-txt">
         ${g.href ? `<a class="rc-name" href="${g.href}">${esc(g.name)}</a>` : `<span class="rc-name">${esc(g.name)}</span>`}
         <span class="rc-amt">${usd(g.v)}${g.chg == null ? "" : `<span class="rc-chg ${cls(g.chg)}" title="Today's price against their average buy">${g.chg >= 0 ? "▲" : "▼"} ${Math.abs(g.chg * 100).toFixed(1)}%</span>`}</span>
         <span class="rc-tags">${g.sold >= 500 ? `<span class="rc-tag sold">${usd(g.sold)} sold${g.sold > g.v ? " · more than bought" : ""}</span>` : ""}${g.held === "sold out" ? `<span class="rc-tag sold">Sold out</span>` : g.held && g.held !== "unknown" ? `<span class="rc-tag held">${g.held} still held</span>` : ""}</span></div></div>`;
     const D = wide ? Math.min(400, W - 2 * Math.min(320, W * 0.3) - 60) : Math.min(300, W - 20);
     const face = `<div class="ring-face ${esc(m.party || "I")}" style="width:${D * 0.56}px;height:${D * 0.56}px">${photo(m)}</div>`;
-    const donut = donutSvg(items.map((g) => ({ label: g.tk || g.name, value: g.v, color: g.col, text: usd(g.v) })), { size: 400, hole: 0.7 });
+    const donut = donutSvg(items.map((g) => ({ label: g.tk || g.name, value: g.v, color: g.soft, text: usd(g.v) })), { size: 400, hole: 0.7 });
     if (!wide) {  // phones: the ring on top, the cards in a list underneath
       el.innerHTML = `<div class="ring2-top" style="width:${D}px;height:${D}px">${donut}${face}</div><div class="rcards">${items.map(cardHtml).join("")}</div>`;
       return;
@@ -954,7 +1033,7 @@
         c.style.left = `${x}px`; c.style.top = `${it.y}px`;
         const ex = side === "L" ? cw : W - cw, ey = it.y + hs[it.i] / 2, a = mids[it.i];
         const sx = cx + (R - 1) * Math.sin(a), sy = cy - (R - 1) * Math.cos(a), bx = side === "L" ? ex + 18 : ex - 18;
-        lines += `<polyline points="${sx.toFixed(1)},${sy.toFixed(1)} ${bx.toFixed(1)},${ey.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}" fill="none" stroke="${items[it.i].col}" stroke-width="1.6"/><circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="3.5" fill="${items[it.i].col}" stroke="var(--surface)" stroke-width="1.5"/>`;
+        lines += `<polyline points="${sx.toFixed(1)},${sy.toFixed(1)} ${bx.toFixed(1)},${ey.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}" fill="none" stroke="${items[it.i].soft}" stroke-width="1.6"/><circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="3.5" fill="${items[it.i].soft}" stroke="var(--surface)" stroke-width="1.5"/>`;
       }
     }
     const svg = $(".ring2-lines", el); svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("width", W); svg.setAttribute("height", H); svg.innerHTML = lines;
@@ -973,6 +1052,16 @@
       : /TREAS|T-BILL|UNITED STATES/.test(up) ? "treasury"
       : /\b(ST|STATE|CNTY|COUNTY|CITY|AUTH|DIST|SCH|SCHOOL|REV|GO|HOSP|HSG|WTR|TRANSIT|TURNPIKE|PORT|UNIV|PUB|MUNI|TWP|BORO|COMMONWEALTH|AIRPORT|AVIATION|TOLL|UTIL)\b/.test(up) ? "muni" : "corp";
   }
+  // a bond's readable name: the issuer, without the coupon, series and "due" (maturity) date; as on the classic site
+  function bondName(a, kind) {
+    const up = String(a || "").toUpperCase();
+    if (kind === "treasury") return /BILL/.test(up) ? "U.S. Treasury bills" : /BOND/.test(up) && !/NOTE/.test(up) ? "U.S. Treasury bonds" : "U.S. Treasury notes";
+    let name = String(a || "").replace(/\s+/g, " ").trim().replace(/\s+(B\/E|BE\/R|SER(IES)?\b|RFDG|DUE\b|DTD\b|FC\b|PTC\b).*$/i, "").replace(/\s*\d{1,2}(\.\d+)?\s?%.*$/, "").replace(/\s+\d{1,2}\/\d{1,2}\/\d{2,4}.*$/, "").trim();
+    name = name.length > 4 && name === name.toUpperCase() ? titleCase(name) : name;
+    return ((kind === "fund" ? name : readableIssuer(name)) || a).replace(/Ishares/gi, "iShares").replace(/Spdr/g, "SPDR");
+  }
+  // "DUE 11/15/40": the date the bond is repaid (15 Nov 2040)
+  const dueDate = (a) => { const m = String(a || "").match(/\bDUE\s+(\d{1,2})\/(\d{1,2})\/(\d{2,4})/i); if (!m) return null; const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return [`${y}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`, "filed"]; };
   function bondsInto(el, list) {
     const buys = list.filter((t) => t.side === "B"), sells = list.filter((t) => t.side === "S");
     if (!buys.length) { el.innerHTML = `<p class="muted">No bond or debt purchases ${periodWords()}.</p>`; return; }
@@ -980,12 +1069,12 @@
     const tot = [...k.values()].reduce((a, v) => a + v, 0) || 1, used = Object.entries(DEBT_KINDS).filter(([kk]) => k.get(kk));
     const by = new Map();
     for (const t of buys) { const g = by.get(t.a) || { a: t.a, kind: debtKind(t), list: [] }; g.list.push(t); by.set(t.a, g); }
-    const rows = [...by.values()].map((g) => ({ ...g, e: est(g.list).best, cp: (g.a.toUpperCase().match(/(\d{1,2}(?:\.\d{1,5})?)\s?%/) || [])[1], mt: (MATURITY || {})[g.a] }));
+    const rows = [...by.values()].map((g) => ({ ...g, e: est(g.list).best, cp: (g.a.toUpperCase().match(/(\d{1,2}(?:\.\d{1,5})?)\s?%/) || [])[1], mt: (MATURITY || {})[g.a] || dueDate(g.a), name: bondName(g.a, g.kind) }));
     el.innerHTML = `<div class="grid cols-3">${statCard("Bought", usd(est(buys).best), `${buys.length} purchases, likely ${span(est(buys))}`, "up")}${statCard("Sold or redeemed", sells.length ? usd(est(sells).best) : "$0", `${sells.length} sales`, "down")}
       <div class="card stat"><div class="lbl">What kind</div><div class="stackbar">${used.map(([kk, [l, c]]) => `<i style="width:${(k.get(kk) / tot * 100).toFixed(1)}%;background:${c}" title="${l} ${usd(k.get(kk))}"></i>`).join("")}</div>
       <div class="legend small">${used.map(([kk, [l, c]]) => `<span><i class="sw" style="background:${c}"></i>${l} ${Math.round(k.get(kk) / tot * 100)}%</span>`).join("")}</div></div></div><div class="section" id="bondTbl"></div>`;
     table($("#bondTbl", el), [
-      { key: "a", label: "Issuer", html: (g) => `<i class="sw" style="background:${DEBT_KINDS[g.kind][1]}"></i> ${esc(g.a)}`, sort: (g) => g.a },
+      { key: "a", label: "Issuer", html: (g) => `<span title="As filed: ${esc(g.a)}"><i class="sw" style="background:${DEBT_KINDS[g.kind][1]}"></i> ${esc(g.name)}</span>`, sort: (g) => g.name },
       { key: "kind", label: "Type", cls: "hide-sm", hideSm: true, html: (g) => DEBT_KINDS[g.kind][0], sort: (g) => g.kind },
       { key: "cp", label: "Coupon", cls: "r", html: (g) => g.cp ? `${+g.cp}%` : "–", sort: (g) => +(g.cp || 0) },
       { key: "mt", label: "Matures", cls: "r", html: (g) => g.mt ? `<span class="${g.mt[1] === "likely" ? "muted" : ""}">${fmtDate(g.mt[0], { month: "short", year: "numeric" })}</span>` : "–", sort: (g) => g.mt ? g.mt[0] : "" },

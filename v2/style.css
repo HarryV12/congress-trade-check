@@ -2,14 +2,14 @@
 :root {
   --bg: #f3f5f8; --surface: #ffffff; --ink: #111722; --ink-2: #485263; --muted: #6f7888; --line: #dde2e9; --line-strong: #c3cbd6;
   --accent: #1f3f99; --accent-soft: #e6ecfa; --chip: #edf0f5; --good: #0b6b33; --good-soft: #e3f3e9; --bad: #b42323; --bad-soft: #f9e5e5;
-  --dem: #2f6fd6; --rep: #d64545; --ind: #7a7f87; --chart: #1f5fd6; --chart-area: rgba(31, 95, 214, 0.12); --hot: #d9480f;
+  --dem: #2f6fd6; --rep: #d64545; --ind: #7a7f87; --chart: #1f5fd6; --chart-area: rgba(31, 95, 214, 0.12); --hot: #d9480f; --f-bought: #1f5fd6; --f-sold: #c22f2f; --f-up: #0b7a41; --f-bond: #C98F00;
   --font-ui: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 :root[data-theme="dark"] {
   --bg: #0c1117; --surface: #141b24; --ink: #eef2f6; --ink-2: #c3cbd6; --muted: #8b95a3; --line: #222b36; --line-strong: #344150;
   --accent: #8fb0ff; --accent-soft: #1b2740; --chip: #1d2631; --good: #3fd07f; --good-soft: #10291c; --bad: #ff6b6b; --bad-soft: #2e1617;
-  --dem: #4f8ef0; --rep: #ef6464; --ind: #8c95a3; --chart: #5aa0ff; --chart-area: rgba(90, 160, 255, 0.16); --hot: #e8662e;
+  --dem: #4f8ef0; --rep: #ef6464; --ind: #8c95a3; --chart: #5aa0ff; --chart-area: rgba(90, 160, 255, 0.16); --hot: #e8662e; --f-bought: #5aa0ff; --f-sold: #ff6b6b; --f-up: #3fd07f; --f-bond: #e0a91a;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -326,3 +326,11 @@ a.tpill.S:hover { box-shadow: inset 0 0 18px 3px color-mix(in srgb, var(--bad) 4
 .rc-tag { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
 .rc-tag.sold { color: var(--bad); background: var(--bad-soft); } .rc-tag.held { color: var(--ink-2); background: var(--chip); }
 .rcard { align-items: center; }
+
+/* the three totals under the biggest-buys ring (as on the classic image) */
+.rfacts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+.rfact { background: var(--bg); border-radius: 14px; padding: 16px 18px; }
+.rf-big { font: 700 34px/1.1 var(--font-mono); margin-bottom: 6px; }
+.rf-big.bought { color: var(--f-bought); } .rf-big.sold { color: var(--f-sold); } .rf-big.up { color: var(--f-up); } .rf-big.bond { color: var(--f-bond); }
+.rfact b { display: block; font-size: 15px; margin-bottom: 6px; } .rfact p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+@media (max-width: 760px) { .rfacts { grid-template-columns: minmax(0, 1fr); } .rf-big { font-size: 28px; } }
