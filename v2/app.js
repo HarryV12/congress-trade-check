@@ -1304,8 +1304,17 @@
 
   // ---------- Market drops: why did the market fall? ----------
   let MOVES = null;
-  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
-  let dropInd = "all", dropRange = "all", thRange = "1y";  // the market or industry, and the chart's time span, chosen on Market drops
+  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
+  let dropInd = "all", dropRange = "all", thRange = "1y";
+  // "what happened", in words, from the numbers: how far, over how long, what moved most
+  const coName = (tk) => stocks[tk] ? cleanName(stocks[tk][0]).replace(/s+(Sponsored|Corporation|Oyj|AG|SE)b.*$/i, "") : tk;
+  const spanTxt = (a, b) => a === b ? `on ${fmtDate(a, { day: "numeric", month: "short" })}` : `from ${fmtDate(a, { day: "numeric", month: "short" })} to ${fmtDate(b, { day: "numeric", month: "short" })}`;
+  const pctAbs = (r, d = 1) => `${Math.abs(r * 100).toFixed(d)}%`;
+  const dropWhat = (e) => {
+    const up = e.themes && MOVES && MOVES.themes ? Object.entries(e.themes).filter(([, r]) => r >= 0.01).map(([k, r]) => `${MOVES.themes[k].name.toLowerCase()} (+${pctAbs(r)})`) : [];
+    return `The S&amp;P 500 fell ${pctAbs(e.spy)} and the Nasdaq 100 ${pctAbs(e.qqq)} ${spanTxt(e.start, e.end)}. ${e.sectors[0] ? `${esc(e.sectors[0][0])} was hit hardest (${pct(e.sectors[0][1])}).` : ""} ${e.big.length ? `Among big companies, ${e.big.slice(0, 3).map(([tk, r]) => `${esc(coName(tk))} (${pct(r, 0)})`).join(", ")} fell most.` : ""}${up.length ? ` Not everything fell: ${up.join(", ")} rose.` : ""}`;
+  };
+  const moveWhat = (t, e) => `${esc(t.name)} ${e.dir === "up" ? "jumped" : "fell"} ${pctAbs(e.move)} ${spanTxt(e.start, e.end)}, while the S&amp;P 500 ${e.spy >= 0 ? "rose" : "fell"} ${pctAbs(e.spy)}. ${e.most.length ? `${e.most.slice(0, 3).map(([tk, r]) => `${esc(coName(tk))} (${pct(r, 0)})`).join(", ")} moved most.` : ""}`;  // the market or industry, and the chart's time span, chosen on Market drops
   async function pageDrops() {
     setNav("drops");
     app.innerHTML = `<h1>Why did the market drop?</h1><p class="loading">Loading…</p>`;
@@ -1367,7 +1376,7 @@
           <div class="drop-top"><div><span class="muted small">${k === 0 ? "Latest · " : ""}${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""} · ${e.days} trading day${e.days === 1 ? "" : "s"}</span>
             <h2>S&amp;P 500 <span class="down">${pct(e.spy)}</span> <span class="muted small">Nasdaq ${pct(e.qqq)}</span></h2></div>
             <span class="rec ${e.recover == null ? "open" : ""}">${e.level ? e.recover == null ? "Not yet recovered" : `Recovered in ${e.recover} days` : ""}</span></div>
-          ${e.summary ? `<p class="why-sum"><b>Why it fell:</b> ${esc(e.summary)}</p>` : ""}
+          <div class="why-sum"><p><b>What happened:</b> ${dropWhat(e)}</p>${e.summary ? `<p><b>Why:</b> ${esc(e.summary)}</p>` : ""}</div>
           <div class="drop-grid">
             <div class="dblock"><h4>How far it fell</h4>${bars(idx, mx)}<p class="small muted">Worst day ${fmtDate(e.worst_day.date, { day: "numeric", month: "short" })}: S&amp;P ${pct(e.worst_day.spy)}, Nasdaq ${pct(e.worst_day.qqq)}</p></div>
             <div class="dblock"><h4>Hardest-hit sectors</h4>${bars(e.sectors.map(([s2, r]) => [esc(s2), r]), mx)}</div>
@@ -1375,7 +1384,7 @@
             <div class="dblock"><h4>Big companies that fell most</h4><div class="bigfalls">${e.big.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 28) : ""}<span class="tk">${esc(tk)}</span><b class="down">${pct(r, 0)}</b></a>`).join("")}</div></div>
             ${before(e)}
           </div>
-          ${e.what.length || e.why.length ? `<details class="srcs"><summary>Headlines this explanation is based on (${e.what.length + e.why.length})</summary><div class="news2"><div><h3>That week</h3><ul>${e.what.map(hl).join("")}</ul></div>
+          ${e.what.length || e.why.length ? `<details class="srcs"><summary>Sources: ${e.what.length + e.why.length} news articles</summary><div class="news2"><div><h3>That week</h3><ul>${e.what.map(hl).join("")}</ul></div>
             ${e.why.length ? `<div><h3>The week after</h3><ul>${e.why.map(hl).join("")}</ul></div>` : ""}</div></details>` : ""}</div>`;
       }).join("") || `<p class="muted">No market drop data yet.</p>`}</div>
       ${eps.length > 3 ? `<div class="more"><button type="button" class="btn" id="moreDrops">Show ${eps.length - 3} more drops</button></div>` : ""}
@@ -1539,8 +1548,8 @@
         <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}" id="thm-${k}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
             <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
           <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 0)}</b></a>`).join("")}</div>
-          ${e.summary ? `<p class="why-sum small"><b>Why:</b> ${esc(e.summary)}</p>` : ""}
-          ${e.what.length || e.why.length ? `<details class="srcs"><summary>Headlines (${e.what.length + e.why.length})</summary><ul>${[...e.what, ...e.why].map(hl).join("")}</ul></details>` : ""}</div>`).join("") || `<p class="muted">No sharp moves in this period.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
+          <div class="why-sum small"><p><b>What happened:</b> ${moveWhat(t, e)}</p>${e.summary ? `<p><b>Why:</b> ${esc(e.summary)}</p>` : ""}</div>
+          ${e.what.length || e.why.length ? `<details class="srcs"><summary>Sources: ${e.what.length + e.why.length} news articles</summary><ul>${[...e.what, ...e.why].map(hl).join("")}</ul></details>` : ""}</div>`).join("") || `<p class="muted">No sharp moves in this period.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
       const older = $("#thOlder"); if (older) older.addEventListener("click", () => showTheme(key, true));
       // hover anywhere on the chart: that day's move, the week's, the S&P 500, the stocks that moved most that day,
       // and, inside a shaded band, that jump or fall with its first headline; click a band to read it below
