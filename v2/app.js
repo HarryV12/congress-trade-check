@@ -1306,6 +1306,18 @@
   let MOVES = null;
   const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=5&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
   let dropInd = "all", dropRange = "all", thRange = "1y";
+  // the US stock market's clock (New York time): regular trading 9:30am to 4:00pm ET, Monday to Friday
+  // (exchange holidays aren't known here, so a holiday shows as a normal weekday)
+  function usMarket() {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })
+      .formatToParts(new Date()).map((x) => [x.type, x.value]));
+    const date = `${parts.year}-${parts.month}-${parts.day}`, mins = (+parts.hour % 24) * 60 + +parts.minute, weekend = parts.weekday === "Sat" || parts.weekday === "Sun";
+    const time = `${(+parts.hour % 12) || 12}:${parts.minute}${+parts.hour >= 12 ? "pm" : "am"} ET`;
+    if (weekend) return { date, open: false, text: `Market closed for the weekend · opens Monday 9:30am ET (now ${time})` };
+    if (mins < 570) return { date, open: false, text: `Pre-market · opens 9:30am ET (now ${time}); today's moves appear after the 4:00pm close` };
+    if (mins < 960) return { date, open: true, text: `Market open now (${time}) · today's moves appear after the 4:00pm ET close` };
+    return { date, open: false, text: `Market closed at 4:00pm ET (now ${time})` };
+  }
   // "what happened", in words, from the numbers: how far, over how long, what moved most
   const coName = (tk) => stocks[tk] ? cleanName(stocks[tk][0]).replace(/\s+(Sponsored|Corporation|Oyj|AG|SE)\b.*$/i, "") : tk;
   const spanTxt = (a, b) => a === b ? `on ${fmtDate(a, { day: "numeric", month: "short" })}` : `from ${fmtDate(a, { day: "numeric", month: "short" })} to ${fmtDate(b, { day: "numeric", month: "short" })}`;
@@ -1472,9 +1484,10 @@
       const e = src[w]; e.dir = e.move >= 0 ? "up" : "down";
       const t = { name: key === "all" ? "The S&P 500" : TH[key].name };
       const what = key === "all" ? `The S&amp;P 500 ${e.dir === "up" ? "rose" : "fell"} ${pctAbs(e.move)} ${spanTxt(e.start, e.end)}. Among companies worth $50 billion or more, ${e.most.slice(0, 3).map(([tk, r]) => `${esc(coName(tk))} (${pct(r, 1)})`).join(", ")} moved most.` : moveWhat(t, e);
-      const lbl = w === "today" ? `${e.end === new Date().toISOString().slice(0, 10) ? "Today" : "Latest trading day"} · ${fmtDate(e.end, { weekday: "long", day: "numeric", month: "short" })}` : `This week · ${fmtDate(e.start, { day: "numeric", month: "short" })} – ${fmtDate(e.end, { day: "numeric", month: "short", year: "numeric" })}`;
+      const mk = usMarket(), lastSess = fmtDate(e.end, { weekday: "long", day: "numeric", month: "short" });
+      const lbl = w === "today" ? (e.end === mk.date ? `Today · ${lastSess}` : `Last session · ${lastSess}`) : `This week · ${fmtDate(e.start, { day: "numeric", month: "short" })} – ${fmtDate(e.end, { day: "numeric", month: "short", year: "numeric" })}`;
       return `<div class="card recent ${e.dir}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pctAbs(e.move)}</span>
-          <span><b class="rc-lbl">${lbl}</b><br><span class="muted small">${key === "all" ? "S&amp;P 500" : `${esc(t.name)} · S&amp;P 500 ${pct(e.spy)}`} · past month ${pct(e.month)}</span></span>
+          <span><b class="rc-lbl">${lbl}</b>${w === "today" ? ` <span class="mkt ${mk.open ? "open" : ""}">${esc(mk.text)}</span>` : ""}<br><span class="muted small">${key === "all" ? "S&amp;P 500" : `${esc(t.name)} · S&amp;P 500 ${pct(e.spy)}`} · past month ${pct(e.month)}</span></span>
           <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 1)}</b></a>`).join("")}</div></div>
         <div class="recent-body"><div><p><b>What happened:</b> ${what}</p>${e.summary ? `<p><b>Why:</b> ${esc(e.summary)}</p>` : `<p class="muted"><b>Why:</b> not written yet for this ${w === "today" ? "day" : "week"}.</p>`}</div>
           <div class="ana" data-ana="${key}|${w}"></div></div>
