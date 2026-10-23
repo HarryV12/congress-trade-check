@@ -385,3 +385,10 @@ h2.section { margin-bottom: 0; }
 .sub-row .count { white-space: nowrap; margin-left: auto; }
 .sub-row .seg { flex: none; }
 .sub-row { padding-top: 6px; padding-bottom: 6px; }
+
+/* market drops: every industry at a glance */
+.inds { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.ind { display: grid; gap: 4px; text-align: left; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; }
+.ind:hover { border-color: var(--accent); } .ind > b { font-size: 15px; margin-bottom: 4px; }
+.ind-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-2); } .ind-row b { font: 600 13px var(--font-mono); }
+.ind-last { font: 600 12px var(--font-mono); margin-top: 4px; } .ind-last.up { color: var(--good); } .ind-last.down { color: var(--bad); }

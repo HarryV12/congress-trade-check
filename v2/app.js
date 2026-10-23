@@ -1305,6 +1305,7 @@
   // ---------- Market drops: why did the market fall? ----------
   let MOVES = null;
   const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
+  let dropInd = "all";  // the market or industry chosen on Market drops
   async function pageDrops() {
     setNav("drops");
     app.innerHTML = `<h1>Why did the market drop?</h1><p class="loading">Loading…</p>`;
@@ -1334,26 +1335,6 @@
     }).join("");
 
     // headline numbers
-    // where things stand now: today's move, how far below the high, the latest drop so far, and when past drops this size were won back
-    const qqq = P ? P.px.QQQ : [], L = dates.length - 1, chg = (x, i, k = 1) => x[i] && x[i - k] ? x[i] / x[i - k] - 1 : null;
-    const hiOf = (x) => { let m = 0, at = L; for (let i = Math.max(0, L - 252); i <= L; i++) if (x[i] > m) { m = x[i]; at = i; } return [m, at]; };
-    const [spyHi, spyHiAt] = hiOf(spy), [qqqHi] = hiOf(qqq);
-    const cur = eps[0], isOpen = cur && cur.level && cur.recover == null;
-    let low = null, lowAt = null;
-    if (cur && cur.ia != null) for (let i = cur.ia; i <= L; i++) if (spy[i] != null && (low == null || spy[i] < low)) { low = spy[i]; lowAt = i; }
-    const deepest = cur && low ? low / cur.level - 1 : null, nowVs = cur && cur.level ? spy[L] / cur.level - 1 : null, bounce = low ? spy[L] / low - 1 : null;
-    // past drops of a similar depth (half to twice as deep) that were won back: days from their low to winning it back,
-    // counted on from this drop's low so far
-    const alike = deepest == null ? [] : eps.filter((e) => e !== cur && e.recover != null && e.spy <= deepest * 0.5 && e.spy >= deepest * 2)
-      .map((e) => Math.max(1, Math.round(e.recover - (Date.parse(e.end) - Date.parse(e.start)) / DAY))).sort((a, b) => a - b);
-    const med = alike.length ? alike[Math.floor(alike.length / 2)] : null, eta = lowAt != null && med != null ? new Date(Date.parse(dates[lowAt] + "T00:00:00Z") + med * DAY).toISOString().slice(0, 10) : null;
-    const dayTxt = (n) => `${n} day${n === 1 ? "" : "s"}`;
-    const nowCards = [
-      statCard(`Today · ${fmtDate(dates[L], { day: "numeric", month: "short" })}`, pct(chg(spy, L)), `S&amp;P 500 · Nasdaq 100 ${pct(chg(qqq, L))} · this week ${pct(chg(spy, L, 5))}`, cls(chg(spy, L))),
-      statCard("Below the high", pct(spy[L] / spyHi - 1), `S&amp;P 500 from its high of ${fmtDate(dates[spyHiAt], { day: "numeric", month: "short" })} · Nasdaq 100 ${pct(qqq[L] / qqqHi - 1)}`, cls(spy[L] / spyHi - 1)),
-      cur ? statCard(isOpen ? "Latest drop so far" : "Latest drop", pct(deepest), isOpen ? `at its lowest ${fmtDate(dates[lowAt], { day: "numeric", month: "short" })}, since ${fmtDate(cur.start, { day: "numeric", month: "short" })} · now ${pct(nowVs)} vs before it, ${pct(bounce)} off the low` : `${fmtDate(cur.start, { day: "numeric", month: "short" })} · won back in ${dayTxt(cur.recover)}`, "down") : "",
-      cur ? statCard(isOpen ? "Likely recovery" : "Recovered", isOpen ? (eta ? `≈ ${fmtDate(eta, { day: "numeric", month: "short" })}` : "–") : dayTxt(cur.recover), isOpen ? (alike.length ? `from their low, past drops this deep took ${alike[0]}–${dayTxt(alike[alike.length - 1])} to win back; half within ${dayTxt(med)} (${alike.length} drops). An estimate, not a forecast.` : "no past drop this deep to compare") : `back to the level before the drop on ${fmtDate(dates[cur.ia + 0] && cur.recover != null ? new Date(Date.parse(cur.start + "T00:00:00Z") + cur.recover * DAY).toISOString().slice(0, 10) : cur.end, { day: "numeric", month: "short" })}`) : "",
-    ].join("");
     const open = eps.filter((e) => e.level && e.recover == null);
     // the chart: the S&P 500 every day, each drop shaded and labelled with its fall; hover for its story, click to jump to it
     const Wc = 1000, Hc = 300, i0 = 0, i1 = dates.length - 1, vals = spy.filter((v) => v != null), lo = Math.min(...vals) * 0.97, hi = Math.max(...vals) * 1.01;
@@ -1371,16 +1352,15 @@
     }).join("");
     app.innerHTML = `<h1>Why did the market drop?</h1>
       <p class="lede">Every sharp fall in the S&amp;P 500 and Nasdaq 100 since ${fmtDate(D.start, { month: "short", year: "numeric" })}: how far it fell, what fell most, how long it took to win back, and the headlines that day and the week after.</p>
-      <div class="grid cols-4">${nowCards}</div>
+      <div class="toolbar pin-top"><div class="seg" role="group" aria-label="Market or industry"><button type="button" data-ind="all">Whole market</button>${TH ? Object.entries(TH).map(([k, t]) => `<button type="button" data-ind="${k}">${esc(t.name)}</button>`).join("") : ""}</div></div>
+      <div class="grid cols-4" id="nowCards"></div>
       <div class="card section"><h2>The S&amp;P 500, every drop marked <span class="muted">darker red, deeper fall · hover a drop for what happened, click to read it</span></h2>
         <div class="chart" id="dropChart">${svgBox(Wc, Hc, `
           ${ticks.map((v) => `<line x1="10" x2="${Wc - 60}" y1="${Yc(v).toFixed(1)}" y2="${Yc(v).toFixed(1)}" stroke="var(--line)"/><text x="${Wc - 54}" y="${(Yc(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">$${Math.round(v)}</text>`).join("")}
           ${yrs.map((i) => `<text x="${Xc(i).toFixed(1)}" y="${Hc - 8}" font-size="12" fill="var(--muted)" text-anchor="middle">${dates[i].slice(0, 4)}</text>`).join("")}
           ${shaded}<path d="${line}" fill="none" stroke="var(--chart)" stroke-width="1.8" stroke-linejoin="round"/>`, "S&P 500 with every drop marked")}<div class="tip" hidden></div></div>
         ${open.length ? `<p class="small"><b class="down">Not yet won back:</b> ${open.map((e) => `${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })} (${pct(e.spy)})`).join(" · ")}</p>` : ""}</div>
-      ${TH ? `<div class="card section"><h2>By industry <span class="muted">sharp falls and jumps, whether or not the whole market moved</span></h2>
-        <div class="toolbar"><div class="seg" role="group" aria-label="Industry">${Object.entries(TH).map(([k, t], i) => `<button type="button" data-th="${k}" aria-pressed="${i === 0}">${esc(t.name)}</button>`).join("")}</div></div>
-        <div id="thBody"></div></div>` : ""}
+      ${TH ? `<div class="card section"><h2 id="thTitle">By industry</h2><div id="thBody"></div></div>` : ""}
       <h2 class="section">Every market drop</h2>
       <div class="drops">${eps.map((e, k) => {
         const idx = [["S&amp;P 500", e.spy], ["Nasdaq 100", e.qqq], ...(e.dia != null ? [["Dow", e.dia]] : [])], mx = Math.max(...idx.map((x) => Math.abs(x[1] || 0)), ...e.sectors.map((x) => Math.abs(x[1])), 0.01);
@@ -1426,7 +1406,51 @@
       g.addEventListener("mouseleave", () => { tip.hidden = true; });
       g.addEventListener("click", () => { const el = $(`#drop-${k}`); if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1600); } });
     });
-    if (!TH) return;
+    // where things stand now, for the whole market or one industry: today's move, how far below the year's high, the
+    // latest drop so far, and when past drops this deep were won back (an estimate from history, not a forecast)
+    const L = dates.length - 1, qqq = P ? P.px.QQQ : [], chg = (x, i, k = 1) => x[i] && x[i - k] ? x[i] / x[i - k] - 1 : null;
+    const daily = new Map([["all", spy]]);
+    const seriesOf = (key) => {  // an industry's basket day by day: the equal-weight average of its stocks' daily moves
+      if (!daily.has(key)) { const tks = TH[key].tickers.filter((t) => P.px[t]), x = [1]; for (let i = 1; i <= L; i++) { const rs = tks.map((t) => P.px[t][i] && P.px[t][i - 1] ? P.px[t][i] / P.px[t][i - 1] - 1 : null).filter((r) => r != null); x.push(x[i - 1] * (1 + (rs.length ? rs.reduce((a, r) => a + r, 0) / rs.length : 0))); } daily.set(key, x); }
+      return daily.get(key);
+    };
+    const dropsOf = (key, x) => {  // its falls, each with the level before it, its low and when it was won back
+      const src = key === "all" ? eps : TH[key].events.filter((e) => e.dir === "down");
+      return src.map((e) => {
+        const ia = di.get(e.start), ib = di.get(e.end); if (ia == null || ib == null || !x[ia - 1]) return null;
+        const level = x[ia - 1]; let low = Infinity, lowAt = ia; for (let i = ia; i <= L; i++) { if (i > ib && x[i] >= level) break; if (x[i] < low) { low = x[i]; lowAt = i; } }
+        let rec = null; for (let i = ib + 1; i <= L; i++) if (x[i] >= level) { rec = i; break; }
+        return { start: e.start, ia, level, low, lowAt, depth: low / level - 1, rec, fromLow: rec == null ? null : Math.max(1, Math.round((Date.parse(dates[rec]) - Date.parse(dates[lowAt])) / DAY)) };
+      }).filter(Boolean).sort((a, b) => b.ia - a.ia);
+    };
+    const dayTxt = (n) => `${n} day${n === 1 ? "" : "s"}`, short = (d) => fmtDate(d, { day: "numeric", month: "short" });
+    const drawNow = (key) => {
+      const x = seriesOf(key), name = key === "all" ? "S&amp;P 500" : esc(TH[key].name);
+      let hi = 0, hiAt = L; for (let i = Math.max(0, L - 252); i <= L; i++) if (x[i] > hi) { hi = x[i]; hiAt = i; }
+      let qhi = 0; for (let i = Math.max(0, L - 252); i <= L; i++) if (qqq[i] > qhi) qhi = qqq[i];
+      const ds = dropsOf(key, x), cur = ds[0], open = cur && cur.rec == null;
+      const alike = cur ? ds.filter((d) => d !== cur && d.fromLow != null && d.depth <= cur.depth * 0.5 && d.depth >= cur.depth * 2).map((d) => d.fromLow).sort((a, b) => a - b) : [];
+      const med = alike.length ? alike[Math.floor(alike.length / 2)] : null, eta = open && med != null ? new Date(Date.parse(dates[cur.lowAt] + "T00:00:00Z") + med * DAY).toISOString().slice(0, 10) : null;
+      $("#nowCards").innerHTML = [
+        statCard(`Today · ${short(dates[L])}`, pct(chg(x, L)), key === "all" ? `S&amp;P 500 · Nasdaq 100 ${pct(chg(qqq, L))} · this week ${pct(chg(x, L, 5))}` : `${name} basket · this week ${pct(chg(x, L, 5))} · S&amp;P 500 ${pct(chg(spy, L))}`, cls(chg(x, L))),
+        statCard("Below the high", pct(x[L] / hi - 1), `${name} from its high of ${short(dates[hiAt])}${key === "all" ? ` · Nasdaq 100 ${pct(qqq[L] / qhi - 1)}` : ""}`, cls(x[L] / hi - 1)),
+        cur ? statCard(open ? "Latest drop so far" : "Latest drop", pct(cur.depth), open ? `at its lowest ${short(dates[cur.lowAt])}, since ${short(cur.start)} · now ${pct(x[L] / cur.level - 1)} vs before it, ${pct(x[L] / cur.low - 1)} off the low` : `${short(cur.start)}, at its lowest ${short(dates[cur.lowAt])} · won back ${short(dates[cur.rec])}`, "down") : statCard("Latest drop", "–", "no sharp fall since the data starts"),
+        cur ? statCard(open ? "Likely recovery" : "Recovered", open ? (eta ? `≈ ${short(eta)}` : "–") : short(dates[cur.rec]), open ? (alike.length ? `from their low, past ${key === "all" ? "" : `${name} `}drops this deep took ${alike[0]}–${dayTxt(alike[alike.length - 1])} to win back; half within ${dayTxt(med)} (${alike.length} drops). An estimate, not a forecast.` : "no past drop this deep to compare") : `${dayTxt(cur.fromLow)} after its low`) : "",
+      ].join("");
+    };
+    // the whole market: every industry side by side; click one to open it
+    const overview = () => {
+      $("#thTitle").innerHTML = `By industry <span class="muted">how each one is doing now; pick one above for its sharp moves and headlines</span>`;
+      $("#thBody").innerHTML = `<div class="inds">${Object.entries(TH).map(([k, t]) => {
+        const x = seriesOf(k); let hi = 0; for (let i = Math.max(0, L - 252); i <= L; i++) if (x[i] > hi) hi = x[i];
+        const last = t.events[0];
+        return `<button type="button" class="ind" data-go="${k}"><b>${esc(t.name)}</b><span class="ind-row"><span>Today</span><b class="${cls(chg(x, L))}">${pct(chg(x, L))}</b></span>
+          <span class="ind-row"><span>This week</span><b class="${cls(chg(x, L, 5))}">${pct(chg(x, L, 5))}</b></span><span class="ind-row"><span>Below the high</span><b class="${cls(x[L] / hi - 1)}">${pct(x[L] / hi - 1)}</b></span>
+          ${last ? `<span class="ind-last ${last.dir}">${last.dir === "up" ? "▲" : "▼"} ${pct(last.move, 0).replace(/^[+−]/, "")} ${short(last.start)}</span>` : ""}</button>`;
+      }).join("")}</div>`;
+      $$("[data-go]").forEach((b) => b.addEventListener("click", () => choose(b.dataset.go)));
+    };
+    if (!TH) { drawNow("all"); return; }
     // one industry: its basket against the S&P 500, its sharp moves marked, then each move as a card
     const showTheme = (key) => {
       const t = TH[key], ser = t.series, n = ser.length, Wt = 1000, Ht = 240, base = ser[0][1];
@@ -1452,8 +1476,14 @@
           <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 0)}</b></a>`).join("")}</div>
           ${e.what.length ? `<h4>What happened</h4><ul>${e.what.slice(0, 3).map(hl).join("")}</ul>` : ""}${e.why.length ? `<h4>Why</h4><ul>${e.why.slice(0, 3).map(hl).join("")}</ul>` : ""}</div>`).join("") || `<p class="muted">No sharp moves since ${fmtDate(D.start, { month: "short", year: "numeric" })}.</p>`}</div>`;
     };
-    $$("[data-th]").forEach((b) => b.addEventListener("click", () => { $$("[data-th]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); showTheme(b.dataset.th); }));
-    showTheme(Object.keys(TH)[0]);
+    const choose = (key) => {
+      dropInd = key; $$("[data-ind]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.ind === key)));
+      drawNow(key);
+      if (key === "all") overview(); else { $("#thTitle").innerHTML = `${esc(TH[key].name)} <span class="muted">sharp falls and jumps, whether or not the whole market moved</span>`; showTheme(key); }
+    };
+    $$("[data-ind]").forEach((b) => b.addEventListener("click", () => choose(b.dataset.ind)));
+    choose(TH[dropInd] ? dropInd : "all");
+    pinBar();
   }
 
   // ---------- routing ----------
@@ -1470,10 +1500,7 @@
     else if (page === "drops") pageDrops();
     else pageHome();
     // the page's period and its other main choices stay in a bar under the top bar while scrolling
-    const sb = $("#subbar"), row = $(".sub-row", sb), tb = $(".toolbar.pin-top", app), h1t = $("h1", app);
-    row.innerHTML = "";
-    if (tb) { row.insertAdjacentHTML("beforeend", `<span class="sb-title">${esc(h1t ? h1t.textContent : "")}</span>`); row.appendChild(tb); }
-    sb.hidden = !tb; fitSubbar();
+    pinBar();
     const h1 = $("h1", app);
     if (h1 && !["signals", "drops"].includes(page)) {
       const strip = document.createElement("div"); strip.innerHTML = filterStrip();
@@ -1482,6 +1509,12 @@
       bindStrip(app);
     }
     setTimeout(() => { const t = $("h1", app); document.title = t && page ? `${t.textContent} · Congress Trade Check` : "Congress Trade Check"; }, 0);
+  }
+  function pinBar() {
+    const sb = $("#subbar"), row = $(".sub-row", sb), tb = $(".toolbar.pin-top", app), h1t = $("h1", app);
+    row.innerHTML = "";
+    if (tb) { row.insertAdjacentHTML("beforeend", `<span class="sb-title">${esc(h1t ? h1t.textContent : "")}</span>`); row.appendChild(tb); }
+    sb.hidden = !tb; fitSubbar();
   }
   // the bar sits right under the top bar where that stays put (wide screens); on phones it sticks to the top itself
   function fitSubbar() { const top = $("header.top"); document.documentElement.style.setProperty("--toph", getComputedStyle(top).position === "sticky" ? `${top.offsetHeight}px` : "0px"); }
