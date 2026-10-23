@@ -109,11 +109,9 @@
     CMCSA: ["#6138F5", "nbc"], T: ["#00A8E0", "att"], VZ: ["#CD040B", "verizon"], BA: ["#0D2D6C", "boeing"], GS: ["#6B9BD1", "goldmansachs"],
     BAC: ["#E31837", "bankofamerica"], WFC: ["#D71E28", "wellsfargo"], PFE: ["#0093D0", "pfizer"], CVX: ["#0054A4", "chevron"],
   };
-  // muted, clearly different colours for the slices of a breakdown (the Biggest buys ring)
-  const MUTED = ["#5b7fa6", "#c28a52", "#6b9e78", "#b0697a", "#8576b0", "#a99a4c", "#4f9a9c", "#a5725e", "#7d8c55", "#9a6a99", "#6a8fbd", "#8e9198"];
   const logoBox = (tk, col, size = 34, own = false) => {  // own: use col as the background, not the brand colour
     const b = BRAND[tk], bg = own ? col : b ? (b[2] || b[0]) : col;
-    if (b && b[1] === "ms" && !own) return `<span class="logo" style="width:${size}px;height:${size}px;background:#fff;border:1px solid var(--line)"><span class="ms"><i style="background:#F25022"></i><i style="background:#7FBA00"></i><i style="background:#00A4EF"></i><i style="background:#FFB900"></i></span></span>`;
+    if (b && b[1] === "ms") return `<span class="logo" style="width:${size}px;height:${size}px;background:#fff;border:1px solid var(--line)"><span class="ms"><i style="background:#F25022"></i><i style="background:#7FBA00"></i><i style="background:#00A4EF"></i><i style="background:#FFB900"></i></span></span>`;
     if (b && b[1]) return `<span class="logo" style="width:${size}px;height:${size}px;background:${bg}"><img src="https://cdn.jsdelivr.net/npm/simple-icons@11.14.0/icons/${b[1]}.svg" alt="" loading="lazy"></span>`;
     return `<span class="logo" style="width:${size}px;height:${size}px;background:${bg}"><b style="font-size:${size * ((tk || "").length > 3 ? 0.3 : 0.38)}px">${esc((tk || "•").slice(0, 4))}</b></span>`;
   };
@@ -771,11 +769,9 @@
         ${card("Scorecard", "their buys against the S&amp;P 500", `<div id="score"></div>`)}
         ${card("Factsheet", "", `<div id="facts"></div>`)}
       </div>
-      <div class="grid cols-2 section">
-        ${card("Biggest buys", periodWords(), `<div id="ring" class="ring"></div>`)}
+      <div class="section">${card(`${esc(m.name)}'s biggest buys`, `the 15 largest ${periodWords()}, what they sold and what they still hold`, `<div id="ring" class="ring2"></div>`)}</div>
+      <div class="grid cols-3 section">
         ${card("How fast they report", "days from trade to disclosure", `<div id="delays"></div>`)}
-      </div>
-      <div class="grid cols-2 section">
         ${card("Committee overlap", periodWords(), `<div id="overlap"></div>`)}
         ${card("Sectors bought", periodWords(), `<div id="sectors" class="bars"></div>`)}
       </div>
@@ -834,17 +830,24 @@
       fact("Usual trade size", usualSize.get(m.i) ? usd(usualSize.get(m.i)) : "–"),
     ].join("");
 
-    // biggest buys ring
+    // biggest buys: a ring with the person's photo, each slice labelled with a card (logo, amount, sold, still held)
     const byH = new Map();
     for (const t of buys) { const k = t.t && stocks[t.t] ? t.t : t.a; const g = byH.get(k) || { k, t, b: [], s: 0 }; g.b.push(t); byH.set(k, g); }
     for (const t of sells) { const k = t.t && stocks[t.t] ? t.t : t.a; if (byH.has(k)) byH.get(k).s += t.amt; }
-    const top = [...byH.values()].map((g) => ({ ...g, v: est(g.b).best })).sort((a, b) => b.v - a.v).slice(0, 12);
-    top.forEach((g, i) => { g.col = MUTED[i % MUTED.length]; });
-    const tot = top.reduce((a, g) => a + g.v, 0);
-    $("#ring").innerHTML = top.length ? `<div class="ring-chart">${donutSvg(top.map((g) => ({ label: g.t.t || g.k, value: g.v, color: g.col })))}<div class="ring-face ${esc(m.party || "I")}">${photo(m)}</div></div>
-      <div class="ring-list">${top.map((g) => `<div class="ring-row" style="--c:${g.col}">${logoBox(g.t.t || "", g.col, 34, true)}<div class="ell"><b class="ell">${g.t.t && stocks[g.t.t] ? `<a href="#/stock/${encodeURIComponent(g.t.t)}">${esc(cleanName(stocks[g.t.t][0]))}</a>` : esc(g.k)}</b>
-        <span class="small ${g.s > g.v ? "down" : "muted"}">${g.s >= 500 ? `sold ${usd(g.s)}${g.s > g.v ? " · more than bought" : ""}` : "none sold"}${g.t.t && stocks[g.t.t] ? ` · holds ${leftPlain(leftOf(m.i, g.t.t))}` : ""}</span></div>
-        <span class="mono">${usd(g.v)}<span class="muted small"> ${Math.round(g.v / tot * 100)}%</span></span></div>`).join("")}</div>` : `<p class="muted">No buys ${periodWords()}.</p>`;
+    const top = [...byH.values()].map((g) => ({ ...g, v: est(g.b).best })).sort((a, b) => b.v - a.v).slice(0, 15);
+    ringColours(top.map((g) => g.t.t)).forEach((c, i) => { top[i].col = c; });
+    const ringEl = $("#ring");
+    if (!top.length) ringEl.innerHTML = `<p class="muted">No buys ${periodWords()}.</p>`;
+    else {
+      const items = top.map((g) => {
+        const tk = g.t.t && stocks[g.t.t] ? g.t.t : "", L = tk ? leftOf(m.i, tk) : null;
+        return { tk, col: g.col, v: g.v, sold: g.s, name: tk ? cleanName(stocks[tk][0]) : readableAsset(g.k), href: tk ? `#/stock/${encodeURIComponent(tk)}` : "",
+          held: !tk ? "" : L == null ? "still holds: unknown" : L.value < 1000 ? "still holds: none (sold out)" : `still holds ≈${usd(L.value)}` };
+      });
+      drawRing(ringEl, items, m);
+      let rt; const onResize = () => { clearTimeout(rt); rt = setTimeout(() => { if (ringEl.isConnected) drawRing(ringEl, items, m); else window.removeEventListener("resize", onResize); }, 150); };
+      window.addEventListener("resize", onResize, { passive: true });
+    }
 
     // disclosure delays
     const bins = [["0–15", 0, 15], ["16–30", 16, 30], ["31–45", 31, 45], ["46–60", 46, 60], ["61–90", 61, 90], ["90+", 91, 1e9]];
@@ -888,6 +891,72 @@
     $$("[data-side]").forEach((b) => b.addEventListener("click", () => { side = b.dataset.side; $$("[data-side]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); draw(); }));
     $("#filt").addEventListener("input", (e) => { q = e.target.value.trim().toLowerCase(); draw(); });
     draw();
+  }
+
+  // ---------- the biggest-buys ring ----------
+  // Colourful like the classic site's image: each company's own brand colour, unless it is missing or too close to one
+  // already used, then the next clear colour from a fixed list.
+  const RING_PAL = ["#2f6fd6", "#d9480f", "#1f9d6b", "#c0268f", "#7c3aed", "#d4a017", "#0e8a9c", "#b42323", "#5b8c2a", "#e8862e", "#3d4b5c", "#8a5a2b", "#e05a87", "#2bb3c0", "#6b6f78"];
+  const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const near = (a, b) => { const x = rgb(a), y = rgb(b); return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) < 70; };
+  function ringColours(tks) {
+    const used = [];
+    return tks.map((tk) => {
+      const br = BRAND[tk] && /^#[0-9a-f]{6}$/i.test(BRAND[tk][0]) ? BRAND[tk][0] : null;
+      const c = br && !used.some((u) => near(u, br)) ? br : RING_PAL.find((p) => !used.some((u) => near(u, p))) || RING_PAL[used.length % RING_PAL.length];
+      used.push(c); return c;
+    });
+  }
+  // bond and note names as written on the forms are hard to read: tidy the common abbreviations
+  const readableAsset = (a) => String(a || "").replace(/\s+/g, " ").trim().toLowerCase().replace(/\b(\w)/g, (c) => c.toUpperCase())
+    .replace(/\bCnty\b/g, "County").replace(/\bRev\b/g, "Revenue").replace(/\bSch\b/g, "School").replace(/\bDist\b/g, "District").replace(/\bAuth\b/g, "Authority")
+    .replace(/\bHsg\b/g, "Housing").replace(/\bHosp\b/g, "Hospital").replace(/\bFin\b/g, "Finance").replace(/\bBds?\b/g, "Bond").replace(/\bNts?\b/g, "Note")
+    .replace(/\bGo\b/g, "GO").replace(/\bLlc\b/g, "LLC").replace(/\bPlc\b/g, "plc").replace(/\bUs\b/g, "US").replace(/\bS&p\b/g, "S&P");
+  function drawRing(el, items, m) {
+    const W = el.clientWidth || 900, wide = W >= 760, tot = items.reduce((a, g) => a + g.v, 0) || 1;
+    const cardHtml = (g, i) => `<div class="rcard" data-i="${i}" style="--c:${g.col}">${logoBox(g.tk || "$", g.col, 40, true)}<div class="rc-txt">
+        ${g.href ? `<a class="rc-name" href="${g.href}">${esc(g.name)}</a>` : `<span class="rc-name">${esc(g.name)}</span>`}
+        <span class="rc-amt">${usd(g.v)} <span class="rc-pct">${Math.round(g.v / tot * 100)}%</span></span>
+        <span class="rc-sub ${g.sold > g.v ? "down" : ""}">${g.sold >= 500 ? `sold ${usd(g.sold)}${g.sold > g.v ? " · more than bought" : ""}` : "none sold"}</span>
+        ${g.held ? `<span class="rc-sub rc-held">${g.held}</span>` : ""}</div></div>`;
+    const D = wide ? Math.min(400, W - 2 * Math.min(320, W * 0.3) - 60) : Math.min(300, W - 20);
+    const face = `<div class="ring-face ${esc(m.party || "I")}" style="width:${D * 0.56}px;height:${D * 0.56}px">${photo(m)}</div>`;
+    const donut = donutSvg(items.map((g) => ({ label: g.tk || g.name, value: g.v, color: g.col, text: usd(g.v) })), { size: 400, hole: 0.7 });
+    if (!wide) {  // phones: the ring on top, the cards in a list underneath
+      el.innerHTML = `<div class="ring2-top" style="width:${D}px;height:${D}px">${donut}${face}</div><div class="rcards">${items.map(cardHtml).join("")}</div>`;
+      return;
+    }
+    // slices start at the top and go clockwise; a card sits on the side of its slice, near its height
+    let a0 = 0; const mids = items.map((g) => { const a = a0 + Math.PI * g.v / tot; a0 += 2 * Math.PI * g.v / tot; return a; });
+    el.innerHTML = `<div class="ring2-wide"><svg class="ring2-lines"></svg><div class="ring2-donut" style="width:${D}px;height:${D}px">${donut}${face}</div>${items.map(cardHtml).join("")}</div>`;
+    const box = $(".ring2-wide", el), cards = $$(".rcard", el), cw = Math.min(320, (W - D - 60) / 2);
+    cards.forEach((c) => { c.style.width = `${cw}px`; });
+    const R = D / 2, gap = 8, sides = { L: [], R: [] };
+    items.forEach((g, i) => sides[Math.sin(mids[i]) >= 0 ? "R" : "L"].push(i));
+    // keep the two columns close in length: move the slices nearest the top or bottom across
+    const hs = cards.map((c) => c.offsetHeight), colH = (l) => l.reduce((a, i) => a + hs[i] + gap, 0);
+    for (let k = 0; k < items.length && Math.abs(colH(sides.L) - colH(sides.R)) > 160; k++) {
+      const [from, to] = colH(sides.L) > colH(sides.R) ? ["L", "R"] : ["R", "L"];
+      const pick = sides[from].slice().sort((x, y) => Math.abs(Math.sin(mids[x])) - Math.abs(Math.sin(mids[y])))[0];
+      sides[from].splice(sides[from].indexOf(pick), 1); sides[to].push(pick);
+    }
+    const H = Math.max(D + 40, colH(sides.L) + 10, colH(sides.R) + 10), cx = W / 2, cy = H / 2;
+    box.style.height = `${H}px`;
+    const donutEl = $(".ring2-donut", el); donutEl.style.left = `${cx - R}px`; donutEl.style.top = `${cy - R}px`;
+    let lines = "";
+    for (const side of ["L", "R"]) {
+      const list = sides[side].map((i) => ({ i, want: cy - (R + 6) * Math.cos(mids[i]) - hs[i] / 2 })).sort((a, b) => a.want - b.want);
+      let y = 0; for (const it of list) { it.y = Math.max(it.want, y); y = it.y + hs[it.i] + gap; }
+      let over = y - gap - H; for (let k = list.length - 1; k >= 0 && over > 0; k--) { const it = list[k]; const nxt = k < list.length - 1 ? list[k + 1].y - hs[it.i] - gap : H - hs[it.i]; it.y = Math.min(it.y, nxt); }
+      for (const it of list) {
+        const c = cards[it.i], x = side === "L" ? 0 : W - cw;
+        c.style.left = `${x}px`; c.style.top = `${it.y}px`;
+        const ex = side === "L" ? cw : W - cw, ey = it.y + hs[it.i] / 2, a = mids[it.i];
+        const sx = cx + (R - 1) * Math.sin(a), sy = cy - (R - 1) * Math.cos(a), bx = side === "L" ? ex + 18 : ex - 18;
+        lines += `<polyline points="${sx.toFixed(1)},${sy.toFixed(1)} ${bx.toFixed(1)},${ey.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}" fill="none" stroke="${items[it.i].col}" stroke-width="1.6"/><circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="3.5" fill="${items[it.i].col}" stroke="var(--surface)" stroke-width="1.5"/>`;
+      }
+    }
+    const svg = $(".ring2-lines", el); svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("width", W); svg.setAttribute("height", H); svg.innerHTML = lines;
   }
 
   // ---------- bonds and debt ----------
