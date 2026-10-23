@@ -315,3 +315,6 @@ a.tpill:hover { text-decoration: none; box-shadow: 0 4px 18px rgba(0, 0, 0, .2);
 .tpill .x { border: 0; background: none; font-size: 17px; line-height: 1; color: var(--muted); cursor: pointer; padding: 0 0 0 4px; margin-right: -6px; } .tpill .x:hover { color: var(--ink); }
 .pin .tpill { pointer-events: auto; }
 @media (max-width: 520px) { .tp-ph img { width: 32px; height: 32px; } .tp-txt b { font-size: 13px; } .tp-txt > span { font-size: 11px; } }
+.rc-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 8px; margin-top: 3px; font-size: 12px; }
+.rc-grid > span { color: var(--muted); } .rc-grid > b { font: 600 12px var(--font-mono); color: var(--ink); overflow-wrap: anywhere; }
+.rc-grid > b.down { color: var(--bad); } .rc-grid > b.up { color: var(--good); } .rc-grid > b.muted { color: var(--muted); } .rc-grid > b.avg { color: var(--accent); }

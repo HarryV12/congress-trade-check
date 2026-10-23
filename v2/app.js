@@ -112,7 +112,7 @@
   const logoBox = (tk, col, size = 34, own = false) => {  // own: use col as the background, not the brand colour
     const b = BRAND[tk], bg = own ? col : b ? (b[2] || b[0]) : col;
     if (b && b[1] === "ms") return `<span class="logo" style="width:${size}px;height:${size}px;background:#fff;border:1px solid var(--line)"><span class="ms"><i style="background:#F25022"></i><i style="background:#7FBA00"></i><i style="background:#00A4EF"></i><i style="background:#FFB900"></i></span></span>`;
-    if (b && b[1]) return `<span class="logo" style="width:${size}px;height:${size}px;background:${bg}"><img src="https://cdn.jsdelivr.net/npm/simple-icons@11.14.0/icons/${b[1]}.svg" alt="" loading="lazy"></span>`;
+    if (b && b[1]) return `<span class="logo" style="width:${size}px;height:${size}px;background:${bg}"><img src="https://cdn.jsdelivr.net/npm/simple-icons@11.14.0/icons/${b[1]}.svg" alt="" loading="lazy" onerror="this.outerHTML='<b style=&quot;font-size:${Math.round(size * (tk.length > 3 ? 0.3 : 0.38))}px&quot;>${esc(tk.slice(0, 4))}</b>'"></span>`;
     return `<span class="logo" style="width:${size}px;height:${size}px;background:${bg}"><b style="font-size:${size * ((tk || "").length > 3 ? 0.3 : 0.38)}px">${esc((tk || "•").slice(0, 4))}</b></span>`;
   };
 
@@ -833,7 +833,7 @@
     // biggest buys: a ring with the person's photo, each slice labelled with a card (logo, amount, sold, still held)
     const byH = new Map();
     for (const t of buys) { const k = t.t && stocks[t.t] ? t.t : t.a; const g = byH.get(k) || { k, t, b: [], s: 0 }; g.b.push(t); byH.set(k, g); }
-    for (const t of sells) { const k = t.t && stocks[t.t] ? t.t : t.a; if (byH.has(k)) byH.get(k).s += t.amt; }
+    for (const t of sells) { const k = t.t && stocks[t.t] ? t.t : t.a; if (byH.has(k)) { byH.get(k).s += t.amt; (byH.get(k).sl ||= []).push(t); } }
     const top = [...byH.values()].map((g) => ({ ...g, v: est(g.b).best })).sort((a, b) => b.v - a.v).slice(0, 15);
     ringColours(top.map((g) => g.t.t)).forEach((c, i) => { top[i].col = c; });
     const ringEl = $("#ring");
@@ -841,8 +841,10 @@
     else {
       const items = top.map((g) => {
         const tk = g.t.t && stocks[g.t.t] ? g.t.t : "", L = tk ? leftOf(m.i, tk) : null;
-        return { tk, col: g.col, v: g.v, sold: g.s, name: tk ? cleanName(stocks[tk][0]) : readableAsset(g.k), href: tk ? `#/stock/${encodeURIComponent(tk)}` : "",
-          held: !tk ? "" : L == null ? "still holds: unknown" : L.value < 1000 ? "still holds: none (sold out)" : `still holds ≈${usd(L.value)}` };
+        const pb = g.b.filter((t) => t.ep && t.amt), avg = pb.length ? pb.reduce((a, t) => a + t.amt, 0) / pb.reduce((a, t) => a + t.amt / t.ep, 0) : null, now = tk ? lastPrice(tk) : null;
+        return { tk, col: g.col, v: g.v, sold: g.s, nb: g.b.length, ns: (g.sl || []).length, avg, chg: avg && now ? now / avg - 1 : null,
+          name: tk ? cleanName(stocks[tk][0]) : readableAsset(g.k), href: tk ? `#/stock/${encodeURIComponent(tk)}` : "",
+          held: !tk ? "" : L == null ? "unknown" : L.value < 1000 ? "sold out" : `≈${usd(L.value)}` };
       });
       drawRing(ringEl, items, m);
       let rt; const onResize = () => { clearTimeout(rt); rt = setTimeout(() => { if (ringEl.isConnected) drawRing(ringEl, items, m); else window.removeEventListener("resize", onResize); }, 150); };
@@ -916,9 +918,12 @@
     const W = el.clientWidth || 900, wide = W >= 760, tot = items.reduce((a, g) => a + g.v, 0) || 1;
     const cardHtml = (g, i) => `<div class="rcard" data-i="${i}" style="--c:${g.col}">${logoBox(g.tk || "$", g.col, 40, true)}<div class="rc-txt">
         ${g.href ? `<a class="rc-name" href="${g.href}">${esc(g.name)}</a>` : `<span class="rc-name">${esc(g.name)}</span>`}
-        <span class="rc-amt">${usd(g.v)} <span class="rc-pct">${Math.round(g.v / tot * 100)}%</span></span>
-        <span class="rc-sub ${g.sold > g.v ? "down" : ""}">${g.sold >= 500 ? `sold ${usd(g.sold)}${g.sold > g.v ? " · more than bought" : ""}` : "none sold"}</span>
-        ${g.held ? `<span class="rc-sub rc-held">${g.held}</span>` : ""}</div></div>`;
+        <span class="rc-amt">${usd(g.v)} <span class="rc-pct">${g.nb} buy${g.nb === 1 ? "" : "s"} · ${Math.round(g.v / tot * 100)}% of the total</span></span>
+        <span class="rc-grid">
+          <span>Sold</span><b class="${g.sold >= 500 ? "down" : "muted"}">${g.sold >= 500 ? `${usd(g.sold)} · ${g.ns} sale${g.ns === 1 ? "" : "s"}${g.sold > g.v ? " (more than bought)" : ""}` : "none"}</b>
+          ${g.avg ? `<span>Avg buy</span><b class="avg">${price(g.avg)}</b><span>Change</span><b class="${cls(g.chg)}">${g.chg == null ? "–" : pct(g.chg)}</b>` : ""}
+          ${g.held ? `<span>Left now</span><b class="${g.held === "sold out" ? "down" : ""}">${g.held}</b>` : ""}
+        </span></div></div>`;
     const D = wide ? Math.min(400, W - 2 * Math.min(320, W * 0.3) - 60) : Math.min(300, W - 20);
     const face = `<div class="ring-face ${esc(m.party || "I")}" style="width:${D * 0.56}px;height:${D * 0.56}px">${photo(m)}</div>`;
     const donut = donutSvg(items.map((g) => ({ label: g.tk || g.name, value: g.v, color: g.col, text: usd(g.v) })), { size: 400, hole: 0.7 });

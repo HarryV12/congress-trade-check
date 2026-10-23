@@ -4494,8 +4494,10 @@ if (location.hostname === "harryv12.github.io") {
       ctx.font = `600 18px ${UI}`; ctx.fillStyle = C.text;
       { const full = `${shortName(g.m)} · ${party(g.m)}`, w = 330 - 62 - 12; ctx.fillText(fitText(ctx, ctx.measureText(full).width <= w ? full : shortName(g.m), w), 62, bl); }
       ctx.font = `600 17px ${M}`;
-      ctx.fillStyle = g.buys.length ? C.green : C.label; ctx.fillText(fitText(ctx, g.buys.length ? `${estOf(g.buys).best ? usdEst(estOf(g.buys).best) : "–"} · ${plural(g.buys.length, "buy")}` : "–", 506 - 330 - 10), 330, bl);
-      ctx.fillStyle = g.sells.length ? C.red : C.label; ctx.fillText(fitText(ctx, g.sells.length ? `${estOf(g.sells).best ? usdEst(estOf(g.sells).best) : "?"} · ${plural(g.sells.length, "sale")}` : "–", 676 - 506 - 10), 506, bl);
+      const shrink = (txt, w) => { let fs = 17; ctx.font = `600 ${fs}px ${M}`; while (fs > 12 && ctx.measureText(txt).width > w) ctx.font = `600 ${--fs}px ${M}`; return txt; };
+      ctx.fillStyle = g.buys.length ? C.green : C.label; ctx.fillText(fitText(ctx, shrink(g.buys.length ? `${estOf(g.buys).best ? usdEst(estOf(g.buys).best) : "–"} · ${plural(g.buys.length, "buy")}` : "–", 506 - 330 - 10), 506 - 330 - 10), 330, bl);
+      ctx.fillStyle = g.sells.length ? C.red : C.label; ctx.fillText(fitText(ctx, shrink(g.sells.length ? `${estOf(g.sells).best ? usdEst(estOf(g.sells).best) : "?"} · ${plural(g.sells.length, "sale")}` : "–", 676 - 506 - 10), 676 - 506 - 10), 506, bl);
+      ctx.font = `600 17px ${M}`;
       ctx.fillStyle = g.col || C.amber; ctx.fillText(g.avg ? price(g.avg) : "–", 676, bl);
       const r = g.avg ? last / g.avg - 1 : null;
       ctx.fillStyle = r == null ? C.label : r >= 0 ? C.green : C.red; ctx.fillText(r == null ? "–" : pct(r), 800, bl);
