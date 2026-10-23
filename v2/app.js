@@ -1501,7 +1501,7 @@
     };
     if (!TH) { drawNow("all"); return; }
     // one industry: its basket against the S&P 500, its sharp moves marked, then each move as a card
-    const showTheme = (key) => {
+    const showTheme = (key, every = false) => {  // every: every move, not just the newest six
       const t = TH[key], ser = t.series, n = ser.length, Wt = 1000, Ht = 240, base = ser[0][1];
       const sp0 = spy[di.get(ser[0][0])] || null, vals2 = ser.map((x) => x[1] / base - 1), spv = ser.map((x) => { const i = di.get(x[0]); return sp0 && i != null && spy[i] ? spy[i] / sp0 - 1 : null; });
       const all = [...vals2, ...spv.filter((v) => v != null)], lo2 = Math.min(0, ...all), hi2 = Math.max(0, ...all), pad = (hi2 - lo2) * 0.08 || 0.05;
@@ -1509,10 +1509,8 @@
       const path = (vs) => { let d = "", on = false; vs.forEach((v, i) => { if (v == null) { on = false; return; } d += `${on ? "L" : "M"}${Xt(i).toFixed(1)},${Yt(v).toFixed(1)}`; on = true; }); return d; };
       const near = (d) => { const i = ser.findIndex((x) => x[0] >= d); return i < 0 ? n - 1 : i; };
       const yrs2 = []; for (let i = 1; i < n; i++) if (ser[i][0].slice(0, 4) !== ser[i - 1][0].slice(0, 4)) yrs2.push(i);
-      const ev = t.events, ups = ev.filter((e) => e.dir === "up").length;
-      $("#thBody").innerHTML = `<div class="grid cols-3"><div class="mini"><span class="lbl">Since ${fmtDate(ser[0][0], { month: "short", year: "numeric" })}</span><b class="${cls(vals2[n - 1])}">${pct(vals2[n - 1], 0)}</b><span class="muted small">S&amp;P 500 ${pct(spv[n - 1], 0)}</span></div>
-          <div class="mini"><span class="lbl">Sharp jumps</span><b class="up">${ups}</b><span class="muted small">5 days up ${Math.round(t.cut * 100)}% or more</span></div>
-          <div class="mini"><span class="lbl">Sharp falls</span><b class="down">${ev.length - ups}</b><span class="muted small">5 days down ${Math.round(t.cut * 100)}% or more</span></div></div>
+      const ev = t.events;
+      $("#thBody").innerHTML = `
         <div class="chart">${svgBox(Wt, Ht, `
           ${[lo2, 0, hi2].map((v) => `<line x1="10" x2="${Wt - 60}" y1="${Yt(v).toFixed(1)}" y2="${Yt(v).toFixed(1)}" stroke="var(--line)"/><text x="${Wt - 54}" y="${(Yt(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">${pct(v, 0)}</text>`).join("")}
           ${yrs2.map((i) => `<text x="${Xt(i).toFixed(1)}" y="${Ht - 8}" font-size="12" fill="var(--muted)" text-anchor="middle">${ser[i][0].slice(0, 4)}</text>`).join("")}
@@ -1520,10 +1518,11 @@
           <path d="${path(spv)}" fill="none" stroke="#eb6834" stroke-width="1.6" stroke-dasharray="5 4"/>
           <path d="${path(vals2)}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>`, `${t.name} against the S&P 500`)}</div>
         <div class="legend small"><span><i class="sw" style="background:var(--chart)"></i>${esc(t.name)} basket</span><span><i class="sw" style="background:#eb6834"></i>S&amp;P 500</span><span><i class="sw" style="background:var(--good)"></i>sharp jump</span><span><i class="sw" style="background:var(--bad)"></i>sharp fall</span><span class="tks">${t.tickers.map((x) => tkLink(x)).join(" ")}</span></div>
-        <div class="thmoves">${ev.map((e) => `<div class="thmove ${e.dir}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
+        <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
             <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
           <div class="bigfalls">${e.most.map(([tk, r]) => `<a class="bf" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 24) : ""}<span class="tk">${esc(tk)}</span><b class="${cls(r)}">${pct(r, 0)}</b></a>`).join("")}</div>
-          ${e.what.length ? `<h4>What happened</h4><ul>${e.what.slice(0, 3).map(hl).join("")}</ul>` : ""}${e.why.length ? `<h4>Why</h4><ul>${e.why.slice(0, 3).map(hl).join("")}</ul>` : ""}</div>`).join("") || `<p class="muted">No sharp moves since ${fmtDate(D.start, { month: "short", year: "numeric" })}.</p>`}</div>`;
+          ${e.what.length ? `<h4>What happened</h4><ul>${e.what.slice(0, 3).map(hl).join("")}</ul>` : ""}${e.why.length ? `<h4>Why</h4><ul>${e.why.slice(0, 3).map(hl).join("")}</ul>` : ""}</div>`).join("") || `<p class="muted">No sharp moves since ${fmtDate(D.start, { month: "short", year: "numeric" })}.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
+      const older = $("#thOlder"); if (older) older.addEventListener("click", () => showTheme(key, true));
     };
     const choose = (key) => {
       dropInd = key; $$("[data-ind]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.ind === key)));
