@@ -1336,28 +1336,50 @@
 
     // headline numbers
     const open = eps.filter((e) => e.level && e.recover == null);
-    // the chart: the S&P 500 every day, each drop shaded and labelled with its fall; hover for its story, click to jump to it
-    const Wc = 1000, Hc = 300, i0 = 0, i1 = dates.length - 1, vals = spy.filter((v) => v != null), lo = Math.min(...vals) * 0.97, hi = Math.max(...vals) * 1.01;
-    const Xc = (i) => 10 + (i - i0) / (i1 - i0) * (Wc - 70), Yc = (v) => 22 + (hi - v) / (hi - lo) * (Hc - 52);
+    // sharp jumps, found the same way as the drops (in the browser, from the daily prices): a day up 1.5% or more
+    // (Nasdaq 100 2%), five days up 3% (4%), ten days up 5% (6%); overlapping windows make one jump
+    const qq = P ? P.px.QQQ : [], up = (x, i, k) => x[i] && x[i - k] ? x[i] / x[i - k] - 1 : null, wins = [];
+    for (let i = 10; i < dates.length; i++) {
+      if (up(spy, i, 10) >= 0.05 || up(qq, i, 10) >= 0.06) wins.push([i - 9, i]);
+      else if (up(spy, i, 5) >= 0.03 || up(qq, i, 5) >= 0.04) wins.push([i - 4, i]);
+      else if (up(spy, i, 1) >= 0.015 || up(qq, i, 1) >= 0.02) wins.push([i, i]);
+    }
+    const jumps = [];
+    for (const [a1, b1] of wins) { const j = jumps[jumps.length - 1]; if (j && a1 <= j[1] + 2) j[1] = Math.max(j[1], b1); else jumps.push([a1, b1]); }
+    const jumpList = jumps.map(([a1, b1]) => {
+      let top = a1; for (let i = a1; i <= b1; i++) if (qq[i] / qq[a1 - 1] > qq[top] / qq[a1 - 1]) top = i;
+      return { ia: a1, ib: top, spy: spy[top] / spy[a1 - 1] - 1, qqq: qq[top] / qq[a1 - 1] - 1 };
+    }).filter((j) => j.spy > 0);
+    // the chart: the S&P 500 every day; drops shaded red in the top half, jumps green in the bottom half, the biggest
+    // labelled; months along the bottom. Hover a band for what happened, click a drop to read it
+    const Wc = 1000, Hc = 340, T0 = 18, B0 = Hc - 44, MID = (T0 + B0) / 2, i0 = 0, i1 = dates.length - 1, vals = spy.filter((v) => v != null), lo = Math.min(...vals) * 0.97, hi = Math.max(...vals) * 1.01;
+    const Xc = (i) => 10 + (i - i0) / (i1 - i0) * (Wc - 70), Yc = (v) => T0 + 4 + (hi - v) / (hi - lo) * (B0 - T0 - 8);
     const line = spy.map((v, i) => v == null ? "" : `${i ? "L" : "M"}${Xc(i).toFixed(1)},${Yc(v).toFixed(1)}`).join("");
-    const yrs = []; for (let i = 1; i < dates.length; i++) if (dates[i].slice(0, 4) !== dates[i - 1].slice(0, 4)) yrs.push(i);
+    const months = []; for (let i = 1; i < dates.length; i++) if (dates[i].slice(0, 7) !== dates[i - 1].slice(0, 7)) months.push(i);
     const ticks = [0, 1, 2, 3].map((k) => lo + (hi - lo) * k / 3);
-    const sev = (r) => r <= -0.05 ? 0.42 : r <= -0.03 ? 0.3 : 0.18;
-    let lastLbl = -1e9;
-    const shaded = eps.filter((e) => e.ia != null).sort((a, b) => a.ia - b.ia).map((e) => {
-      const x = Xc(e.ia - 1), w = Math.max(4, Xc(e.ib) - x), big = (e.spy <= -0.04 || e.qqq <= -0.07) && x + w / 2 - lastLbl > 36;
-      if (big) lastLbl = x + w / 2;
-      return `<g class="dz" data-ep="${eps.indexOf(e)}"><rect x="${x.toFixed(1)}" y="16" width="${w.toFixed(1)}" height="${Hc - 46}" fill="var(--bad)" fill-opacity="${sev(e.spy)}"/>
-        ${big ? `<text x="${(x + w / 2).toFixed(1)}" y="12" font-size="11" text-anchor="middle" fill="var(--bad)" font-family="var(--font-mono)" font-weight="700">${pct(e.spy, 0)}</text>` : ""}</g>`;
-    }).join("");
+    const sev = (r) => Math.abs(r) >= 0.05 ? 0.5 : Math.abs(r) >= 0.03 ? 0.34 : 0.2;
+    const bands = (list, isUp) => {
+      let lastLbl = -1e9;
+      return list.filter((e) => e.ia != null).sort((a, b) => a.ia - b.ia).map((e) => {
+        const x = Xc(e.ia - 1), w = Math.max(3, Xc(e.ib) - x), big = (Math.abs(e.spy) >= 0.04 || Math.abs(e.qqq) >= 0.07) && x + w / 2 - lastLbl > 36;
+        if (big) lastLbl = x + w / 2;
+        const y = isUp ? MID : T0, h = (B0 - T0) / 2;
+        return `<g class="dz${isUp ? " up" : ""}" ${isUp ? `data-jp="${jumpList.indexOf(e)}"` : `data-ep="${eps.indexOf(e)}"`}><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${isUp ? "var(--good)" : "var(--bad)"}" fill-opacity="${sev(e.spy)}"/>
+          ${big ? `<text x="${(x + w / 2).toFixed(1)}" y="${isUp ? B0 - 6 : T0 + 12}" font-size="11" text-anchor="middle" fill="${isUp ? "var(--good)" : "var(--bad)"}" font-family="var(--font-mono)" font-weight="700">${pct(e.spy, 0)}</text>` : ""}</g>`;
+      }).join("");
+    };
+    const shaded = `<line x1="10" x2="${Wc - 60}" y1="${MID}" y2="${MID}" stroke="var(--line-strong)" stroke-dasharray="2 4"/>
+      ${bands(eps, false)}${bands(jumpList, true)}`;
+    const axis = months.map((i) => { const jan = dates[i].slice(5, 7) === "01", x = Xc(i).toFixed(1);
+      return `<line x1="${x}" x2="${x}" y1="${B0}" y2="${B0 + (jan ? 8 : 4)}" stroke="var(--line-strong)"/>${+dates[i].slice(5, 7) % 2 === 1 ? `<text x="${x}" y="${B0 + 18}" font-size="10" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], { month: "short" })}</text>` : ""}${jan ? `<text x="${x}" y="${B0 + 34}" font-size="12" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${dates[i].slice(0, 4)}</text>` : ""}`; }).join("");
     app.innerHTML = `<h1>Why did the market drop?</h1>
       <p class="lede">Every sharp fall in the S&amp;P 500 and Nasdaq 100 since ${fmtDate(D.start, { month: "short", year: "numeric" })}: how far it fell, what fell most, how long it took to win back, and the headlines that day and the week after.</p>
       <div class="toolbar pin-top"><div class="seg" role="group" aria-label="Market or industry"><button type="button" data-ind="all">Whole market</button>${TH ? Object.entries(TH).map(([k, t]) => `<button type="button" data-ind="${k}">${esc(t.name)}</button>`).join("") : ""}</div></div>
       <div class="grid cols-4" id="nowCards"></div>
-      <div class="card section"><h2>The S&amp;P 500, every drop marked <span class="muted">darker red, deeper fall · hover a drop for what happened, click to read it</span></h2>
+      <div class="card section"><h2>The S&amp;P 500, every drop and jump <span class="muted">red above: drops · green below: jumps · darker, bigger move · hover for what happened, click a drop to read it</span></h2>
         <div class="chart" id="dropChart">${svgBox(Wc, Hc, `
           ${ticks.map((v) => `<line x1="10" x2="${Wc - 60}" y1="${Yc(v).toFixed(1)}" y2="${Yc(v).toFixed(1)}" stroke="var(--line)"/><text x="${Wc - 54}" y="${(Yc(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">$${Math.round(v)}</text>`).join("")}
-          ${yrs.map((i) => `<text x="${Xc(i).toFixed(1)}" y="${Hc - 8}" font-size="12" fill="var(--muted)" text-anchor="middle">${dates[i].slice(0, 4)}</text>`).join("")}
+          ${axis}
           ${shaded}<path d="${line}" fill="none" stroke="var(--chart)" stroke-width="1.8" stroke-linejoin="round"/>`, "S&P 500 with every drop marked")}<div class="tip" hidden></div></div>
         ${open.length ? `<p class="small"><b class="down">Not yet won back:</b> ${open.map((e) => `${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })} (${pct(e.spy)})`).join(" · ")}</p>` : ""}</div>
       ${TH ? `<div class="card section"><h2 id="thTitle">By industry</h2><div id="thBody"></div></div>` : ""}
@@ -1393,7 +1415,17 @@
       <p class="small muted">Headlines from Google News, kept to well-known financial outlets; links open the publisher. Moves are closing prices, from the close before the drop to its lowest close. Recovered: the first close back at the level before the drop.</p>`;
     // hover and click on the chart
     const ch = $("#dropChart"), svg = $("svg", ch), tip = $(".tip", ch);
-    $$(".dz", ch).forEach((g) => {
+    $$(".dz.up", ch).forEach((g) => {  // a jump: how far it rose
+      const j = jumpList[+g.dataset.jp];
+      g.addEventListener("mouseenter", () => {
+        tip.innerHTML = `<div class="muted">${fmtDate(dates[j.ia])}${j.ib !== j.ia ? ` – ${fmtDate(dates[j.ib])}` : ""}</div><div>S&amp;P 500 <b class="up">${pct(j.spy)}</b> · Nasdaq <b class="up">${pct(j.qqq)}</b></div><div class="small muted">a sharp jump</div>`;
+        tip.hidden = false;
+        const r = svg.getBoundingClientRect(), gx = g.getBoundingClientRect(), left = gx.left - r.left, tw = tip.offsetWidth;
+        tip.style.left = `${Math.max(0, Math.min(r.width - tw, left + (left > r.width / 2 ? -tw - 12 : 12)))}px`; tip.style.top = `${r.height / 2}px`;
+      });
+      g.addEventListener("mouseleave", () => { tip.hidden = true; });
+    });
+    $$(".dz:not(.up)", ch).forEach((g) => {
       const e = eps[+g.dataset.ep], k = +g.dataset.ep;
       g.addEventListener("mouseenter", () => {
         tip.innerHTML = `<div class="muted">${fmtDate(e.start)}${e.end !== e.start ? ` – ${fmtDate(e.end)}` : ""}</div><div>S&amp;P 500 <b class="down">${pct(e.spy)}</b> · Nasdaq <b class="down">${pct(e.qqq)}</b></div>
