@@ -644,3 +644,21 @@ h2 .muted, .card h2 .muted, h5 .muted, .stat .sub, .spike .small, .banner, .why,
 /* hype-check reasons: neutral text; red or green only as a thin edge */
 .why.pos, .why.neg { color: var(--ink-2); padding-left: 7px; border-left: 3px solid var(--good); }
 .why.neg { border-left-color: var(--bad); }
+
+/* ===== Each Congress page's own filters, in its pinned bar ===== */
+.fsep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 2px; flex: none; }
+.toolbar select { font: inherit; font-size: 14px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); max-width: 230px; flex: none; }
+.fchip { font: inherit; font-size: 14px; font-weight: 600; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); cursor: pointer; white-space: nowrap; flex: none; }
+.fchip:hover { border-color: var(--accent); }
+.fchip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.fmore-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.fmore-panel { display: flex; flex-wrap: wrap; gap: 14px 32px; align-items: flex-start; padding-top: 10px; padding-bottom: 14px; border-top: 1px solid var(--line); }
+.fmore-panel[hidden] { display: none; }
+.fmore-panel .field { display: grid; gap: 6px; align-content: start; }
+.fmore-panel .flbl { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.fmore-panel .check { display: flex; gap: 7px; align-items: center; font-size: 15px; cursor: pointer; }
+.fmore-panel .check .muted { font-size: 13px; }
+.fmore-panel input[type="text"] { font: inherit; font-size: 14px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); width: 160px; }
+.fmore-panel select { font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+@media (min-width: 861px) { .sub-row .toolbar:has(.fchip) { flex-wrap: wrap; row-gap: 6px; } }
+@media (max-width: 860px) { .fmore-panel { max-height: 55vh; overflow-y: auto; } }

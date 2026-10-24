@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Public+Sans:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="style.css?v=20261025p">
+<link rel="stylesheet" href="style.css?v=20261025q">
 <script>/* light unless the viewer picked dark */ try { document.documentElement.dataset.theme = localStorage.getItem("ctc-theme") === "dark" ? "dark" : "light"; } catch (e) { document.documentElement.dataset.theme = "light"; }</script>
 </head>
 <body>
@@ -30,10 +30,8 @@
       <input id="q" type="search" placeholder="Search a politician or stock" autocomplete="off" spellcheck="false" aria-label="Search a politician or stock" aria-controls="qList" aria-expanded="false" role="combobox">
       <ul id="qList" role="listbox" hidden></ul>
     </div>
-    <button id="filterBtn" class="btn fbtn" type="button" aria-expanded="false" aria-controls="fpanel">Filter</button>
     <button id="theme" class="icon-btn" type="button" aria-label="Light or dark">◐</button>
   </div>
-  <section id="fpanel" class="fpanel" hidden aria-label="Filter"></section>
 </header>
 <div id="subbar" class="subbar" hidden><div class="wrap sub-row"></div></div>
 <main id="app" class="wrap" tabindex="-1"><p class="loading">Loading the trades…</p></main>
@@ -44,6 +42,6 @@
 <script src="../data.js"></script>
 <script src="../series.js"></script>
 <script src="../holdings_start.js"></script>
-<script src="app.js?v=20261025p"></script>
+<script src="app.js?v=20261025q"></script>
 </body>
 </html>
