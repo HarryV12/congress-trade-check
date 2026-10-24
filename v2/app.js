@@ -1974,124 +1974,103 @@
   // in-page jumps (the address keeps the page; #af-3 would be read as a page of its own)
   document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("[data-goto]"); if (!a) return; e.preventDefault(); const el = document.getElementById(a.dataset.goto); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); });
 
-  // ---------- AI bubble: "The AI Bubble Isn't Where You Think It Is" (Prof G Markets, 24 Oct 2026), as pictures ----------
-  // The numbers the presenter quotes are shown as he states them (marked "video"); where the site has the prices,
-  // the page shows its own figures beside them (marked "our data").
-  const VIDEO = { id: "VLj8xNyOsD8", title: "The AI Bubble Isn't Where You Think It Is", channel: "Prof G Markets", host: "Ed Elson", date: "2026-10-24", length: "10:37" };
+  // ---------- AI bubble watch: are AI stocks or the private AI labs the risk? ----------
+  // Hand-kept facts (each dated and sourced) come from ai_bubble.js, which is updated as news happens; one-year
+  // share moves and company values are worked out live from the site's prices.
+  let AIB = null;
+  const loadAIB = () => AIB ? Promise.resolve(AIB) : loadScript(`../ai_bubble.js?v=1&h=${new Date().toISOString().slice(0, 13)}`).then(() => (AIB = window.CTC_AIB || null));
   async function pageAIBubble() {
     setNav("aibubble");
     app.innerHTML = `<h1>Where is the AI bubble?</h1><p class="loading">Loading…</p>`;
-    const P = await loadAllPrices(); if (location.hash !== "#/aibubble") return;
+    const [P, D] = await Promise.all([loadAllPrices(), loadAIB()]); if (location.hash !== "#/aibubble") return;
+    if (!D) { app.innerHTML = `<h1>Where is the AI bubble?</h1><p class="muted">Couldn't load this page's data.</p>`; return; }
     const L = P.dates.length - 1, yr = (tk) => { const x = P.px[tk]; return x && x[L] && x[L - 252] ? x[L] / x[L - 252] - 1 : null; };
-    const yt = (t) => `https://www.youtube.com/watch?v=${VIDEO.id}&t=${t}s`, at = (t, lbl) => `<a class="vt" href="${yt(t)}" target="_blank" rel="noopener">▶ ${lbl}</a>`;
-    // the biggest US-listed companies today, with the two AI labs placed at their planned IPO values
-    const big = Object.entries(stocks).filter(([t, s]) => s[4] > 5e11 && !["GOOG"].includes(t)).map(([t, s]) => ({ name: coName(t), v: s[4], tk: t }));
-    const ranked = [...big, { name: "Anthropic (planned IPO)", v: 2e12, lab: true }, { name: "OpenAI (planned IPO)", v: 1.4e12, lab: true }].sort((a, b) => b.v - a.v).slice(0, 14);
+    // numbered source links, in the order they first appear
+    const used = [], src = (...keys) => keys.filter((k) => k && D.sources[k]).map((k) => { if (!used.includes(k)) used.push(k); return `<a class="ab-src" href="${esc(D.sources[k].url)}" target="_blank" rel="noopener" title="${esc(D.sources[k].name)}">${used.indexOf(k) + 1}</a>`; }).join("");
+    const bar = (label, v, mx, c, txt) => `<div class="bb-row"><span class="bb-l">${label}</span><span class="bb-t"><i style="width:${Math.max(1, Math.abs(v) / mx * 100).toFixed(1)}%;background:${c}"></i></span><b class="mono">${txt}</b></div>`;
+    const moveBars = (list) => { const rows = list.map(([n, tk]) => [n, tk, yr(tk)]).filter((r) => r[2] != null), mx = Math.max(1, ...rows.map((r) => Math.abs(r[2])));
+      return rows.map(([n, tk, y]) => bar(`${esc(n)} <span class="muted">${tk}</span>`, y, mx, y >= 0 ? "var(--good)" : "var(--bad)", pct(y, 0))).join(""); };
+    // the biggest US-listed companies today, with the private labs placed at their reported values
+    const big = Object.entries(stocks).filter(([t, s]) => s[4] > 5e11 && !["GOOG"].includes(t)).map(([t, s]) => ({ name: coName(t), v: s[4] }));
+    const ranked = [...big, ...D.labs.map((l) => ({ name: `${l.name} (private)`, v: l.value, lab: true }))].sort((a, b) => b.v - a.v).slice(0, 14);
     const rk = (n) => ranked.findIndex((r) => r.name.startsWith(n)) + 1, vmx = ranked[0].v;
-    const bar = (label, v, mx, c, txt, extra = "") => `<div class="bb-row"><span class="bb-l">${label}</span><span class="bb-t"><i style="width:${Math.max(1, Math.abs(v) / mx * 100).toFixed(1)}%;background:${c}"></i></span><b class="mono">${txt}</b>${extra}</div>`;
-    const PE = [["Nvidia", "NVDA", -0.48], ["Broadcom", "AVGO", -0.54], ["Micron", "MU", -0.56], ["SK Hynix", null, -0.49]];
-    const NEO = [["CoreWeave", "CRWV", -0.52], ["IREN", "IREN", -0.53], ["Cipher Mining", "CIFR", -0.55]];
-    const snap = (stocks.SNAP || [])[4] || 0;
-    app.innerHTML = `<div class="ab-hero"><div><span class="ab-kick">AI bubble · explained from one video</span><h1>The AI bubble isn't where you think it is</h1>
-        <p class="lede">After a scary month for AI, many expect the stock market to crash. This video argues the opposite: AI <b>stocks</b> have already priced in the risk, and the real bubble is in <b>private AI start-ups</b> like OpenAI and Anthropic, which are about to meet Wall Street.</p>
-        <p class="small muted">From <b>${esc(VIDEO.title)}</b> · ${esc(VIDEO.channel)}, presented by ${esc(VIDEO.host)} · ${fmtDate(VIDEO.date)} · ${VIDEO.length}. These are his views. Figures marked <span class="tagv">video</span> are as he states them; <span class="tago">our data</span> is from this site's prices.</p></div>
-        <div class="ab-video"><iframe src="https://www.youtube-nocookie.com/embed/${VIDEO.id}" title="${esc(VIDEO.title)}" loading="lazy" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe></div></div>
+    const cw = D.coreweave, odds = cw.defaultOdds;
+    const labTxt = D.labs.map((l) => `${l.name} ${l.label.replace("~", "")}`).join(" · ");
+    const nextHtml = (() => { const main = D.next.filter((s) => !s.fork), fork = D.next.filter((s) => s.fork);
+      const step = (s, k) => `<div class="nx-step${s.kind ? " " + s.kind : ""}">${k != null ? `<span class="nx-n">${k + 1}</span>` : ""}<b>${esc(s.title)}</b><span class="small muted">${esc(s.text)}</span></div>`;
+      return main.map((s, k) => step(s, k)).join(`<div class="nx-arrow">→</div>`) + (fork.length ? `<div class="nx-arrow">→</div><div class="nx-fork">${fork.map((s) => step(s)).join("")}</div>` : ""); })();
+    app.innerHTML = `<div class="ab-hero"><div><span class="ab-kick">AI bubble watch · updated ${fmtDate(D.updated)}</span><h1>Where is the AI bubble?</h1>
+        <p class="lede">AI shares have had a scary few weeks and talk of a crash is everywhere. The numbers point somewhere more specific: listed AI companies are priced on fast-growing profits, while the private AI labs about to sell shares to the public are priced on hope, and that is where the risk sits.</p>
+        <p class="small muted">Share moves and company values update with every market close. Facts from the news are dated, with numbered links to their sources.</p></div>
+        <div class="card ab-news"><h2>What's new</h2><ul>${D.updates.map((u) => `<li><span class="ab-date">${fmtDate(u.date)}</span><span>${esc(u.text)} ${src(u.src, u.src2)}</span></li>`).join("")}</ul></div></div>
 
       <div class="card section ab-two"><h2>A tale of two bubbles</h2>
-        <svg viewBox="0 0 900 300" class="ab-bubbles" role="img" aria-label="Public AI stocks: small, deflating. Private AI start-ups: large, the real bubble">
+        <svg viewBox="0 0 900 300" class="ab-bubbles" role="img" aria-label="Listed AI stocks: priced on profits. Private AI labs: priced on hope, the bigger risk">
           <circle cx="230" cy="160" r="95" fill="var(--good-soft)" stroke="var(--good)" stroke-width="2" stroke-dasharray="6 5"/>
           <text x="230" y="140" text-anchor="middle" font-size="20" font-weight="800" fill="var(--ink)">AI stocks</text>
           <text x="230" y="164" text-anchor="middle" font-size="14" fill="var(--ink-2)">Nvidia, Broadcom, Micron,</text><text x="230" y="182" text-anchor="middle" font-size="14" fill="var(--ink-2)">Big Tech</text>
-          <text x="230" y="212" text-anchor="middle" font-size="13" font-weight="700" fill="var(--good)">risk already priced in</text>
+          <text x="230" y="212" text-anchor="middle" font-size="13" font-weight="700" fill="var(--good)">risk largely priced in</text>
           <text x="230" y="285" text-anchor="middle" font-size="13" fill="var(--muted)">Public market · priced on profits</text>
           <circle cx="620" cy="150" r="140" fill="var(--bad-soft)" stroke="var(--bad)" stroke-width="2.5"/>
-          <text x="620" y="118" text-anchor="middle" font-size="22" font-weight="800" fill="var(--ink)">AI start-ups</text>
-          <text x="620" y="146" text-anchor="middle" font-size="15" fill="var(--ink-2)">OpenAI $1.4T · Anthropic $2T</text>
-          <text x="620" y="168" text-anchor="middle" font-size="15" fill="var(--ink-2)">Thinking Machines, …</text>
-          <text x="620" y="200" text-anchor="middle" font-size="14" font-weight="700" fill="var(--bad)">the real bubble</text>
-          <text x="620" y="298" text-anchor="middle" font-size="13" fill="var(--muted)">Private market · priced on vision</text>
+          <text x="620" y="118" text-anchor="middle" font-size="22" font-weight="800" fill="var(--ink)">Private AI labs</text>
+          <text x="620" y="146" text-anchor="middle" font-size="15" fill="var(--ink-2)">${esc(labTxt)}</text>
+          <text x="620" y="168" text-anchor="middle" font-size="15" fill="var(--ink-2)">losing money, valued on vision</text>
+          <text x="620" y="200" text-anchor="middle" font-size="14" font-weight="700" fill="var(--bad)">the bigger risk</text>
+          <text x="620" y="298" text-anchor="middle" font-size="13" fill="var(--muted)">Private market · priced on hope</text>
           <path d="M335 150 C 400 120, 430 120, 470 140" fill="none" stroke="var(--muted)" stroke-width="2" marker-end="url(#abArrow)"/><text x="400" y="112" text-anchor="middle" font-size="12" fill="var(--muted)">going public soon</text>
           <defs><marker id="abArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
         </svg></div>
 
-      <h2 class="section ab-h">1 · What set off the scare ${at(1, "0:01")}</h2>
-      <div class="grid cols-3">
-        <div class="card ab-quote"><span class="ab-who">Jefferies' global head of equity strategy</span><blockquote>“massive capital destruction in AI”</blockquote></div>
-        <div class="card ab-quote"><span class="ab-who">Broadcom's CEO</span><blockquote>AI investors have “no clue what they're investing in”</blockquote></div>
-        <div class="card ab-quote hot"><span class="ab-who">The last straw: CoreWeave</span><blockquote>A hot AI data-centre company whose bonds went into crisis mode</blockquote></div>
-      </div>
-      <div class="card section"><h2>CoreWeave: borrowing more than it can afford ${at(60, "1:01")}</h2>
+      <h2 class="section ab-h">1 · What's worrying markets</h2>
+      <div class="grid cols-3">${D.voices.map((v, k) => `<div class="card ab-quote${k === D.voices.length - 1 ? " hot" : ""}"><span class="ab-who">${esc(v.who)} · ${fmtDate(v.date)}</span><blockquote>${v.paraphrase ? esc(v.said) : `“${esc(v.said)}”`}</blockquote><span class="small muted">${v.paraphrase ? "in summary" : "quoted"} ${src(v.src)}</span></div>`).join("")}</div>
+      <div class="card section"><h2>CoreWeave: the AI company bond markets are most worried about</h2>
         <div class="ab-cw">
-          <div class="ab-stat"><span class="lbl">Debt taken on</span><b>$50B</b><span class="muted small">video</span></div>
-          <div class="ab-rates"><span class="lbl">Borrowing vs earning</span>${bar("Pays on its debt", 0.09, 0.1, "var(--bad)", "9%")}${bar("Earns on it", 0.01, 0.1, "var(--good)", "1%")}<span class="small muted">"Like taking out a margin loan to buy Treasuries": D.A. Davidson's Gil Luria</span></div>
-          <div class="ab-stat"><span class="lbl">Yield on its unsecured bonds</span><b class="down">15%</b><span class="muted small">exploded higher · video</span></div>
-          <div class="ab-donut"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--chip)" stroke-width="16"/><circle cx="60" cy="60" r="46" fill="none" stroke="var(--bad)" stroke-width="16" stroke-dasharray="${(0.62 * 289).toFixed(1)} 289" transform="rotate(-90 60 60)"/><text x="60" y="66" text-anchor="middle" font-size="22" font-weight="800" fill="var(--ink)">62%</text></svg>
-            <span class="small">chance of default within 5 years, implied by its credit default swaps · video</span></div>
-        </div></div>
+          ${cw.stats.map((s) => `<div class="ab-stat"><span class="lbl">${esc(s.label)}</span><b>${esc(s.value)}</b><span class="muted small">${esc(s.note)} ${src(s.src)}</span></div>`).join("")}
+          <div class="ab-donut"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--chip)" stroke-width="16"/><circle cx="60" cy="60" r="46" fill="none" stroke="var(--bad)" stroke-width="16" stroke-dasharray="${(odds.value * 289).toFixed(1)} 289" transform="rotate(-90 60 60)"/><text x="60" y="66" text-anchor="middle" font-size="20" font-weight="800" fill="var(--ink)">${Math.round(odds.value * 100)}%+</text></svg>
+            <span class="small">${esc(odds.note)} ${src(odds.src)}</span></div>
+        </div><p class="small muted">As of ${fmtDate(cw.asOf)}. A credit default swap is insurance against a company not paying its debts; the more it costs, the likelier markets think a default is.</p></div>
 
-      <div class="card section"><h2>The squeeze: costs up, prices down ${at(90, "1:30")}</h2>
+      <div class="card section"><h2>The squeeze: costs up, prices down</h2>
         <div class="ab-squeeze">
-          <div class="sq sq-up"><span class="sq-arrow">▲</span><b>Cost to build AI is rising</b><ul><li>Memory chip prices up</li><li>Political backlash against data centres</li><li>Data centres harder and dearer to build than planned</li><li>Higher financing costs</li></ul></div>
+          <div class="sq sq-up"><span class="sq-arrow">▲</span><b>The cost of building AI is rising</b><ul>${D.squeeze.up.map((s) => `<li>${s.text} ${src(s.src)}</li>`).join("")}</ul></div>
           <div class="sq-mid">→</div>
-          <div class="sq sq-down"><span class="sq-arrow">▼</span><b>Price to sell AI is falling</b><ul><li>China's cheap open-weight models cut AI token prices <b>in half</b></li><li>OpenAI forced to cut prices by <b>up to 80%</b></li><li>Less money flowing into the AI ecosystem</li></ul></div>
-        </div><p class="small muted">"The cost to build AI is going up and the price to sell it is going down. Not good."</p></div>
+          <div class="sq sq-down"><span class="sq-arrow">▼</span><b>The price of selling AI is falling</b><ul>${D.squeeze.down.map((s) => `<li>${s.text} ${src(s.src)}</li>`).join("")}</ul></div>
+        </div><p class="small muted">Spending more to build something that sells for less only works while lenders keep lending.</p></div>
 
-      <h2 class="section ab-h">2 · Why the stock market isn't the bubble ${at(181, "3:01")}</h2>
-      <div class="card"><h2>Share prices went up, but what investors pay per dollar of profit fell</h2>
-        <p class="small">Profits at the chipmakers exploded, so the shares rose; but the price-to-earnings multiple, the premium investors pay, came down. That means investors are already discounting the risk. Data centres are over 90% of Nvidia's business.</p>
-        <div class="ab-pe">${PE.map(([n, tk, pe]) => { const y = tk ? yr(tk) : null; return `<div class="pe-g"><b>${n}</b>
-          ${bar(`P/E multiple <span class="tagv">video</span>`, pe, 0.6, "var(--bad)", pct(pe, 0))}
-          ${y != null ? bar(`Share price, 1 year <span class="tago">our data</span>`, y, Math.max(0.6, Math.abs(y)), y >= 0 ? "var(--good)" : "var(--bad)", pct(y, 0)) : `<div class="bb-row muted small">No share price in our data (Korea-listed)</div>`}</div>`; }).join("")}</div></div>
-      <div class="grid cols-2 section">
-        <div class="card"><h2>The riskiest names were already crushed ${at(270, "4:30")}</h2><p class="small muted">"Neoclouds": data-centre renters on every AI sceptic's watch list. Down over the past year:</p>
-          ${NEO.map(([n, tk, v]) => { const y = yr(tk); return `<div class="pe-g"><b>${n}</b>${bar(`<span class="tagv">video</span>`, v, 0.6, "var(--bad)", pct(v, 0))}${y != null ? bar(`<span class="tago">our data</span>`, y, 0.6, y >= 0 ? "var(--good)" : "var(--bad)", pct(y, 0)) : ""}</div>`; }).join("")}</div>
-        <div class="card"><h2>Big Tech is priced cautiously, not like 2000 ${at(305, "5:05")}</h2><p class="small muted">Price-to-earnings multiple</p>
-          ${bar("Cisco at the dot-com peak", 100, 105, "var(--bad)", "100+")}
-          ${bar("Meta, Alphabet, Amazon, Microsoft (average, excluding private investment gains)", 30.5, 105, "var(--chart)", "~30")}
-          ${bar("S&amp;P 500 average", 27.7, 105, "var(--muted)", "~28")}
-          <p class="small muted">Video: Big Tech's multiple is "a little over 30", less than 10% above the S&amp;P 500's. "Not buys, but not sells either." The S&amp;P figure here is worked out from that statement.</p></div>
+      <h2 class="section ab-h">2 · Why listed AI stocks look less like a bubble</h2>
+      <div class="grid cols-2">
+        <div class="card"><h2>Share prices rose, but what investors pay for profits fell</h2>
+          <p class="small">Profits at the chipmakers grew faster than their share prices, so the price paid per dollar of expected profit came down. That is the opposite of 2000, when prices ran far ahead of profits.</p>
+          ${D.pe.map((p) => `<div class="pe-g"><b>${esc(p.name)}: ${esc(p.note)}</b>${bar(esc(p.thenLabel), p.then, 45, "var(--muted)", p.then.toFixed(0) + "×")}${bar(esc(p.nowLabel), p.now, 45, "var(--chart)", p.now.toFixed(1) + "×")}<span class="small muted">${src(p.src)}</span></div>`).join("")}
+          <p class="small muted">${esc(D.peNote)} ${src(D.peSrc)}</p>
+          <div class="pe-g"><b>Share price, past year</b>${moveBars(D.chipmakers)}<span class="small muted">From this site's prices, to ${fmtDate(P.dates[L])}.</span></div></div>
+        <div class="card"><h2>Most of the riskiest listed names already fell hard</h2>
+          <p class="small muted">"Neoclouds" rent out AI data centres, mostly with borrowed money. Share price over the past year:</p>
+          ${moveBars(D.neoclouds)}
+          <p class="small muted">From this site's prices, to ${fmtDate(P.dates[L])}. Most of the fragile names have already fallen a long way, so much of the fear is already in their prices.</p></div>
       </div>
 
-      <h2 class="section ab-h">3 · Where the bubble really is ${at(335, "5:35")}</h2>
-      <div class="card"><h2>Where OpenAI and Anthropic would rank at their planned IPO values</h2>
-        <p class="small muted">Biggest US-listed companies by value (<span class="tago">our data</span>), with the two AI labs placed at their reported IPO targets (<span class="tagv">video</span>). The video puts them 7th and 11th in the world; among US-listed companies they would be ${rk("Anthropic")}th and ${rk("OpenAI")}th.</p>
+      <h2 class="section ab-h">3 · Where the risk is</h2>
+      <div class="card"><h2>Where the private AI labs would rank among America's biggest companies</h2>
+        <p class="small muted">Biggest US-listed companies by value, live from this site's data, with the two labs placed at their latest reported values: Anthropic would be ${rk("Anthropic")}th and OpenAI ${rk("OpenAI")}th.</p>
         <div class="ab-rank">${ranked.map((r, k) => `<div class="rk-row${r.lab ? " lab" : ""}"><span class="rk-n">${k + 1}</span><span class="rk-name">${esc(r.name)}</span><span class="rk-t"><i style="width:${(r.v / vmx * 100).toFixed(1)}%"></i></span><b class="mono">${usd(r.v)}</b></div>`).join("")}</div>
-        <p class="small">Together that is "almost equal in value to every tech IPO of the past 45 years combined", for companies that are losing billions of dollars a year.</p></div>
-      <div class="grid cols-2 section">
-        <div class="card"><h2>"Profitable"… on an adjusted basis ${at(395, "6:35")}</h2>
-          <div class="ab-adj"><div class="adj-col"><span class="lbl">What "adjusted" likely leaves out</span><span class="adj-x">Training costs: the biggest expense, the cost of building the product</span><span class="adj-x">Revenue-sharing agreements</span></div>
-            <div class="adj-col"><span class="lbl">Price vs sales</span><b class="ab-big">~30×</b><span class="small">Anthropic's value vs its revenue run rate at $2T (no earnings to compare). That implies a run rate of about $67B a year.</span></div></div></div>
-        <div class="card"><h2>If they were priced like Nvidia ${at(485, "8:05")}</h2><p class="small muted">Apply Nvidia's price-to-sales multiple and the valuations roughly halve:</p>
-          ${bar("Anthropic: planned", 2, 2.1, "var(--bad)", "$2T")}${bar("Anthropic: at Nvidia's multiple", 1, 2.1, "var(--chart)", "~$1T")}
-          ${bar("OpenAI: planned", 1.4, 2.1, "var(--bad)", "$1.4T")}${bar("OpenAI: at Nvidia's multiple", 0.7, 2.1, "var(--chart)", "~$0.7T")}
-          <p class="small muted">OpenAI's ~$0.7T is "halved" in the video, worked out here.</p></div>
-      </div>
-      <div class="card section"><h2>Two kinds of investor, two prices ${at(445, "7:25")}</h2>
-        <div class="ab-mkts"><div class="mk private"><b>Private market</b><span class="muted">Venture capitalists in Silicon Valley</span><ul><li>Care about founder vision and tech talent</li><li>Set the prices of OpenAI and Anthropic</li><li>"Accept everything and question nothing"</li></ul></div>
+        <div class="grid cols-2 ab-ex">${D.labs.map((l) => `<div><b>${esc(l.name)}: ${esc(l.label)}</b><p class="small">${esc(l.status)}. As of ${fmtDate(l.asOf)}. ${src(l.src, l.src2)}</p></div>`).join("")}</div></div>
+      <div class="card section"><h2>Two kinds of investor, two kinds of price</h2>
+        <div class="ab-mkts"><div class="mk private"><b>Private market</b><span class="muted">Venture capital and big-tech partners</span><ul><li>Pay for the founders, the talent and the vision</li><li>Set the values of OpenAI and Anthropic</li><li>Few outside checks on the numbers</li></ul></div>
           <div class="mk-vs">vs</div>
-          <div class="mk public"><b>Public market</b><span class="muted">Investors on Wall Street</span><ul><li>Care about margins and profits</li><li>Set the prices of Nvidia and Big Tech</li><li>The "coliseum" the start-ups are about to enter</li></ul></div></div>
-        <p class="ab-verdict">"We don't have an AI bubble. We have an AI <b>start-up</b> bubble."</p>
-        <div class="grid cols-2 ab-ex">
-          <div><b>Thinking Machines vs Snap</b><p class="small">Valued at 4× Snap with 1/60 of its revenue. ${snap ? `Snap is worth about ${usd(snap)} (<span class="tago">our data</span>), so that implies roughly ${usd(snap * 4)}.` : ""}</p>
-            ${bar("Value", 4, 4, "var(--bad)", "4× Snap")}${bar("Revenue", 1 / 60, 1, "var(--chart)", "1/60 of Snap")}</div>
-          <div><b>A $32B company with no product</b><p class="small">Another AI start-up was valued at $32 billion before it had a product to sell.</p></div>
-        </div></div>
+          <div class="mk public"><b>Public market</b><span class="muted">Investors on the stock exchange</span><ul><li>Pay for profits and margins</li><li>Set the prices of Nvidia and Big Tech</li><li>Full accounts, every quarter</li></ul></div></div>
+        <p class="ab-verdict">The test comes when the labs list: the stock market will price them like the rest of the market.</p></div>
 
-      <h2 class="section ab-h">4 · What happens next ${at(546, "9:06")}</h2>
-      <div class="card"><div class="ab-next">
-        <div class="nx-step"><span class="nx-n">1</span><b>Prospectus filed</b><span class="small muted">Anthropic has filed its IPO papers; "everything is reportedly ready to go".</span></div>
-        <div class="nx-arrow">→</div>
-        <div class="nx-step"><span class="nx-n">2</span><b>IPO in about a month</b><span class="small muted">Public investors will price it on profits, not vision.</span></div>
-        <div class="nx-arrow">→</div>
-        <div class="nx-fork"><div class="nx-step bad"><b>Price comes down</b><span class="small muted">Valuation cut toward public-market levels</span></div><div class="nx-step warn"><b>IPO delayed</b><span class="small muted">The host's prediction: “Anthropic delays IPO, cites market uncertainty”</span></div></div>
-      </div></div>
+      <h2 class="section ab-h">4 · What happens next</h2>
+      <div class="card"><div class="ab-next">${nextHtml}</div></div>
 
       <div class="card section ab-take"><h2>The takeaway</h2><div class="grid cols-3">
-        <div class="tk-pub"><b>Public AI stocks</b><p class="small">Prices up because profits are up; multiples down because investors already see the risks. Not where the bubble is.</p></div>
-        <div class="tk-priv"><b>Private AI start-ups</b><p class="small">Valued like luxury brands on vision, losing money, and about to face Wall Street. That's the bubble.</p></div>
-        <div><b>What to watch</b><p class="small">Anthropic's and OpenAI's IPO pricing, CoreWeave's bonds and credit default swaps, and AI token prices.</p></div>
+        <div><b>Listed AI stocks</b><p class="small">Prices rose because profits rose, and investors now pay less per dollar of profit. Risky, but not a bubble in the 2000 sense.</p></div>
+        <div><b>Private AI labs</b><p class="small">Valued in the trillions while losing money, and about to face public investors. That is where a fall would come from.</p></div>
+        <div><b>What to watch</b><ul class="small">${D.watch.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>
       </div></div>
-      <p class="small muted">Summary of ${esc(VIDEO.channel)}'s video "${esc(VIDEO.title)}" (${fmtDate(VIDEO.date)}), from its transcript. Quotes are the presenter's words. Where the site has prices, its own one-year figures are shown beside the video's; price-to-earnings figures aren't in our data and are as stated in the video. Not investment advice.</p>`;
+      <div class="card section ab-sources"><h2>Sources</h2><ol class="small">${used.map((k) => `<li><a href="${esc(D.sources[k].url)}" target="_blank" rel="noopener">${esc(D.sources[k].name)}</a></li>`).join("")}</ol>
+        <p class="small muted">Facts last checked ${fmtDate(D.updated)}; prices to ${fmtDate(P.dates[L])}. Reported values of private companies are not official. Not investment advice.</p></div>`;
   }
 
   // ---------- routing ----------
