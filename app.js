@@ -2193,29 +2193,28 @@
       <p class="small muted">Sources: U.S. House Clerk financial disclosures (Periodic Transaction Reports) and the Office of Government Ethics (Form 278-T). Senate trades: Quiver Quantitative's transcriptions of Senate reports. Prices: Yahoo Finance. Company size and industry: Nasdaq. Committees and official portraits: the congress-legislators and unitedstates/images projects. This is a research tool, not financial advice.</p>`;
   }
 
-  // ---------- Data Visualization: the classic site's image maker on its own page (linked from the footer only) ----------
-  // The classic page at ?view=dataviz shows just that panel; it is sized to its content here so the page scrolls as one.
-  function pageDataViz() {
+  // ---------- Data Visualization: the image maker (dataviz.js, the main site's own copy), linked from the footer only ----------
+  // dataviz.js holds the controls' markup and the drawing code; it is loaded the first time the page opens, with the
+  // fonts the images are drawn in, and mounted each time.
+  let dvLoading = null;
+  const loadDataViz = () => dvLoading || (dvLoading = (() => {
+    for (const href of ["dataviz.css?v=1",
+      "https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,800;1,6..72,400&family=Public+Sans:wght@400;500;600;700;800&display=swap"]) {
+      const l = document.createElement("link"); l.rel = "stylesheet"; l.href = href; document.head.appendChild(l);
+    }
+    return loadScript("dataviz.js?v=1").then(() => window.HFDataViz || null);
+  })());
+  async function pageDataViz() {
     setNav("dataviz");
+    app.innerHTML = `<h1>Data Visualization</h1><p class="loading">Loading…</p>`;
+    const V = await loadDataViz(); if (location.hash !== "#/dataviz") return;
+    if (!V) { app.innerHTML = `<h1>Data Visualization</h1><p class="muted">Couldn't load the image maker.</p>`; return; }
     app.innerHTML = `<h1>Data Visualization</h1>
       <p class="lede">Charts and fact sheets built from the Congress filings: a stock's price with each trade marked, a politician's record, the latest disclosures and more. Pick a view, then download or copy it as an image.</p>
       <p class="small muted dv-note">The images count every trade in the period you pick. The filters on the Congress pages (large caps, committee-linked and the rest) don't apply here, so a Congress page with its filters on can show smaller totals.</p>
-      <iframe id="dvFrame" class="dv-frame" src="classic.html?view=dataviz&v=20261026a" title="Data Visualization" allow="clipboard-write"></iframe>`;
-    const fr = $("#dvFrame");
-    const fit = () => { try { const pm = fr.contentDocument && fr.contentDocument.getElementById("postMaker"); if (pm) fr.style.height = `${Math.ceil(pm.getBoundingClientRect().height) + 24}px`; } catch (e) { /* not loaded yet */ } };
-    fr.addEventListener("load", () => {
-      fr.classList.add("ready"); fit();
-      try { new ResizeObserver(fit).observe(fr.contentDocument.getElementById("postMaker")); } catch (e) { /* older browser: sized once */ }
-    });
+      <section id="dvApp" class="card">${V.markup}</section>`;
+    V.mount();
   }
-  // the image maker asks for its full-size view here, so it covers the whole page rather than just the frame
-  window.addEventListener("message", (e) => {
-    if (e.origin !== location.origin || !e.data || e.data.type !== "ctc-dv-image") return;
-    const v = $("#dvView"); $("img", v).src = e.data.src; v.hidden = false; document.body.style.overflow = "hidden"; $("button", v).focus();
-  });
-  const closeDv = () => { const v = $("#dvView"); if (v.hidden) return; v.hidden = true; document.body.style.overflow = ""; };
-  $("#dvView").addEventListener("click", closeDv);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDv(); });
 
   // ---------- routing ----------
   let lastPage = null;
@@ -2258,7 +2257,6 @@
   $("#theme").addEventListener("click", () => {
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t; try { localStorage.setItem("ctc-theme", t); } catch (e) { /* storage blocked */ }
-    const fr = $("#dvFrame"); try { if (fr && fr.contentDocument) fr.contentDocument.documentElement.dataset.theme = t; } catch (e) { /* not loaded */ }
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && fMoreOpen) { fMoreOpen = false; const pn = $("#subbar .fmore-panel"); if (pn) pn.hidden = true; $$("[data-fmore]").forEach((b) => b.setAttribute("aria-expanded", "false")); } });
   bindSearch();

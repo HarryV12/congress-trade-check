@@ -1,0 +1,4784 @@
+/* HarryV12 Finance · Data Visualization: the image maker (every view, Download image, Copy image, full-size view).
+   Copied from the classic page's script (classic.html, now legacy) so the main site owns it; built by
+   scratchpad build_dataviz.py on 24 Oct 2026. Runs on the same data files as the rest of the site. The
+   Data Visualization page draws the controls (dvMarkup) and calls HFDataViz.mount() each time it opens. */
+(() => {
+  const D = window.CTC_DATA;
+  if (!D) return;
+  const $ = (s, root = document) => root.querySelector(s);
+  const F = Object.fromEntries(D.fields.map((f, i) => [f, i]));
+  const DAY = 86400000;
+  const today = new Date(D.prices_through + "T00:00:00Z");
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+
+  // ---------- data prep ----------
+  const members = D.members.map((m, i) => ({ ...m, i }));
+  const stocks = D.stocks;
+  // each stock's weekly closes come from series.js (kept apart so data.js stays small enough to publish)
+  for (const [tk, v] of Object.entries(stocks)) if (v.length < 7) v[6] = (window.CTC_SERIES && window.CTC_SERIES[tk]) || [];
+  // a share or fund with a market price: company stock, or a fund / ETF (hidden with the big stocks)
+  const isSec = (t) => t.cls === "stock" || t.cls === "fund";
+  // Amounts: filings give dollar ranges. Where a filing also gives the share count, the exact amount
+  // is known, and those trades show where real amounts sit inside a range: mostly near the bottom
+  // (a $1,001–$15,000 trade is typically about $4–5K, not the $8K middle). Each range is estimated
+  // from them: its average (the best estimate) and its spread, which gives a total's likely range.
+  // crypto (coins, crypto funds, crypto-linked stocks: the Crypto sector) is left off the site for now;
+  // set SHOW_CRYPTO to true to bring it back
+  const SHOW_CRYPTO = false;
+  const cryptoRow = (row) => !SHOW_CRYPTO && stocks[row[F.t]] && stocks[row[F.t]][1] === "Crypto";
+  const POS = [];  // where known trades sit in their range, on a log scale: 0 = bottom, 1 = top
+  for (const row of D.trades) {
+    if (cryptoRow(row)) continue;
+    const ex = row[F.ex], lo = row[F.lo], hi = row[F.hi];
+    if (ex && lo && hi > lo && row[F.src] !== "i") {
+      const x = Math.min(Math.max(ex[0], lo), hi);
+      POS.push({ p: (Math.log(x) - Math.log(lo)) / (Math.log(hi) - Math.log(lo)), m: row[F.m] });
+    }
+  }
+  const bandCache = new Map();
+  // a range's best estimate (mean), spread (sd) and 10th–90th percentiles; skipM leaves one member's
+  // own known trades out (used to test the method against their real amounts)
+  function bandStats(lo, hi, skipM) {
+    const key = `${lo}-${hi}-${skipM ?? ""}`;
+    let b = bandCache.get(key);
+    if (b) return b;
+    const ps = POS.filter((q) => q.m !== skipM).map((q) => q.p);
+    if (!(hi > lo) || !ps.length) { const v = hi > lo ? (lo + hi) / 2 : lo; b = { mean: v, sd: 0, p10: v, p90: v }; }
+    else {
+      const v = ps.map((p) => Math.exp(Math.log(lo) + p * (Math.log(hi) - Math.log(lo)))).sort((a, c) => a - c);
+      const mean = v.reduce((a, x) => a + x, 0) / v.length;
+      b = { mean, sd: Math.sqrt(v.reduce((a, x) => a + (x - mean) ** 2, 0) / v.length), p10: v[Math.floor(v.length * 0.15)], p90: v[Math.min(v.length - 1, Math.floor(v.length * 0.85))] };
+    }
+    bandCache.set(key, b);
+    return b;
+  }
+  const trades = D.trades.filter((row) => !cryptoRow(row)).map((row) => {
+    const t = {};
+    for (const f of D.fields) t[f] = row[F[f]];
+    // a scanned line misread as "$50,000,001 – $5,000,000" (top below bottom) keeps the bracket its top belongs to
+    if (t.hi && t.lo > t.hi) t.lo = [1001, 15001, 50001, 100001, 250001, 500001, 1000001, 5000001, 25000001].filter((x) => x < t.hi).pop() || t.lo;
+    const lo = t.lo || 0, hi = t.hi || lo;
+    // ex: [dollars, shares, price per share, source] where the filing gave a share count and the
+    // dollars fell inside the reported range; it replaces the range's estimate everywhere
+    t.exact = t.ex ? t.ex[0] : null;
+    const band = t.exact || !lo ? null : bandStats(lo, hi);
+    t.amt = t.exact || (band ? band.mean : 0);
+    t.amtSd = band ? band.sd : 0;
+    t.time = Date.parse(t.d + "T00:00:00Z");
+    t.ftime = t.fd ? Date.parse(t.fd + "T00:00:00Z") : null;
+    t.delay = t.ftime ? Math.round((t.ftime - t.time) / DAY) : null;
+    t.side = t.k === "B" ? "B" : (t.k === "S" || t.k === "SP") ? "S" : "O";
+    t.st = (isSec(t) || t.cls === "option") ? stocks[t.t] || null : null;
+    // two timings: from the trade date (what they earned) and from the disclosure date
+    // (what someone copying the public filing could have earned)
+    t.T = { r: t.r, sr: t.sr, ep: t.ep, se: t.se, ew: t.ew, xw: t.xw, xd: t.xd };
+    t.P = { r: t.rf, sr: t.srf, ep: t.epf, se: t.sef, ew: t.efw, xw: t.xfw, xd: t.xfd };
+    return t;
+  });
+  // a put gains when the stock falls; everything else moves with the stock
+  const eff = (t, r) => r == null ? null : (t.opt === "P" ? -r : r);
+  function applyTiming() {
+    for (const t of trades) {
+      const src = S.timing === "public" ? t.P : t.T;
+      t.rr = eff(t, src.r); t.sr = src.sr; t.ep = src.ep; t.se = src.se; t.ew = src.ew; t.xw = src.xw; t.xd = src.xd;
+    }
+  }
+  const priced = (t) => t.st && t.rr != null && t.ew != null && t.ep && t.se;
+  const tradeCount = new Map();
+  for (const t of trades) tradeCount.set(t.m, (tradeCount.get(t.m) || 0) + 1);
+  const memberHasPaper = new Set(trades.filter((t) => t.src === "p").map((t) => t.m));
+  const lastName = (m) => m.last || m.name.split(" ").filter((w) => !/^(jr\.?|sr\.?|ii|iii|iv)$/i.test(w)).pop();
+  // well-known traders, matched by name in the member list
+  const PICKS = [["Donald Trump", /^Donald J\. Trump$/], ["Elon Musk", /^Elon Musk$/], ["Warren Buffett", /^Warren Buffett$/], ["Mark Zuckerberg", /^Mark Zuckerberg$/], ["Jensen Huang", /^Jensen Huang$/], ["Nancy Pelosi", /Pelosi/], ["Ro Khanna", /Khanna/], ["Michael McCaul", /McCaul/], ["Josh Gottheimer", /Gottheimer/],
+    ["Marjorie Taylor Greene", /Marjorie Taylor Greene/], ["Rob Bresnahan", /Bresnahan/], ["Cleo Fields", /Cleo Fields/],
+    ["Lisa McClain", /Lisa C?\.? ?McClain$/], ["Gil Cisneros", /Cisneros/], ["Dan Crenshaw", /Crenshaw/], ["Kevin Hern", /Kevin Hern/],
+    ["Jared Moskowitz", /Moskowitz/]];
+
+  // portraits and daily prices load after the page is drawn
+  let PHOTOS = window.CTC_PHOTOS || null, PRICES = window.CTC_PRICES || null, DESC = null, SIGNALS = null, HOLD0 = null, MATURITY = null;  // MATURITY: bond_maturity.js  // HOLD0: holdings_start.js (year-end holdings from annual reports)  // SIGNALS: signals.js (Public signals view)  // DESC: what each company does (descriptions.js)
+  const loadScript = (src) => new Promise((resolve) => {
+    const s = document.createElement("script");
+    s.src = src; s.onload = () => resolve(true); s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+
+  // ---------- state ----------
+  const defaults = { members: [], committee: "all", chamber: "all", ticker: "", timing: "trade", owner: "all",
+    feedSide: "all", feedDays: "30", feedKept: false, range: "all", hideBig: true, sp500: true, capMax: "0",
+    exclude: "", committeeOnly: true, lateOnly: false, options: true, crypto: true, side: "all", view: "kept",
+    leaderSort: "ret", leaderDir: -1, tradeSort: "d", tradeDir: -1, units: "pct", spikes: true, v: 14,
+    lines: { kept: true, spy: true, inv: true, every: true, big: true } };
+  const postDefaults = { style: "chart", who: "all", trade: "", filing: "", ticker: "", member: "", committee: "", window: "182", sells: true, side: "B", days: "30", sort: "amt", kept: false, noBig: false, debt: "all", hby: "member", bby: "member", bond: "", theme: "light", pv: 11 };
+  let S = { ...defaults }, P = { ...postDefaults };
+  // embedded in the new site's Data Visualization page: the Filter isn't shown there, so it starts from the defaults,
+  // is never saved, and "Apply the Filter" stays off
+  const EMBED = true;  // this copy runs on the main site: the classic Filter is never read, applied or saved
+  try {
+    const saved = EMBED ? {} : JSON.parse(localStorage.getItem("ctc-state") || "{}");
+    S = { ...defaults, ...saved, lines: { ...defaults.lines, ...(saved.lines || {}) } };
+    // v9: percentages became the default view, and members rank by return
+    if (!(saved.v >= 9)) { S.units = "pct"; S.leaderSort = "ret"; S.v = 9; }
+    // v11: the Filter's new defaults, and several politicians at once
+    if (!(saved.v >= 11)) {
+      Object.assign(S, { owner: "self", capMax: "0", exclude: "NVDA, AAPL, GOOGL", hideBig: true, committeeOnly: true, v: 11 });
+      S.members = saved.member && saved.member !== "all" ? [String(saved.member)] : [];
+    }
+    // v12: every line on the portfolio chart starts ticked
+    if (!(saved.v >= 12)) { S.lines = { ...defaults.lines }; S.v = 12; }
+    // v13: Account starts on All (own, spouse, children and joint accounts)
+    if (!(saved.v >= 13)) { S.owner = "all"; S.v = 13; }
+    // v14: nothing is always excluded by default (the old default list NVDA, AAPL, GOOGL is cleared)
+    if (!(saved.v >= 14)) { if (/^\s*NVDA,\s*AAPL,\s*GOOGL\s*$/i.test(S.exclude || "")) S.exclude = ""; S.v = 14; }
+    delete S.member;
+    const savedPost = JSON.parse(localStorage.getItem("ctc-post") || "{}");
+    // earlier versions had three post types
+    if (savedPost.template && !savedPost.style) {
+      savedPost.style = savedPost.template === "roundup" ? "list" : "chart";
+      savedPost.who = savedPost.template === "member" ? "one" : "all";
+    }
+    delete savedPost.template;
+    // v9: one 3:4 size; a politician's poster starts from all the stocks they bought
+    if (!(savedPost.pv >= 9)) { if (savedPost.who === "one") savedPost.ticker = ""; delete savedPost.size; delete savedPost.onlyMember; savedPost.pv = 9; }
+    if (!(savedPost.pv >= 11)) { savedPost.sells = true; savedPost.pv = 11; if (savedPost.style && !["chart", "terminal", "list", "breaking", "scorecard", "leaders", "conflict", "frontpage", "card", "receipt"].includes(savedPost.style)) savedPost.style = "chart"; }
+    P = { ...postDefaults, ...savedPost };
+    // Receipt, Trading card, Front page and Breaking were removed
+    if (["breaking", "frontpage", "card", "receipt"].includes(P.style)) P.style = "chart";
+    if (EMBED) P.kept = false;
+  } catch (e) { /* storage blocked */ }
+  if (!Array.isArray(S.members)) S.members = [];
+  S.members = [...new Set(S.members.map(String))].filter((i) => members[+i]);
+  // the politicians picked in the Filter
+  const picked = () => S.members.map((i) => members[+i]);
+  const single = () => S.members.length === 1 ? members[+S.members[0]] : null;
+  const addMember = (i) => { if (!S.members.includes(String(i))) S.members.push(String(i)); };
+  const dropMember = (i) => { S.members = S.members.filter((x) => x !== String(i)); };
+  let pickSet = new Set();
+  // trades whose forms don't say whose account (OGE reports; Senate trades from Quiver; SEC Form 4)
+  S.crypto = SHOW_CRYPTO;  // no crypto tick while crypto is off
+  // crypto: coins, crypto funds and crypto companies (all filed under the Crypto sector)
+  const isCrypto = (t) => !!t.st && t.st[1] === "Crypto";
+  const ownUnknown = (t) => t.src === "o" || t.src === "q" || t.src === "s" || t.src === "i";
+  // members with a committee (or department) that oversees industries; the oversight filter skips the rest
+  const oversees = new Set(members.filter((m) => (m.committees || []).some((c) => (D.committees[c] || {}).matches)).map((m) => m.i));
+  if (S.committee !== "all" && !D.committees[S.committee]) S.committee = "all";
+  if (S.ticker && !stocks[S.ticker]) S.ticker = "";
+  applyTiming();
+  const save = () => { try { if (!EMBED) localStorage.setItem("ctc-state", JSON.stringify(S)); localStorage.setItem("ctc-post", JSON.stringify(P)); } catch (e) { /* ignore */ } };
+  let tradeLimit = 5, leaderLimit = 5;
+
+  // ---------- formatting ----------
+  const usd = (x) => {
+    const a = Math.abs(x), s = x < 0 ? "−" : "";
+    // thresholds sit just under each unit so $999.9M reads "$1.0B", not "$1000M"
+    if (a >= 0.9995e12) return s + "$" + (a / 1e12).toFixed(a >= 9.95e12 ? 0 : 1) + "T";
+    if (a >= 0.9995e9) return s + "$" + (a / 1e9).toFixed(a >= 9.95e9 ? 0 : 1) + "B";
+    if (a >= 0.9995e6) return s + "$" + (a / 1e6).toFixed(a >= 9.95e6 ? 0 : 1) + "M";
+    if (a >= 999.5) return s + "$" + Math.round(a / 1e3) + "K";
+    return s + "$" + Math.round(a);
+  };
+  const price = (x) => x == null ? "–" : "$" + (x >= 1000 ? x.toLocaleString("en-US", { maximumFractionDigits: 0 }) : x.toFixed(2));
+  const signedUsd = (x) => (x > 0 ? "+" : "") + usd(x);
+  const pct = (x, d = 1) => x == null || !isFinite(x) ? "–" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x * 100).toFixed(d) + "%";
+  const pts = (x) => x == null || !isFinite(x) ? "–" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x * 100).toFixed(1) + "%";
+  const cls = (x) => x > 0 ? "pos" : x < 0 ? "neg" : "";
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const fmtDate = (iso, opts = { month: "short", day: "numeric", year: "numeric" }) => iso ? new Date((iso.length > 10 ? iso : iso + "T00:00:00Z")).toLocaleDateString("en-GB", { ...opts, timeZone: "UTC" }) : "";
+  // where the data starts, for labels ("since Jan 2023", "2023–26")
+  const START_SHORT = fmtDate(D.start, { month: "short", year: "numeric" }), START_LONG = fmtDate(D.start, { month: "long", year: "numeric" });
+  const YEARS_SPAN = `${D.start.slice(0, 4)}–${D.prices_through.slice(2, 4)}`;
+  const DATA_YEARS = []; for (let y = +D.prices_through.slice(0, 4); y >= +D.start.slice(0, 4); y--) DATA_YEARS.push(String(y));
+  const RANGE_CODES = [[1001, "A"], [15001, "B"], [50001, "C"], [100001, "D"], [250001, "E"], [500001, "F"], [1000001, "G"], [5000001, "H"], [25000001, "I"], [50000001, "J"]];
+  // exact amounts: dollars to the cent under $100, whole dollars above
+  const usdExact = (x) => "$" + x.toLocaleString("en-US", { minimumFractionDigits: x < 100 ? 2 : 0, maximumFractionDigits: x < 100 ? 2 : 0 });
+  const EXACT_HOW = { t: "the total the filing states", p: "shares × the price the filing states", c: "shares × the closing price on the trade date" };
+  const fmtShares = (n) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+  const exactNote = (t) => !t.exact ? "" : `Exact, from shares reported: ${t.cls === "option"
+    ? `${fmtShares(t.ex[1] / 100)} option contracts (100 shares each) × ${price(t.ex[2])} premium`
+    : `${fmtShares(t.ex[1])} shares${t.ex[3] === "t" ? "" : ` × ${price(t.ex[2])}`}`} = ${usdExact(t.exact)} (${EXACT_HOW[t.ex[3]] || ""}). Reported range: ${t.lo === t.hi ? usd(t.lo) : `${usdExact(t.lo)}–${usdExact(t.hi)}`}.`;
+  // for totals: a trade's exact dollars where known, otherwise its reported range
+  const loOf = (t) => t.exact || t.lo || 0, hiOf = (t) => t.exact || t.hi || t.lo || 0;
+  // a set of trades: the best estimate (each trade's estimate added up), the likely range (80% likely)
+  // and the full range the filings allow (every trade at the bottom of its range, or at the top)
+  function estOf(list) {
+    let best = 0, v = 0, min = 0, max = 0, n = 0, missing = 0;  // missing: amounts still marked "check scan"
+    for (const t of list) { best += t.amt; v += t.amtSd ** 2; min += loOf(t); max += hiOf(t); n++; if (!t.amt) missing++; }
+    let lo = best, hi = best;
+    if (n === 1 && v) { const b = bandStats(list[0].lo, list[0].hi || list[0].lo); lo = b.p10; hi = b.p90; }
+    else if (v) { const sd = Math.sqrt(v); lo = Math.max(min, best - 1.0364 * sd); hi = Math.min(max, best + 1.0364 * sd); }
+    return { best, lo, hi, min, max, exact: !v, n, missing };
+  }
+  // a best estimate: one decimal under $10K ("$4.6K"), otherwise as usd() writes it
+  const usdEst = (x) => Math.abs(x) >= 999.5 && Math.abs(x) < 9950 ? "$" + (x / 1e3).toFixed(1) + "K" : usd(x);
+  // amounts are shown as their likely range (7 times in 10 the real amount is inside it); charts and
+  // rankings use the best estimate in the middle of it
+  const usdFine = (x) => x >= 1e9 ? "$" + (x / 1e9).toFixed(2) + "B" : x >= 1e6 ? "$" + (x / 1e6).toFixed(1) + "M" : "$" + (x / 1e3).toFixed(1) + "K";
+  const spanText = (lo, hi) => {
+    let a = usdEst(lo), b = usdEst(hi);
+    if (a === b && hi > lo * 1.005) { a = usdFine(lo); b = usdFine(hi); }  // a narrow range on a big total: one more digit
+    return a === b ? a : `${a}–${b}`;
+  };
+  const estText = (e) => e.n && e.missing === e.n ? "–" : e.exact ? usd(e.best) : spanText(e.lo, e.hi);
+  const likelyText = (e) => e.n && e.missing === e.n ? "amount to check" : e.missing ? `${e.missing} to check` : "";
+  // one trade's likely range inside its reported range
+  const tradeRange = (t) => { const b = bandStats(t.lo, t.hi || t.lo); return spanText(b.p10, b.p90); };
+  // a running total (best estimate, and the sum of each trade's amtSd²) as its likely range
+  const sumSpan = (best, v) => !v ? usd(best) : spanText(Math.max(0, best - 1.0364 * Math.sqrt(v)), best + 1.0364 * Math.sqrt(v));
+  const listSpan = (list) => estText(estOf(list));
+  // table cell: the exact amount with its label, or the likely range with the reported range under it
+  const amountCell = (t, withCode = true) => t.exact
+    ? `<span class="exact-amt" title="${esc(exactNote(t))}">${usdExact(t.exact)}<span class="co">exact, from shares reported</span></span>`
+    : !t.amt || t.lo === t.hi ? reportedRange(t, withCode)
+    : `<span class="est-amt">${tradeRange(t)}<span class="co">reported ${esc(reportedRange(t, withCode))}</span></span>`;
+  // one trade in a sentence: exact, or the likely range (open-ended ranges such as "Over $1M" stay as reported)
+  const amountLabel = (t, withCode = true) => t.exact ? `${usdExact(t.exact)} (exact)` : !t.amt || t.lo === t.hi ? reportedRange(t, withCode) : tradeRange(t);
+  // the range as the filing reported it
+  const reportedRange = (t, withCode = true) => {
+    if (t.exact) return `${usdExact(t.exact)} (exact)`;
+    if (!t.lo) return "–";
+    if (t.lo === t.hi) return t.lo % 1000 === 1 ? "Over " + usd(t.lo - 1) : usd(t.lo);
+    const code = (RANGE_CODES.find(([v]) => v === t.lo) || [])[1];
+    return (withCode && code ? code + " · " : "") + usd(t.lo) + "–" + usd(t.hi);
+  };
+  const OWNER = { SP: "Spouse", DC: "Dependent child", JT: "Joint" };
+  const TYPE = { B: "Buy", S: "Sell", SP: "Partial sell", E: "Exchange", U: "Unclear" };
+  // the executive branch (President, Cabinet-level officials) is listed alongside Congress
+  const DEPT_SHORT = [[/^White House Office$/, "White House"], [/^Department of (The )?/i, ""], [/\/Office of The Secretary$/, ""],
+    [/ System Board of Governors$/, ""], [/^Office of (the )?Director of National Intelligence$/i, "National Intelligence"], [/^Office of (the )?/i, ""],
+    [/^National Aeronautics and Space Administration$/, "NASA"], [/^Environmental Protection Agency$/, "EPA"], [/^Health and Human Services$/, "HHS"],
+    [/^Housing and Urban Development$/, "HUD"], [/^Central Intelligence Agency$/, "CIA"], [/^Social Security Administration$/, "Social Security"]];
+  const deptShort = (m) => DEPT_SHORT.reduce((s, [re, to]) => s.replace(re, to), m.agency || "");
+  const isExec = (m) => m.chamber === "E";
+  // business leaders: company insiders whose own trades are public through SEC Form 4
+  const isBiz = (m) => m.chamber === "C";
+  const noSeat = (m) => isExec(m) || isBiz(m);
+  const party = (m) => isBiz(m) ? m.role : isExec(m) ? [m.party, deptShort(m)].filter(Boolean).join("-") : [m.party, m.seat].filter(Boolean).join("-");
+  // "Rep." / "Sen." / "Treasury Secretary" before a name; "Representative" / "Senator" / the role on its own
+  const prefix = (m) => noSeat(m) ? m.role : m.chamber === "S" ? "Sen." : "Rep.";
+  const office = (m) => noSeat(m) ? m.role : m.chamber === "S" ? "Senator" : "Representative";
+  const cname = (cid) => (D.committees[cid] || {}).name || cid;
+  const initials = (m) => m.name.split(" ").filter((w) => /^[A-Z]/.test(w)).map((w) => w[0]).slice(0, 2).join("");
+  const shortName = (m) => { const first = m.name.split(" ")[0]; const last = lastName(m); return first === last ? m.name : `${first} ${last}`; };
+  const face = (m, size = "") => {
+    const uri = PHOTOS && PHOTOS[m.id];
+    const pc = ["D", "R", "I"].includes(m.party) ? m.party : "I";
+    return uri ? `<img class="face ${size} ${pc}" src="${uri}" alt="" title="${esc(m.name)}">`
+      : `<span class="face ${size} ${pc}" title="${esc(m.name)}">${esc(initials(m))}</span>`;
+  };
+
+  // ---------- buying spikes: many members suddenly buying the same stock ----------
+  // A big, ordinary stock (Berkshire, Apple) is normally filtered out, but not when members pile
+  // into it all at once. For each stock, the usual number of different members buying it in a month
+  // comes from the whole data. A buy is part of a spike when at least 3 different members bought that
+  // stock within 15 days either side of it, and that many would turn up by chance less than 1 time
+  // in 20 at the usual rate (a Poisson test, the standard check for "more events than usual").
+  const SPIKE_MIN = 3, SPIKE_P = 0.05, SPIKE_HALF = 15 * DAY;
+  const poissonTail = (k, lam) => { let term = Math.exp(-lam), cdf = 0; for (let i = 0; i < k; i++) { cdf += term; term *= lam / (i + 1); } return Math.max(0, 1 - cdf); };
+  (function markSpikes() {
+    const months = Math.max(1, (today - Date.parse(D.start + "T00:00:00Z")) / (30.44 * DAY));
+    const byStock = new Map();
+    for (const t of trades) if (t.side === "B" && t.st) { if (!byStock.has(t.t)) byStock.set(t.t, []); byStock.get(t.t).push(t); }
+    for (const list of byStock.values()) {
+      list.sort((a, b) => a.time - b.time);
+      const buyerMonths = new Set(list.map((t) => t.m + "|" + t.d.slice(0, 7))).size;
+      let lo = 0, hi = 0;
+      for (const t of list) {
+        while (list[lo].time < t.time - SPIKE_HALF) lo++;
+        while (hi < list.length && list[hi].time <= t.time + SPIKE_HALF) hi++;
+        const buyers = new Set(); for (let j = lo; j < hi; j++) buyers.add(list[j].m);
+        const k = buyers.size;
+        if (k < SPIKE_MIN) continue;
+        // the usual monthly rate, leaving this month's own buyers out of it
+        const usual = Math.max(0.05, (buyerMonths - k) / Math.max(1, months - 1));
+        const p = poissonTail(k, usual);
+        if (p <= SPIKE_P) t.spike = { k, usual, p };
+      }
+    }
+  })();
+  const spikeText = (s) => `${s.k} members bought it within a month; usually ${s.usual < 1 ? "under 1" : s.usual.toFixed(1)} a month`;
+
+  // ---------- filtering ----------
+  const chamberOf = (m) => m.chamber || "H";
+  const onCommittee = (m) => (S.committee === "all" || (m.committees || []).includes(S.committee))
+    && (S.chamber === "all" ? !isBiz(m) : chamberOf(m) === S.chamber);
+  const inRange = (t) => !(/^\d{4}$/.test(S.range) && !t.d.startsWith(S.range)) && !((S.range === "182" || S.range === "365") && today - t.time > +S.range * DAY);
+  function inScope(t) {
+    if (pickSet.size) { if (!pickSet.has(t.m)) return false; }
+    else if (!onCommittee(members[t.m])) return false;
+    if (S.ticker && t.t !== S.ticker) return false;
+    if (S.owner !== "all" && !ownUnknown(t) && (t.own || "self") !== S.owner) return false;  // skipped where the form doesn't say
+    if (/^\d{4}$/.test(S.range) && !t.d.startsWith(S.range)) return false;
+    if ((S.range === "182" || S.range === "365") && today - t.time > +S.range * DAY) return false;
+    return true;
+  }
+  const RANGE_LABEL = { all: YEARS_SPAN, 365: "the last 12 months", 182: "the last 6 months", ...Object.fromEntries(DATA_YEARS.map((y) => [y, y])) };
+  let excl = new Set(), capMax = 0;
+  // big, ordinary holdings: S&P 500 / very large companies, the hide list, and funds and ETFs
+  const isBig = (t) => !!t.st && (t.cls === "fund" || (S.sp500 && t.st[5]) || (capMax && t.st[4] > capMax) || excl.has(t.t));
+  function removalReason(t) {
+    if (t.cls === "option" && !S.options) return "option";
+    if (isCrypto(t) && !S.crypto) return "crypto";
+    if (!isSec(t) && t.cls !== "option") return "other";
+    if (!priced(t)) return "noprice";
+    // a stock picked in the search bar always shows, even when it's big or on the hide list
+    const chosen = S.ticker && t.t === S.ticker;
+    if (S.hideBig && t.cls === "fund" && !chosen && !(S.crypto && isCrypto(t))) return "fund";
+    // a big stock stays in when it's part of a buying spike (unless the ticker is on the always-hide list)
+    if (S.hideBig && isBig(t) && !chosen && !(S.crypto && isCrypto(t)) && !(S.spikes && t.spike && !excl.has(t.t)) && !isBiz(members[t.m])) return "big";
+    // House and Senate members only, in industries their committees oversee. Officials (the President
+    // included), business leaders and members with no overseeing committee drop out, unless picked by name.
+    if (S.committeeOnly) {
+      const m = members[t.m];
+      if (noSeat(m) || !oversees.has(t.m)) { if (!pickSet.has(t.m)) return "noseat"; }
+      else if (!(t.c && t.c.length)) return "committee";
+    }
+    if (S.lateOnly && !(t.delay > 45)) return "ontime";
+    return null;
+  }
+  function compute() {
+    pickSet = new Set(S.members.map(Number));
+    excl = new Set(S.exclude.toUpperCase().split(/[\s,;]+/).filter(Boolean));
+    capMax = +S.capMax || 0;
+    const kept = [], removed = [], scope = [], counts = {};
+    for (const t of trades) {
+      if (!inScope(t)) continue;
+      scope.push(t);
+      const why = removalReason(t);
+      if (why) { t.why = why; removed.push(t); counts[why] = (counts[why] || 0) + 1; }
+      else { t.why = null; kept.push(t); }
+    }
+    // every priced buy in scope, ignoring the big-stock / committee / late filters
+    const every = scope.filter((t) => priced(t) && (isSec(t) || (t.cls === "option" && S.options)));
+    return { kept, removed, scope, every, counts };
+  }
+  // stats for buys; `base` picks a timing ("T" trade date, "P" public) instead of the current one
+  function stats(list, base) {
+    let n = 0, inv = 0, iv = 0, gain = 0, spyGain = 0, wins = 0;
+    for (const t of list) {
+      if (t.side !== "B") continue;
+      const r = base ? eff(t, t[base].r) : t.rr, sr = base ? t[base].sr : t.sr;
+      if (r == null || sr == null) continue;
+      n++; inv += t.amt; iv += t.amtSd ** 2; gain += t.amt * r; spyGain += t.amt * sr;
+      if (r > sr) wins++;
+    }
+    return { n, inv, iv, gain, spyGain, ret: inv ? gain / inv : null, spyRet: inv ? spyGain / inv : null,
+             diff: inv ? (gain - spyGain) / inv : null, win: n ? wins / n : null };
+  }
+  function sellStats(list, base) {
+    let n = 0, amt = 0, mv = 0, spy = 0;
+    const sold = [];
+    for (const t of list) {
+      if (t.side !== "S") continue;
+      sold.push(t);
+      const r = base ? eff(t, t[base].r) : t.rr, sr = base ? t[base].sr : t.sr;
+      if (r == null || sr == null) continue;
+      n++; amt += t.amt; mv += t.amt * r; spy += t.amt * sr;
+    }
+    return { n, sold, after: amt ? mv / amt : null, spyAfter: amt ? spy / amt : null };
+  }
+  // value over time of copying a set of buys, the same money in SPY, and money put in
+  function seriesFor(list) {
+    const W = D.weeks.length;
+    const val = new Float64Array(W), spy = new Float64Array(W), inv = new Float64Array(W), started = new Int32Array(W);
+    let any = false;
+    for (const t of list) {
+      if (t.side !== "B" || !priced(t)) continue;
+      any = true;
+      const px = t.st[6];
+      const end = t.xw == null ? W : t.xw;
+      let last = t.ep;
+      started[t.ew]++;
+      for (let w = t.ew; w < W; w++) {
+        inv[w] += t.amt;
+        if (w < end) {
+          if (px[w] != null) last = px[w];
+          const move = last / t.ep - 1;
+          val[w] += t.amt * Math.max(0, 1 + (t.opt === "P" ? -move : move));
+          spy[w] += t.amt * (D.spy[w] ?? t.se) / t.se;
+        } else {
+          val[w] += t.amt * Math.max(0, 1 + t.rr);
+          spy[w] += t.amt * (1 + t.sr);
+        }
+      }
+    }
+    if (!any) return null;
+    const ret = Array.from(val, (v, w) => inv[w] ? v / inv[w] - 1 : null);
+    const spyRet = Array.from(spy, (v, w) => inv[w] ? v / inv[w] - 1 : null);
+    // the line starts once there have been 5 buys and at least 1% of the money is in: before that a few
+    // small early buys can show a big % that then collapses when the main buying arrives (the same
+    // gain divided by far more money), which looks like a crash that never happened
+    const peak = Math.max(...inv);
+    let n = 0, first = -1;
+    for (let w = 0; w < W && first < 0; w++) { n += started[w]; if (inv[w] > 0 && n >= 5 && inv[w] >= peak * 0.01) first = w; }
+    return { val, spy, inv, ret, spyRet, first };
+  }
+
+  // ---------- reusable line chart ----------
+  const NS = "http://www.w3.org/2000/svg";
+  const charts = new Map();
+  function lineChart(svg, series, fmt, first) {
+    const box = svg.parentElement, tip = box.querySelector(".tip");
+    let st = charts.get(svg);
+    if (!st) {
+      st = { svg, tip };
+      charts.set(svg, st);
+      svg.addEventListener("pointermove", (e) => chartMove(st, e));
+      svg.addEventListener("pointerdown", (e) => chartMove(st, e));  // a tap on a phone shows the values
+      svg.addEventListener("pointerleave", () => chartLeave(st));
+    }
+    svg.innerHTML = ""; tip.hidden = true;
+    box.querySelector(".empty")?.remove();
+    const shown = series.filter((s) => s && !s.hidden && s.values);
+    if (!shown.length || first < 0) {
+      svg.style.display = "none"; st.data = null;
+      box.insertAdjacentHTML("beforeend", '<p class="empty">No data to chart for this selection. Try relaxing the filters.</p>');
+      return;
+    }
+    svg.style.display = "";
+    // drawn like the Data Visualization stock price chart: value axis on the right with tick marks,
+    // light grid both ways, a soft area under the main line, two-row dates (month, then year) and
+    // boxed value tags on the axis for where each line ends
+    const Wd = svg.clientWidth || 800, H = svg.clientHeight || 300, n = D.weeks.length;
+    const narrow = Wd < 560;
+    const m = { l: 12, r: narrow ? 64 : 178, t: 16, b: 46 };
+    const AX = Wd - m.r;  // the value axis
+    let lo = Infinity, hi = -Infinity;
+    for (const s of shown) for (let i = first; i < n; i++) { const v = s.values[i]; if (v != null && isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }
+    if (fmt === "usd") lo = 0;
+    else { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    const pad = (hi - lo) * 0.06 || 1;
+    hi += pad; if (fmt !== "usd") lo -= pad;
+    const x = (i) => m.l + (i - first) / Math.max(1, n - 1 - first) * (AX - 8 - m.l);
+    const y = (v) => H - m.b - (v - lo) / (hi - lo) * (H - m.t - m.b);
+    const add = (parent, tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; };
+    const el = (tag, attrs) => add(svg, tag, attrs);
+    const f = fmt === "usd" ? usd : (v) => pct(v, 0);
+    // a soft glow under every line in its own colour, fading to nothing; the main line's is strongest
+    const defs = el("defs", {});
+    const gid = (k) => `${svg.id || "chart"}-area-${k}`;
+    shown.forEach((s, k) => {
+      const g = add(defs, "linearGradient", { id: gid(k), x1: 0, y1: 0, x2: 0, y2: 1 });
+      add(g, "stop", { offset: "0%", "stop-color": s.color, "stop-opacity": s.area ? 0.24 : 0.16 });
+      add(g, "stop", { offset: "100%", "stop-color": s.color, "stop-opacity": 0 });
+    });
+    // horizontal grid and the value axis on the right, with tick marks
+    const raw = (hi - lo) / 5, p10 = 10 ** Math.floor(Math.log10(raw));
+    const step = [1, 2, 2.5, 5, 10].map((k) => k * p10).find((s) => s >= raw);
+    const tickText = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+      const zero = Math.abs(v) < step / 1000;
+      el("line", { x1: m.l, x2: AX, y1: y(v), y2: y(v), stroke: zero && fmt !== "usd" ? "var(--line-strong)" : "var(--grid)", "stroke-width": 1, "stroke-dasharray": zero && fmt !== "usd" ? "4 4" : "" });
+      el("line", { x1: AX, x2: AX + 5, y1: y(v), y2: y(v), stroke: "var(--line-strong)", "stroke-width": 1 });
+      const t = el("text", { x: AX + 9, y: y(v) + 4, class: "ax" }); t.textContent = f(zero ? 0 : v);
+      tickText.push({ t, y: y(v) });
+    }
+    // dates: months on the first row, the year under its first month; vertical grid at each label
+    const months = [];
+    let lastMonth = -1;
+    for (let i = first; i < n; i++) {
+      const d = new Date(D.weeks[i] + "T00:00:00Z"), mo = d.getUTCFullYear() * 12 + d.getUTCMonth();
+      if (mo !== lastMonth) { months.push({ i, d }); lastMonth = mo; }
+    }
+    const perMonth = (AX - m.l) / Math.max(1, months.length);
+    const every = [1, 2, 3, 6, 12].find((k) => k * perMonth >= (narrow ? 44 : 40)) || 12;
+    let shownYear = null;
+    for (const { i, d } of months) {
+      const mo = d.getUTCMonth(), yr = d.getUTCFullYear(), xi = x(i);
+      if (mo % every !== 0 || xi > AX - 16 || xi < m.l + 12) continue;
+      el("line", { x1: xi, x2: xi, y1: m.t, y2: H - m.b, stroke: "var(--grid)", "stroke-width": 1 });
+      el("line", { x1: xi, x2: xi, y1: H - m.b, y2: H - m.b + 5, stroke: "var(--line-strong)", "stroke-width": 1 });
+      el("text", { x: xi, y: H - m.b + 18, "text-anchor": "middle", class: "ax-date" }).textContent = d.toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" });
+      if (yr !== shownYear) {
+        shownYear = yr;
+        el("text", { x: xi, y: H - m.b + 36, "text-anchor": "middle", class: "ax-year" }).textContent = String(yr);
+      }
+    }
+    // the frame: bottom axis and the value axis
+    el("line", { x1: m.l, x2: AX, y1: H - m.b, y2: H - m.b, stroke: "var(--line-strong)", "stroke-width": 1 });
+    el("line", { x1: AX, x2: AX, y1: m.t, y2: H - m.b, stroke: "var(--line-strong)", "stroke-width": 1 });
+    // the lines, main one last (on top), with its area underneath
+    const areaLayer = el("g", {});  // every glow sits under every line
+    for (const s of [...shown].reverse()) {
+      let d = "", pen = false, x0 = null, x1 = null;
+      for (let i = first; i < n; i++) {
+        const v = s.values[i];
+        if (v == null || !isFinite(v)) { pen = false; continue; }
+        d += (pen ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); pen = true;
+        if (x0 == null) x0 = x(i); x1 = x(i);
+      }
+      if (d && !d.slice(1).includes("M")) add(areaLayer, "path", { d: `${d}L${x1.toFixed(1)},${H - m.b}L${x0.toFixed(1)},${H - m.b}Z`, fill: `url(#${gid(shown.indexOf(s))})`, stroke: "none" });
+      el("path", { d, fill: "none", stroke: s.color, "stroke-width": s.width || 2, "stroke-dasharray": s.dash || "", "stroke-linejoin": "round", "stroke-linecap": "round" });
+    }
+    // where each line ends: a dot, and a boxed tag on the value axis (name and value; value only on phones)
+    const ends = shown.map((s) => ({ s, v: s.values[n - 1] })).filter((e) => e.v != null && isFinite(e.v))
+      .map((e) => ({ ...e, y: y(e.v) })).sort((a, b) => a.y - b.y);
+    const TAG = 22;
+    for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < TAG + 2) ends[i].y = ends[i - 1].y + TAG + 2;
+    const over = ends.length ? ends[ends.length - 1].y - (H - m.b - TAG / 2) : 0;
+    if (over > 0) for (const e of ends) e.y -= over;
+    for (const e of ends) {
+      el("circle", { cx: x(n - 1), cy: y(e.v), r: 4.5, fill: e.s.color, stroke: "var(--surface)", "stroke-width": 2 });
+      if (Math.abs(e.y - y(e.v)) > 1) el("line", { x1: x(n - 1), x2: AX + 2, y1: y(e.v), y2: e.y, stroke: e.s.color, "stroke-width": 1, opacity: 0.6 });
+      const g = el("g", {});
+      const rect = add(g, "rect", { x: AX + 2, y: e.y - TAG / 2, height: TAG, rx: 4, fill: "var(--surface)", stroke: e.s.color, "stroke-width": 1.5 });
+      const t = add(g, "text", { x: AX + 10, y: e.y + 4, class: "end-label" });
+      if (!narrow) { const a = add(t, "tspan", { class: "end-name" }); a.textContent = (e.s.short || e.s.label) + " "; }
+      const b = add(t, "tspan", { class: "end-val" }); b.textContent = f(e.v);
+      rect.setAttribute("width", Math.ceil((t.getComputedTextLength ? t.getComputedTextLength() : 60) + 16));
+      // the tag covers any axis value under it
+      for (const tk of tickText) if (Math.abs(tk.y - e.y) < TAG / 2 + 6) tk.t.remove();
+    }
+    const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--line-strong)", "stroke-width": 1, "stroke-dasharray": "3 3", visibility: "hidden" });
+    const dots = shown.map((s) => el("circle", { r: 4.5, fill: s.color, stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" }));
+    st.data = { shown, first, n, x, y, m, Wd, cross, dots, f };
+  }
+  function chartMove(st, ev) {
+    const c = st.data; if (!c) return;
+    const rect = st.svg.getBoundingClientRect();
+    const px = ev.clientX - rect.left;
+    if (px < c.m.l - 10 || px > c.Wd - c.m.r + 10) return chartLeave(st);
+    const i = Math.max(c.first, Math.min(c.n - 1, Math.round(c.first + (px - c.m.l) / (c.Wd - c.m.l - c.m.r) * (c.n - 1 - c.first))));
+    c.cross.setAttribute("x1", c.x(i)); c.cross.setAttribute("x2", c.x(i)); c.cross.setAttribute("visibility", "visible");
+    c.shown.forEach((s, k) => {
+      const v = s.values[i];
+      if (v == null || !isFinite(v)) { c.dots[k].setAttribute("visibility", "hidden"); return; }
+      c.dots[k].setAttribute("cx", c.x(i)); c.dots[k].setAttribute("cy", c.y(v)); c.dots[k].setAttribute("visibility", "visible");
+    });
+    st.tip.innerHTML = `<div class="stamp">Week of ${fmtDate(D.weeks[i])}</div>` + c.shown.map((s) =>
+      `<div class="row"><span><i style="border-color:${s.color};${s.dash ? "border-top-style:dashed" : ""}"></i>${esc(s.label)}</span><b class="num">${s.values[i] == null ? "–" : c.f(s.values[i])}</b></div>`).join("");
+    st.tip.hidden = false;
+    const tw = st.tip.offsetWidth, left = c.x(i) + 14 + tw > rect.width ? c.x(i) - tw - 14 : c.x(i) + 14;
+    st.tip.style.left = Math.max(0, left) + "px"; st.tip.style.top = "8px";
+  }
+  function chartLeave(st) {
+    const c = st.data; if (!c) return;
+    st.tip.hidden = true;
+    c.cross.setAttribute("visibility", "hidden");
+    c.dots.forEach((d) => d.setAttribute("visibility", "hidden"));
+  }
+
+
+  function bindSeg(id, get, set) {
+    const el = $("#" + id);
+    const sync = () => el.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === get())));
+    sync();
+    el.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; set(b.dataset.v); sync(); });
+    return sync;
+  }
+
+  // ---------- best politicians to follow: a points score from copying at disclosure ----------
+  // Uses every priced buy (stocks, plus options when counted) over the whole data window,
+  // whatever the big-stock / committee filters say: it rates who is worth copying at all.
+  const FOLLOW_MIN = 5;
+  // scored on buys disclosed in the last two years (or since the data starts, if that's later)
+  const FOLLOW_FROM = Math.max(today - 730 * DAY, Date.parse(D.start + "T00:00:00Z"));
+  const FOLLOW_FROM_ISO = new Date(FOLLOW_FROM).toISOString().slice(0, 10);
+  let followLimit = 5;
+  function followScores(from = FOLLOW_FROM) {
+    const by = new Map();
+    for (const t of trades) {
+      const m = members[t.m];
+      if (t.side !== "B" || !t.st || t.P.r == null || t.P.sr == null) continue;
+      if ((t.ftime || t.time) < from) continue;
+      if (t.cls === "option" && !S.options) continue;
+      if (S.chamber === "all" ? isBiz(m) : chamberOf(m) !== S.chamber) continue;
+      if (S.owner !== "all" && !ownUnknown(t) && (t.own || "self") !== S.owner) continue;
+      if (!by.has(t.m)) by.set(t.m, []);
+      by.get(t.m).push(t);
+    }
+    const out = [];
+    for (const [mi, list] of by) {
+      const s = stats(list, "P");
+      if (s.n < FOLLOW_MIN) continue;
+      const delays = list.filter((t) => t.delay != null && t.delay >= 0).map((t) => t.delay).sort((a, b) => a - b);
+      const median = delays.length ? delays[Math.floor(delays.length / 2)] : 60;
+      // shrink the edge toward zero for small samples, so 5 lucky buys don't top the list
+      const shrunk = s.diff * s.n / (s.n + 10);
+      const edge = 20 + 20 * Math.max(-1, Math.min(1, shrunk / 0.2));
+      const hit = 25 * s.win;
+      const speed = 15 * Math.max(0, Math.min(1, (60 - median) / 60));
+      const record = 20 * Math.min(1, Math.log10(s.n + 1) / 2);
+      out.push({ m: members[mi], s, median, shrunk, parts: { edge, hit, speed, record }, score: edge + hit + speed + record });
+    }
+    return out.sort((a, b) => b.score - a.score);
+  }
+
+  // ======================================================================
+  // Post maker: draws a social-media image on a canvas
+  // ======================================================================
+  const THEMES = {
+    light: { bg: "#f5f6f8", card: "#ffffff", ink: "#0e1621", ink2: "#3f4a5a", muted: "#6b7584", grid: "#e2e6ec", line: "#1f5fd6",
+      area: "rgba(31,95,214,0.16)", up: "#0b7a41", down: "#c22f2f", sell: "#c22f2f", chip: "#eef1f5", D: "#2f6fd6", R: "#d64545", I: "#7a7f87" },
+    dark: { bg: "#0c1117", card: "#141b24", ink: "#eef2f6", ink2: "#c3cbd6", muted: "#8b95a3", grid: "#222b36", line: "#5aa0ff",
+      area: "rgba(90,160,255,0.20)", up: "#3fd07f", down: "#ff6b6b", sell: "#ff6b6b", chip: "#1d2631", D: "#4f8ef0", R: "#ef6464", I: "#8c95a3" },
+  };
+  const UI = '"Public Sans", system-ui, sans-serif', MONO = '"IBM Plex Mono", ui-monospace, monospace';
+  const imgCache = new Map();
+  function photoImage(m) {
+    const uri = PHOTOS && PHOTOS[m.id];
+    if (!uri) return Promise.resolve(null);
+    if (!imgCache.has(uri)) imgCache.set(uri, new Promise((resolve) => { const im = new Image(); im.onload = () => resolve(im); im.onerror = () => resolve(null); im.src = uri; }));
+    return imgCache.get(uri);
+  }
+  // a name that must fit maxW: a smaller size first (down to min), then whole words off the end (keeping at least
+  // `keep` words), and only then an ellipsis. Sets ctx.font to the size used.
+  function fitName(ctx, text, weight, size, min, maxW, family = UI, keep = 2) {
+    let z = size; ctx.font = `${weight} ${z}px ${family}`;
+    while (z > min && ctx.measureText(text).width > maxW) { z = Math.max(min, z - 1); ctx.font = `${weight} ${z}px ${family}`; }
+    let t = String(text);
+    while (t.split(" ").length > keep && ctx.measureText(t).width > maxW) t = t.slice(0, t.lastIndexOf(" ")).replace(/[,·–-]\s*$/, "");
+    // after dropping words, don't end on a word that needs the next one ("…School General", "…Bank of")
+    if (t !== String(text)) while (t.split(" ").length > keep && /\s(General|of|the|and|&|for|de|del|la|Public|New|North|South|East|West)$/i.test(t)) t = t.slice(0, t.lastIndexOf(" "));
+    return fitText(ctx, t, maxW);
+  }
+  function fitText(ctx, text, maxW) {
+    if (ctx.measureText(text).width <= maxW) return text;
+    while (text.length > 1 && ctx.measureText(text + "…").width > maxW) text = text.slice(0, -1);
+    return text + "…";
+  }
+  function drawFace(ctx, img, m, cx, cy, r, th) {
+    const ring = th[m.party] || th.I;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, r + 5, 0, Math.PI * 2); ctx.fillStyle = ring; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, Math.PI * 2); ctx.fillStyle = th.card; ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+    // head-and-shoulders portraits are taller than wide: use the square around the face
+    if (img && img.width === img.height) ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+    else if (img) ctx.drawImage(img, 0, Math.round(img.height * 0.04), img.width, img.width, cx - r, cy - r, r * 2, r * 2);
+    else { ctx.fillStyle = th.chip; ctx.fillRect(cx - r, cy - r, r * 2, r * 2); ctx.fillStyle = th.ink2; ctx.font = `700 ${Math.round(r * 0.8)}px ${UI}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(initials(m), cx, cy + 1); }
+    ctx.restore();
+  }
+  function header(ctx, W, th, eyebrow) {
+    ctx.fillStyle = th.bg; ctx.fillRect(0, 0, W, 99999);
+    ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    ctx.fillStyle = th.muted; ctx.font = `700 22px ${UI}`;
+    ctx.fillText(eyebrow.toUpperCase().split("").join(String.fromCharCode(8202)), 64, 92);
+  }
+  // the site's address, written at the bottom of every image
+  const SITE_LABEL = "harryv12.github.io/harryv12finance";
+  function drawSiteLink(ctx, x, y, font, color) {
+    ctx.save(); ctx.font = font; ctx.fillStyle = color; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(SITE_LABEL, x, y);
+    ctx.restore();
+  }
+  function footer(ctx, W, H, th) {
+    ctx.strokeStyle = th.grid; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(64, H - 118); ctx.lineTo(W - 64, H - 118); ctx.stroke();
+    ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `800 21px ${UI}`;
+    ctx.fillText("HarryV12 Finance", W - 64, H - 72);
+    ctx.textAlign = "left";
+    drawSiteLink(ctx, 64, H - 72, `600 21px ${UI}`, th.line || th.ink2);
+  }
+  function postTrades(kind) {
+    const sc = P.style === "list" ? postScope() : { test: () => true };
+    return trades.filter((t) => sc.test(t) && t.st && (isSec(t) || t.cls === "option") && (kind === "any" || t.side === kind) && (!P.kept || !removalReason(t)));
+  }
+
+  const YEAR = today.getUTCFullYear();
+  const windowDays = () => P.window === "all" ? Math.round((today - Date.parse(D.start + "T00:00:00Z")) / DAY)
+    : P.window === "ytd" ? Math.round((today - Date.UTC(YEAR, 0, 1)) / DAY) : +P.window;
+  const windowLabel = () => ({ 90: "3 months", 182: "6 months", 365: "1 year", ytd: `${YEAR} so far` }[P.window] || `since ${START_SHORT}`);
+  // ======================================================================
+  // Market chart posters: a stock's price with the trades marked, or every
+  // stock a selection bought. One set of information, drawn in ten looks.
+  // ======================================================================
+  const MARKET = ["chart", "movie", "japan", "infographic", "certificate", "swiss", "neon", "blueprint", "luxe", "magazine"];
+  const isMarket = (s = P.style) => MARKET.includes(s);
+  const POST_W = 1080, POST_H = 1440;  // every post is 3:4
+  const BEBAS = '"Bebas Neue", "Barlow Condensed", sans-serif', CINZEL = '"Cinzel", "Newsreader", serif',
+    PLAYFAIR = '"Playfair Display", "Newsreader", serif', INTER = '"Inter", "Public Sans", sans-serif',
+    ORBIT = '"Orbitron", "Public Sans", sans-serif', HAND = '"Architects Daughter", "Public Sans", sans-serif',
+    JP = '"Noto Serif JP", "Yu Mincho", "Hiragino Mincho ProN", serif';
+  // what a poster shows: the user's picks, or a fallback while a pick is empty. The picks
+  // themselves are never overwritten, so unticking a box always brings the earlier poster back.
+  const PE = { member: null, committee: "", ticker: "", bond: "" };
+  const rangeText = (lo, hi) => !lo ? "–" : lo >= hi ? usd(lo) : `${usd(lo)}–${usd(hi)}`;
+  // short committee names for headlines; full names stay in sentences and menus
+  const COMMITTEE_SHORT = { HSSY: "Science", HSPW: "Transportation", HLIG: "Intelligence", HSZS: "China Select", HSED: "Education", HSGO: "Oversight",
+    HSQJ: "January 6", HSII: "Natural Resources", SSAF: "Senate Agriculture", SSBK: "Senate Banking", SSCM: "Senate Commerce", SSEG: "Senate Energy",
+    SSEV: "Senate Environment", SSGA: "Senate Homeland Security", SSHR: "Senate HELP", SSRA: "Senate Rules", SSSB: "Senate Small Business", SSFR: "Senate Foreign Relations" };
+  const committeeShort = (cid) => COMMITTEE_SHORT[cid] || cname(cid).replace(/ \(Permanent Select\)$/, "");
+  const committeeLabel = (cid) => { const n = cname(cid).replace(/ \(Permanent Select\)$/, ""); return cid[0] === "X" || /Committee|Subcommittee/.test(n) ? n : n + " Committee"; };
+  const groupWord = (cid) => cid && cid[0] === "X" ? "official" : "member";
+  const shortDate = (d) => fmtDate(d, { month: "short", day: "numeric" });
+  const dotSize = (t) => 5 + 3 * Math.log10(Math.max(1, (t.amt || 1000) / 1000));
+
+  function postScope() {
+    if (P.who === "one" && PE.member) {
+      const m = PE.member;
+      return { kind: "one", m, test: (t) => t.m === m.i, name: `${titleOf(m)} ${plainName(m)}`, short: shortName(m), last: lastName(m) };
+    }
+    if (P.who === "committee" && PE.committee) {
+      const cid = PE.committee, ids = new Set(members.filter((m) => (m.committees || []).includes(cid)).map((m) => m.i));
+      return { kind: "committee", cid, test: (t) => ids.has(t.m), name: committeeLabel(cid), short: committeeShort(cid), seats: ids.size };
+    }
+    // "Everyone" is Congress and the administration; business leaders are picked one at a time
+    return { kind: "all", test: (t) => !isBiz(members[t.m]), name: "Members of Congress", short: "Congress" };
+  }
+  // trades a poster can mark: stock (and option, when counted) buys, plus sells when asked
+  function postPool(sc, from) {
+    return trades.filter((t) => t.st && (isSec(t) || (t.cls === "option" && S.options)) && sc.test(t) && t.time >= from
+      && (t.side === "B" || (P.sells && t.side === "S")) && t.T.ep && PRICES.px[t.t] && (!P.kept || !removalReason(t)));
+  }
+  const weighted = (list, f) => { let a = 0, w = 0; for (const t of list) { const v = f(t), k = t.amt || 1; if (v == null || !isFinite(v)) continue; a += v * k; w += k; } return w ? a / w : null; };
+  const lastClose = (tk) => { const s = PRICES.px[tk]; return s ? s[lastIdx(s)] : null; };
+  function spyMove(t) {  // the S&P 500 (SPY) from the trade date to its latest close
+    const spy = PRICES.px.SPY; if (!spy) return null;
+    let i = idxOfDate(t.d); while (i < spy.length - 1 && spy[i] == null) i++;
+    const e = lastIdx(spy);
+    return spy[i] && spy[e] ? spy[e] / spy[i] - 1 : null;
+  }
+  function peopleOf(list) {
+    const by = new Map();
+    for (const t of list) {
+      const g = by.get(t.m) || { m: members[t.m], buys: [], sells: [], lo: 0, hi: 0, amt: 0, sAmt: 0, tks: new Set(), top: null };
+      if (t.side === "B") { g.buys.push(t); g.lo += loOf(t); g.hi += hiOf(t); g.amt += t.amt; g.tks.add(t.t); if (!g.top || t.amt > g.top.amt) g.top = t; }
+      else { g.sells.push(t); g.sAmt += t.amt; if (!g.topS || t.amt > g.topS.amt) g.topS = t; }
+      by.set(t.m, g);
+    }
+    const out = [...by.values()].sort((a, b) => b.amt - a.amt || b.sAmt - a.sAmt);
+    for (const g of out) g.since = weighted(g.buys, (t) => lastClose(t.t) / t.T.ep - 1);
+    return out;
+  }
+  const sumRange = (list) => [list.reduce((a, t) => a + loOf(t), 0), list.reduce((a, t) => a + hiOf(t), 0)];
+  function noTradesText(base, what) {
+    const tips = ["a longer period",
+      P.sells ? null : "“Mark sells too”", P.kept ? "unticking “Only trades left after my filters”" : null].filter(Boolean);
+    const who = base.sc.kind === "all" ? "members of Congress or the administration" : base.sc.kind === "committee" ? `${groupWord(base.sc.cid)}s of the ${base.sc.name}` : base.sc.name;
+    return `No ${P.sells ? "trades" : "buys"} ${what} by ${who} ${base.inPeriod}. Try ${tips.length > 1 ? tips.slice(0, -1).join(", ") + " or " + tips[tips.length - 1] : tips[0]}.`;
+  }
+  function marketModel() {
+    const sc = postScope(), from = windowStart();
+    const base = { sc, from, period: periodLong(), inPeriod: P.window === "all" ? `since ${START_SHORT}` : `in ${periodLong()}`, periodShort: windowLabel(), dates: PRICES.dates };
+    const pool = postPool(sc, from);
+    return PE.ticker ? singleModel(base, pool, PE.ticker) : multiModel(base, pool);
+  }
+  function singleModel(base, pool, tk) {
+    const series = PRICES.px[tk], dates = PRICES.dates;
+    if (!series || !stocks[tk]) return "No daily prices for this stock.";
+    const end = lastIdx(series);
+    let s0 = Math.max(0, dates.findIndex((d) => Date.parse(d + "T00:00:00Z") >= base.from));
+    while (s0 < end && series[s0] == null) s0++;
+    const marks = pool.filter((t) => t.t === tk && idxOfDate(t.d) >= s0);
+    if (!marks.length) return noTradesText(base, `of ${tk}`);
+    const st = stocks[tk], last = series[end], first = series[s0];
+    const buys = marks.filter((t) => t.side === "B"), sells = marks.filter((t) => t.side === "S");
+    const people = peopleOf(marks), [lo, hi] = sumRange(buys);
+    const since = weighted(buys, (t) => last / t.T.ep - 1);
+    return { ...base, mode: "single", tk, st, name: cleanName(st[0]), sector: st[3] || st[2] || "", series, s0, end, last, first,
+      chg: last / first - 1, lastDate: dates[end], marks, buys, sells, people, buyers: people.filter((g) => g.buys.length),
+      lo, hi, since, avg: since == null ? null : last / (1 + since), spy: weighted(buys, spyMove), hero: people[0].m };
+  }
+  function multiModel(base, pool) {
+    const by = new Map(), dates = PRICES.dates;
+    for (const t of pool) {
+      const g = by.get(t.t) || { t: t.t, st: stocks[t.t], buys: [], sells: [], ms: new Set(), amt: 0 };
+      if (t.side === "B") { g.buys.push(t); g.ms.add(t.m); g.amt += t.amt; } else g.sells.push(t);
+      by.set(t.t, g);
+    }
+    const list = [...by.values()].filter((g) => g.buys.length).map((g) => {
+      const series = PRICES.px[g.t], end = lastIdx(series), last = series[end];
+      let s0 = Math.max(0, dates.findIndex((d) => Date.parse(d + "T00:00:00Z") >= base.from));
+      while (s0 < end && series[s0] == null) s0++;
+      const since = weighted(g.buys, (t) => last / t.T.ep - 1), [lo, hi] = sumRange(g.buys);
+      return { ...g, name: cleanName(g.st[0]), series, s0, end, last, lo, hi, since, people: peopleOf(g.buys) };
+    }).sort((a, b) => b.amt - a.amt || b.buys.length - a.buys.length || a.t.localeCompare(b.t));
+    if (!list.length) {
+      const sold = pool.filter((t) => t.side === "S");
+      if (sold.length) {
+        const who = base.sc.kind === "all" ? "Members of Congress" : base.sc.kind === "committee" ? `Officials and members of the ${base.sc.name}` : base.sc.name;
+        return `${who} only sold stocks ${base.inPeriod} (${plural(sold.length, "sale")}). Pick one of those stocks in the Stock list to see the sales on its chart, or choose a longer period.`;
+      }
+      return noTradesText(base, "of any stock");
+    }
+    const buys = list.flatMap((g) => g.buys), sells = pool.filter((t) => t.side === "S"), [lo, hi] = sumRange(buys);
+    const people = peopleOf(buys);
+    return { ...base, mode: "multi", stocks: list, buys, sells, people, buyers: people, lo, hi,
+      since: weighted(buys, (t) => lastClose(t.t) / t.T.ep - 1), spy: weighted(buys, spyMove), hero: people[0].m };
+  }
+  // words every look uses
+  function mkTitle(M) {
+    if (M.mode === "single") return M.name;
+    if (M.sc.kind === "one") return `What ${M.sc.short} bought`;
+    if (M.sc.kind === "committee") return M.sc.cid[0] === "X" ? `What ${M.sc.short} officials bought` : `What ${/Committee|Select/.test(M.sc.short) ? M.sc.short : M.sc.short + " Committee"} members bought`;
+    const who = M.buyers.length ? M.buyers : M.people, ex = who.some((g) => isExec(g.m)), cong = who.some((g) => !noSeat(g.m)), bz = who.some((g) => isBiz(g.m));
+    const parts = [cong && "Congress", ex && "the administration", bz && "business leaders"].filter(Boolean);
+    return `What ${parts.length > 1 ? parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1] : parts[0] || "Congress"} bought`;
+  }
+  function mkWho(M) {
+    const n = (M.buys.length ? M.buyers : M.people).length;
+    if (M.sc.kind === "one") return M.sc.short;
+    if (M.sc.kind === "committee") return `${plural(n, groupWord(M.sc.cid))} of the ${M.sc.name}`;
+    const who = M.buys.length ? M.buyers : M.people, ne = who.filter((g) => isExec(g.m)).length, nb = who.filter((g) => isBiz(g.m)).length, nc = who.length - ne - nb;
+    const parts = [nc && `${plural(nc, "member")} of Congress`, ne && plural(ne, "administration official"), nb && plural(nb, "business leader")].filter(Boolean);
+    return parts.length > 1 ? parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1] : parts[0] || "No one";
+  }
+  function mkDeck(M) {
+    const nb = M.buys.length, ns = M.sells.length;
+    if (M.mode === "multi") return `${mkWho(M)} bought ${plural(M.stocks.length, "stock")} ${M.inPeriod}: ${plural(nb, "buy")}, an estimated ${estText(estOf(M.buys))}.`;
+    if (!nb) return `${mkWho(M)} sold ${M.tk} ${ns === 1 ? "once" : ns + " times"} ${M.inPeriod}.`;
+    return `${mkWho(M)} bought ${M.tk} ${nb === 1 ? "once" : nb + " times"} ${M.inPeriod}, an estimated ${estText(estOf(M.buys))}${ns ? `, and sold it ${ns === 1 ? "once" : ns + " times"}` : ""}.`;
+  }
+  const mkSinceLine = (M) => M.since == null ? "" : `Their buys ${pct(M.since)} since they bought${M.spy != null ? ` · S&P 500 ${pct(M.spy)} over the same days` : ""}`;
+  // the filings a poster draws on: House reports, OGE's Form 278-T for officials, or both
+  let MK_SOURCE = [], MK_SRC = "";
+  function setSource(people) {
+    const ch = new Set(people.map((m) => chamberOf(m)));
+    const parts = [ch.has("H") && "House reports", ch.has("S") && "Senate reports (via Quiver)", ch.has("E") && "OGE Form 278-T", ch.has("C") && "SEC Form 4 (via OpenInsider)"].filter(Boolean);
+    MK_SRC = parts.length === 1 && ch.has("H") ? "U.S. House Periodic Transaction Reports" : parts.length === 1 && ch.has("E") ? "OGE Form 278-T reports" : parts.join(", ") || "House Periodic Transaction Reports";
+    // one source fits on the first line with the price note; several push it to the second
+    MK_SOURCE = ch.size > 1 ? [`Source: ${MK_SRC}.`, "Buy price = close on the trade date. Not financial advice."]
+      : [`Source: ${MK_SRC}. Buy price = closing price on the trade date.`,
+        ch.has("C") ? "Form 4 gives exact share counts and prices, filed within two business days. Not financial advice."
+          : "Filed up to 45 days after trading. Not financial advice."];
+  }
+  setSource([]);
+  // whose trades a poster shows, for its labels: Congress, the White House, the administration, or both
+  let MK_KW = "Congress";
+  function setKeyword(people, sc) {
+    const ex = people.some(isExec), bz = people.some(isBiz), cg = people.some((m) => !noSeat(m));
+    const parts = [cg && "Congress", ex && "administration", bz && "business"].filter(Boolean);
+    MK_KW = parts.length > 1 ? parts.join(" & ").replace(/^a/, "A").replace(/^b/, "B")
+      : ex ? (sc && sc.kind === "one" && sc.m.role === "President" ? "White House" : "Administration") : bz ? "Business leaders" : "Congress";
+  }
+  // the faces a look shows large: the politician, or the biggest buyers
+  const mkStars = (M, n) => M.sc.kind === "one" ? [M.sc.m] : M.buyers.slice(0, n).map((g) => g.m);
+
+  // ---------- shared pieces, drawn in each look's own colours and type ----------
+  function mkScale(M, box, L) {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = M.s0; i <= M.end; i++) { const v = M.series[i]; if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }
+    const span = hi - lo || hi * 0.1; lo -= span * (L.padBot ?? 0.14); hi += span * (L.padTop ?? 0.12);
+    const X = (i) => box.x + (i - M.s0) / Math.max(1, M.end - M.s0) * box.w;
+    const Y = (v) => box.y + box.h - (v - lo) / (hi - lo) * box.h;
+    return { X, Y, lo, hi };
+  }
+  const mkIdx = (M, t) => Math.min(Math.max(idxOfDate(t.d), M.s0), M.end);
+  const mkVal = (M, t) => M.series[mkIdx(M, t)] ?? t.T.ep;
+  function mkAxes(ctx, M, sc, box, L) {
+    const raw = (sc.hi - sc.lo) / (L.ticks || 4), p10 = 10 ** Math.floor(Math.log10(raw));
+    const step = [1, 2, 2.5, 5, 10].map((k) => k * p10).find((s) => s >= raw);
+    ctx.save();
+    ctx.font = L.axisFont; ctx.fillStyle = L.axis; ctx.strokeStyle = L.grid; ctx.lineWidth = L.gridW || 1.5;
+    if (L.gridDash) ctx.setLineDash(L.gridDash);
+    ctx.textBaseline = "middle"; ctx.textAlign = L.axisSide === "left" ? "right" : "left";
+    for (let v = Math.ceil(sc.lo / step) * step; v <= sc.hi; v += step) {
+      const y = sc.Y(v);
+      if (L.grid) { ctx.beginPath(); ctx.moveTo(box.x, y); ctx.lineTo(box.x + box.w, y); ctx.stroke(); }
+      if (L.axisSide !== "none") ctx.fillText(price(v), L.axisSide === "left" ? box.x - 12 : box.x + box.w + 12, y);
+    }
+    ctx.setLineDash([]);
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    const days = windowDays(); let lastMo = -1;
+    for (let i = M.s0; i <= M.end; i++) {
+      const d = new Date(M.dates[i] + "T00:00:00Z"), mo = d.getUTCMonth();
+      if (mo === lastMo) continue;
+      lastMo = mo;
+      const x = sc.X(i);
+      if (i === M.s0 || x - box.x < 36 || box.x + box.w - x < 36) continue;
+      if (days > 800 ? mo % 6 : days > 400 ? mo % 3 : days > 200 && mo % 2) continue;
+      const label = d.toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" }) + (mo === 0 ? " " + d.getUTCFullYear() : "");
+      ctx.fillText(L.upper ? label.toUpperCase() : label, x, box.y + box.h + (L.monthGap || 34));
+    }
+    ctx.restore();
+  }
+  function mkLine(ctx, M, sc, box, L) {
+    const path = new Path2D(); let on = false, x0 = box.x, x1 = box.x;
+    for (let i = M.s0; i <= M.end; i++) {
+      const v = M.series[i]; if (v == null) continue;
+      if (on) path.lineTo(sc.X(i), sc.Y(v)); else { path.moveTo(sc.X(i), sc.Y(v)); on = true; x0 = sc.X(i); }
+      x1 = sc.X(i);
+    }
+    ctx.save();
+    if (L.area || L.hatch) {
+      const a = new Path2D(path); a.lineTo(x1, box.y + box.h); a.lineTo(x0, box.y + box.h); a.closePath();
+      if (L.hatch) {  // engraved look: fine vertical strokes under the line
+        ctx.save(); ctx.clip(a); ctx.strokeStyle = L.hatch; ctx.lineWidth = 1.2;
+        for (let x = x0; x <= x1; x += 6) { ctx.beginPath(); ctx.moveTo(x, box.y); ctx.lineTo(x, box.y + box.h); ctx.stroke(); }
+        ctx.restore();
+      } else {
+        const g = ctx.createLinearGradient(0, box.y, 0, box.y + box.h); g.addColorStop(0, L.area); g.addColorStop(1, L.areaEnd || "rgba(0,0,0,0)");
+        ctx.fillStyle = g; ctx.fill(a);
+      }
+    }
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    if (L.glow) { ctx.shadowColor = L.glow; ctx.shadowBlur = L.glowBlur || 24; }
+    ctx.strokeStyle = L.line; ctx.lineWidth = L.lineW || 4; ctx.stroke(path);
+    if (L.glowCore) { ctx.shadowBlur = 0; ctx.strokeStyle = L.glowCore; ctx.lineWidth = Math.max(1.5, (L.lineW || 4) / 3); ctx.stroke(path); }
+    ctx.restore();
+    // the latest close
+    ctx.beginPath(); ctx.arc(sc.X(M.end), sc.Y(M.last), (L.lineW || 4) + 4, 0, Math.PI * 2); ctx.fillStyle = L.lastDot || L.line; ctx.fill();
+  }
+  // weekly candles from daily closes (open = the previous candle's close); longer periods use longer candles
+  function mkCandles(ctx, M, sc, box, L) {
+    const span = M.end - M.s0, per = span > 500 ? 20 : span > 250 ? 10 : 5;
+    const out = []; let prev = null;
+    for (let i = M.s0; i <= M.end; i += per) {
+      let o = prev, c = null, h = -Infinity, l = Infinity, i1 = Math.min(M.end, i + per - 1);
+      for (let j = i; j <= i1; j++) { const v = M.series[j]; if (v == null) continue; if (o == null) o = v; c = v; h = Math.max(h, v); l = Math.min(l, v); }
+      if (c == null) continue;
+      h = Math.max(h, o); l = Math.min(l, o);
+      out.push({ i: (i + i1) / 2, o, c, h, l }); prev = c;
+    }
+    const cw = Math.max(3, box.w / Math.max(1, out.length) * 0.62);
+    for (const k of out) {
+      const x = sc.X(k.i), up = k.c >= k.o, col = up ? L.up : L.down;
+      ctx.strokeStyle = L.wick || col; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x, sc.Y(k.h)); ctx.lineTo(x, sc.Y(k.l)); ctx.stroke();
+      const y0 = sc.Y(Math.max(k.o, k.c)), y1 = sc.Y(Math.min(k.o, k.c));
+      ctx.fillStyle = col; ctx.fillRect(x - cw / 2, y0, cw, Math.max(2, y1 - y0));
+      if (L.candleEdge) { ctx.strokeStyle = L.candleEdge; ctx.lineWidth = 1.5; ctx.strokeRect(x - cw / 2, y0, cw, Math.max(2, y1 - y0)); }
+    }
+  }
+  function mkDots(ctx, M, sc, L) {
+    for (const t of [...M.marks].sort((a, b) => a.amt - b.amt)) {
+      const x = sc.X(mkIdx(M, t)), y = sc.Y(mkVal(M, t)), r = dotSize(t) * (L.dotScale || 1);
+      ctx.save();
+      if (L.dotGlow) { ctx.shadowColor = t.side === "S" ? L.down : L.up; ctx.shadowBlur = 16; }
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = t.side === "S" ? L.down : L.up; ctx.fill();
+      ctx.restore();
+      if (L.dotRing) { ctx.lineWidth = 3; ctx.strokeStyle = L.dotRing; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke(); }
+      if (L.dotGlyph) {  // a character inside each mark (買 / 売 on the Japanese look)
+        ctx.fillStyle = L.dotGlyphInk || "#fff"; ctx.font = `700 ${Math.round(r * 1.15)}px ${L.dotGlyphFont || UI}`;
+        ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(t.side === "S" ? L.dotGlyph[1] : L.dotGlyph[0], x, y + 1);
+        ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      }
+    }
+  }
+  // Labels go where they cover no other label, keep off the trade marks where they can, stay
+  // close to their mark and inside the chart. A label that can't be placed is left to the key.
+  function mkPlace(items, box, M, sc, L) {
+    const dots = M.marks.map((t) => [sc.X(mkIdx(M, t)), sc.Y(mkVal(M, t)), dotSize(t) * (L.dotScale || 1)]);
+    const line = []; for (let i = M.s0; i <= M.end; i += 2) if (M.series[i] != null) line.push([sc.X(i), sc.Y(M.series[i])]);
+    const hit = (a, b, g) => a.x < b.x + b.w + g && b.x < a.x + a.w + g && a.y < b.y + b.h + g && b.y < a.y + a.h + g;
+    const lim = { x0: box.x - (L.labelOut ?? 0), x1: box.x + box.w + (L.labelOut ?? 0), y0: box.y - (L.labelOutTop ?? 0), y1: box.y + box.h };
+    const placed = [];
+    for (const it of items) {
+      let best = null, bestC = Infinity;
+      for (const dy of [30, 62, 98, 140, 186, 236, 290, 350]) for (const side of [-1, 1]) for (const fx of [0, -0.35, 0.35, -0.7, 0.7, -1, 1]) {
+        const b = { x: it.px - it.w / 2 + fx * it.w, y: side < 0 ? it.py - dy - it.h : it.py + dy, w: it.w, h: it.h };
+        if (b.x < lim.x0 || b.x + b.w > lim.x1 || b.y < lim.y0 || b.y + b.h > lim.y1) continue;
+        if (placed.some((p) => hit(b, p, 12))) continue;
+        let c = dy + Math.abs(fx) * 70 + (side > 0 ? 20 : 0);
+        for (const [x, y, r] of dots) if (x > b.x - r - 6 && x < b.x + b.w + r + 6 && y > b.y - r - 6 && y < b.y + b.h + r + 6) c += 500;
+        for (const [x, y] of line) if (x > b.x - 3 && x < b.x + b.w + 3 && y > b.y - 3 && y < b.y + b.h + 3) c += 7;
+        if (c < bestC) { bestC = c; best = b; }
+      }
+      if (best) { placed.push(best); it.box = best; }
+    }
+    return items.filter((it) => it.box);
+  }
+  // the chart: grid, price, trade marks and labels. Labels name the biggest buyers with what they
+  // bought (or, for one politician, their biggest trades).
+  async function mkChart(ctx, M, box, L, maxLabels = 5) {
+    const sc = mkScale(M, box, L);
+    mkAxes(ctx, M, sc, box, L);
+    if (L.candles) mkCandles(ctx, M, sc, box, L); else mkLine(ctx, M, sc, box, L);
+    const one = M.sc.kind === "one", mode = L.labelMode || "pill";
+    let items = [];
+    if (mode !== "none") {
+      const src = one ? [...M.marks].sort((a, b) => b.amt - a.amt || b.time - a.time).slice(0, maxLabels).map((t, k) => ({ t, m: mode === "face" ? M.sc.m : null, n: k + 1 }))
+        : M.buyers.slice(0, maxLabels).map((g, k) => ({ t: g.top, m: g.m, g, n: k + 1 }));
+      ctx.save();
+      for (const it of src) {
+        it.px = sc.X(mkIdx(M, it.t)); it.py = sc.Y(mkVal(M, it.t));
+        if (mode === "face" || mode === "num") { const r = mode === "face" ? (L.faceR || 24) : (L.numR || 17); it.r = r; it.w = it.h = 2 * r + 4; continue; }
+        it.l1 = one ? `${it.t.side === "S" ? "Sold" : "Bought"} ${amountShort(it.t)}` : (L.lastNames ? lastName(it.m) : shortName(it.m));
+        it.l2 = one ? `${shortDate(it.t.d)} · ${price(it.t.T.ep)}` : `${estText(estOf(it.g.buys))}${it.g.buys.length > 1 ? ` · ${it.g.buys.length} buys` : ""}`;
+        ctx.font = L.font1; let tw = ctx.measureText(it.l1).width; ctx.font = L.font2; tw = Math.max(tw, ctx.measureText(it.l2).width);
+        it.h = L.labelH || 62; it.r = it.h / 2 - 7;
+        it.w = Math.min(box.w * 0.62, Math.ceil(tw) + (it.m ? it.h + 8 : 34) + 22);
+      }
+      ctx.restore();
+      items = mkPlace(src, box, M, sc, L);
+    }
+    // leader lines, then marks, then labels on top
+    ctx.save(); ctx.strokeStyle = L.leader || L.ink2; ctx.lineWidth = L.leaderW || 2;
+    if (L.leaderDash) ctx.setLineDash(L.leaderDash);
+    for (const it of items) {
+      const b = it.box, tx = Math.max(b.x + 14, Math.min(b.x + b.w - 14, it.px)), ty = b.y > it.py ? b.y : b.y + b.h;
+      ctx.beginPath(); ctx.moveTo(it.px, it.py); ctx.lineTo(mode === "pill" ? tx : b.x + b.w / 2, mode === "pill" ? ty : b.y + b.h / 2); ctx.stroke();
+    }
+    ctx.restore();
+    mkDots(ctx, M, sc, L);
+    const imgs = await Promise.all(items.map((it) => it.m ? photoImage(it.m) : null));
+    items.forEach((it, k) => mkLabel(ctx, it, imgs[k], L, mode));
+    return { sc, items };
+  }
+  function mkLabel(ctx, it, img, L, mode) {
+    const b = it.box;
+    if (mode === "num") {
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      ctx.fillStyle = L.numBg || L.ink; ctx.strokeStyle = L.numEdge || "transparent"; ctx.lineWidth = 2;
+      if (L.numSquare) { ctx.fillRect(cx - it.r, cy - it.r, 2 * it.r, 2 * it.r); if (L.numEdge) ctx.strokeRect(cx - it.r, cy - it.r, 2 * it.r, 2 * it.r); }
+      else { ctx.beginPath(); ctx.arc(cx, cy, it.r, 0, Math.PI * 2); ctx.fill(); if (L.numEdge) ctx.stroke(); }
+      ctx.fillStyle = L.numInk || "#fff"; ctx.font = L.numFont || `700 18px ${UI}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(it.n || ""), cx, cy + 1); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      return;
+    }
+    if (mode === "face") {
+      drawFace(ctx, img, it.m, b.x + b.w / 2, b.y + b.h / 2, it.r, L);
+      if (it.n) {
+        const bx = b.x + b.w - 6, by = b.y + b.h - 6;
+        ctx.beginPath(); ctx.arc(bx, by, 12, 0, Math.PI * 2); ctx.fillStyle = L.numBg || L.ink; ctx.fill();
+        ctx.fillStyle = L.numInk || "#fff"; ctx.font = `700 14px ${UI}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(it.n), bx, by + 1); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      }
+      return;
+    }
+    const rad = L.labelRadius ?? b.h / 2;
+    ctx.save();
+    if (L.labelShadow) { ctx.shadowColor = L.labelShadow; ctx.shadowBlur = L.labelShadowBlur || 16; ctx.shadowOffsetY = 3; }
+    ctx.fillStyle = L.labelBg; ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, rad); ctx.fill(); ctx.restore();
+    if (L.labelBorder) { ctx.strokeStyle = L.labelBorder; ctx.lineWidth = L.labelBorderW || 2; ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, b.h, rad); ctx.stroke(); }
+    let tx;
+    if (it.m) { drawFace(ctx, img, it.m, b.x + b.h / 2 + 2, b.y + b.h / 2, it.r, L); tx = b.x + b.h + 8; }
+    else {  // one politician: a coloured tick says buy (green) or sell (red)
+      ctx.fillStyle = it.t.side === "S" ? L.down : L.up; ctx.beginPath(); ctx.arc(b.x + 20, b.y + b.h / 2, 7, 0, Math.PI * 2); ctx.fill();
+      tx = b.x + 36;
+    }
+    const tw = b.x + b.w - tx - 14;
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.font = L.font1; ctx.fillStyle = L.labelInk; ctx.fillText(fitText(ctx, it.l1, tw), tx, b.y + b.h / 2 - 5);
+    ctx.font = L.font2; ctx.fillStyle = L.labelSub; ctx.fillText(fitText(ctx, it.l2, tw), tx, b.y + b.h / 2 + 21);
+  }
+  // legend: green = bought, red = sold, and what the dot size means
+  function mkLegend(ctx, x, y, L, M, align = "left") {
+    ctx.save(); ctx.font = L.legendFont; ctx.textBaseline = "middle";
+    const items = [[L.up, L.buyWord || "Bought"]];
+    if (M.sells.length || P.sells) items.push([L.down, L.sellWord || "Sold"]);
+    const note = L.sizeNote ?? "Bigger dot = bigger trade";
+    const widths = items.map(([, s]) => 26 + ctx.measureText(s).width + 26);
+    ctx.font = L.legendNoteFont || L.legendFont; const noteW = note ? ctx.measureText(note).width : 0;
+    const total = widths.reduce((a, b) => a + b, 0) + noteW;
+    let cx = align === "right" ? x - total : align === "center" ? x - total / 2 : x;
+    items.forEach(([c, s], k) => {
+      ctx.beginPath(); ctx.arc(cx + 9, y, 9, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill();
+      if (L.dotRing) { ctx.strokeStyle = L.dotRing; ctx.lineWidth = 2; ctx.stroke(); }
+      if (L.dotGlyph) { ctx.fillStyle = "#fff"; ctx.font = `700 11px ${L.dotGlyphFont || UI}`; ctx.textAlign = "center"; ctx.fillText(L.dotGlyph[k], cx + 9, y + 1); ctx.textAlign = "left"; }
+      ctx.font = L.legendFont; ctx.fillStyle = L.legendInk || L.ink; ctx.fillText(s, cx + 26, y + 1);
+      cx += widths[k];
+    });
+    if (note) { ctx.font = L.legendNoteFont || L.legendFont; ctx.fillStyle = L.muted; ctx.fillText(note, cx, y + 1); }
+    ctx.restore();
+    return total;
+  }
+  // key: the biggest buyers with what each bought, or one politician's biggest trades
+  async function mkKey(ctx, M, box, L, n) {
+    const one = M.sc.kind === "one";
+    if (one && M.mode === "multi") return 0;
+    const rows = one ? [...M.marks].sort((a, b) => b.amt - a.amt || b.time - a.time).slice(0, n) : M.buyers.slice(0, n);
+    if (!rows.length) return 0;
+    const rowH = Math.min(L.keyRowH || 66, box.h / rows.length), imgs = await Promise.all(rows.map((r) => one ? null : photoImage(r.m)));
+    rows.forEach((r, k) => {
+      const y = box.y + k * rowH, cy = y + rowH / 2;
+      if (L.keyRule && k) { ctx.strokeStyle = L.keyRule; ctx.lineWidth = L.keyRuleW || 1.5; if (L.keyRuleDash) ctx.setLineDash(L.keyRuleDash); ctx.beginPath(); ctx.moveTo(box.x, y); ctx.lineTo(box.x + box.w, y); ctx.stroke(); ctx.setLineDash([]); }
+      let x = box.x;
+      if (L.keyNums) {
+        ctx.fillStyle = L.numBg || L.ink; const rr = 15;
+        if (L.numSquare) ctx.fillRect(x, cy - rr, 2 * rr, 2 * rr); else { ctx.beginPath(); ctx.arc(x + rr, cy, rr, 0, Math.PI * 2); ctx.fill(); }
+        if (L.numEdge) { ctx.strokeStyle = L.numEdge; ctx.lineWidth = 2; if (L.numSquare) ctx.strokeRect(x, cy - rr, 2 * rr, 2 * rr); else { ctx.beginPath(); ctx.arc(x + rr, cy, rr, 0, Math.PI * 2); ctx.stroke(); } }
+        ctx.fillStyle = L.numInk || "#fff"; ctx.font = `700 16px ${UI}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(k + 1), x + rr, cy + 1); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+        x += 2 * rr + 14;
+      }
+      const right = box.x + box.w;
+      if (one) {
+        const t = r, sold = t.side === "S";
+        ctx.font = L.keyTag || `700 15px ${UI}`; const tag = sold ? "SOLD" : "BOUGHT", tgw = ctx.measureText(tag).width + 18;
+        ctx.fillStyle = sold ? L.down : L.up; ctx.globalAlpha = L.tagAlpha ?? 0.16; ctx.beginPath(); ctx.roundRect(x, cy - 15, tgw, 30, 6); ctx.fill(); ctx.globalAlpha = 1;
+        ctx.fillStyle = sold ? L.down : L.up; ctx.textBaseline = "middle"; ctx.fillText(tag, x + 9, cy + 1); ctx.textBaseline = "alphabetic";
+        const x2 = x + tgw + 16;
+        ctx.font = L.keyName; ctx.fillStyle = L.ink; ctx.fillText(fitText(ctx, amountShort(t), 300), x2, cy - 3);
+        ctx.font = L.keySub; ctx.fillStyle = L.muted;
+        ctx.fillText(fitText(ctx, `${fmtDate(t.d)} at ${price(t.T.ep)}${t.own ? " · " + (ACCOUNT_WORD[t.own] || "") : ""}`, right - x2 - 170), x2, cy + 22);
+        const v = M.last / t.T.ep - 1;
+        ctx.textAlign = "right"; ctx.font = L.keyNum; ctx.fillStyle = v >= 0 ? L.up : L.down; ctx.fillText(pct(v), right, cy + 2);
+        ctx.font = L.keySub; ctx.fillStyle = L.muted; ctx.fillText(sold ? "since the sale" : "since the buy", right, cy + 24); ctx.textAlign = "left";
+        return;
+      }
+      const g = r, fr = Math.min(L.keyFaceR || 24, rowH / 2 - 6);
+      if (L.keyFaces !== false) { drawFace(ctx, imgs[k], g.m, x + fr + 4, cy, fr, L); x += 2 * fr + 20; }
+      ctx.font = L.keyNum; const amt = estText(estOf(g.buys)), aw = ctx.measureText(amt).width;
+      ctx.font = L.keyName; ctx.fillStyle = L.ink; ctx.fillText(fitText(ctx, L.keyUpper ? plainName(g.m).toUpperCase() : plainName(g.m), right - x - aw - 30), x, cy - 3);
+      ctx.font = L.keySub; ctx.fillStyle = L.muted;
+      const what = M.mode === "multi" ? plural(g.tks.size, "stock") : `first ${fmtDate(g.buys.map((t) => t.d).sort()[0])}`;
+      ctx.fillText(fitText(ctx, `${party(g.m)} · ${plural(g.buys.length, "buy")} · ${what}`, right - x - 170), x, cy + 22);
+      ctx.textAlign = "right"; ctx.font = L.keyNum; ctx.fillStyle = L.keyAmt || L.ink; ctx.fillText(amt, right, cy - 3);
+      if (g.since != null) { ctx.font = L.keySub; ctx.fillStyle = g.since >= 0 ? L.up : L.down; ctx.fillText(`${pct(g.since)} since`, right, cy + 22); }
+      ctx.textAlign = "left";
+    });
+    return rows.length * rowH;
+  }
+  // small multiples: the stocks bought most, each with its price and the buys marked
+  async function mkTiles(ctx, M, box, L, n, cols = 2) {
+    const list = M.stocks.slice(0, n), rows = Math.ceil(list.length / cols), gap = L.tileGap ?? 18;
+    const tw = (box.w - gap * (cols - 1)) / cols, th = (box.h - gap * (rows - 1)) / Math.max(rows, L.tileRowsMin || 1);
+    const imgs = await Promise.all(list.map((g) => M.sc.kind === "one" ? null : photoImage(g.people[0].m)));
+    list.forEach((g, k) => {
+      const x = box.x + (k % cols) * (tw + gap), y = box.y + Math.floor(k / cols) * (th + gap), p = L.tilePad ?? 20;
+      ctx.save();
+      if (L.tileShadow) { ctx.shadowColor = L.tileShadow; ctx.shadowBlur = 18; ctx.shadowOffsetY = 4; }
+      if (L.tileBg) { ctx.fillStyle = L.tileBg; ctx.beginPath(); ctx.roundRect(x, y, tw, th, L.tileR ?? 16); ctx.fill(); }
+      ctx.restore();
+      if (L.tileBorder) { ctx.strokeStyle = L.tileBorder; ctx.lineWidth = L.tileBorderW || 2; if (L.tileDash) ctx.setLineDash(L.tileDash); ctx.beginPath(); ctx.roundRect(x, y, tw, th, L.tileR ?? 16); ctx.stroke(); ctx.setLineDash([]); }
+      ctx.textBaseline = "alphabetic";
+      ctx.font = L.tileTicker; ctx.fillStyle = L.tileInk || L.ink; ctx.textAlign = "left"; ctx.fillText(g.t, x + p, y + p + 30);
+      if (g.since != null) { ctx.textAlign = "right"; ctx.font = L.tileNum; ctx.fillStyle = g.since >= 0 ? L.up : L.down; ctx.fillText(pct(g.since), x + tw - p, y + p + 30); ctx.textAlign = "left"; }
+      ctx.font = L.tileName; ctx.fillStyle = L.muted; ctx.fillText(fitText(ctx, g.name, tw - 2 * p - 120), x + p, y + p + 58);
+      ctx.textAlign = "right"; ctx.fillText("since bought", x + tw - p, y + p + 58); ctx.textAlign = "left";
+      // price over the period with this stock's trades marked
+      const sx = x + p, sy = y + p + 76, sw = tw - 2 * p, sh = Math.max(40, th - 2 * p - 76 - (M.sc.kind === "one" ? 40 : 76));
+      const spark = sparkline(ctx, g.series, g.s0, g.end, sx, sy, sw, sh, L.tileLine || L.line, { width: L.tileLineW || 3, fill: L.tileArea || null });
+      if (spark) {
+        if (L.glow) { /* sparkline already drawn; glow looks rely on the dot glow */ }
+        for (const t of [...g.buys, ...g.sells].sort((a, b) => a.amt - b.amt)) {
+          const i = Math.min(Math.max(idxOfDate(t.d), g.s0), g.end), v = g.series[i] ?? t.T.ep, r = Math.max(5, dotSize(t) * 0.7);
+          ctx.beginPath(); ctx.arc(spark.X(i), spark.Y(v), r, 0, Math.PI * 2); ctx.fillStyle = t.side === "S" ? L.down : L.up; ctx.fill();
+          if (L.dotRing) { ctx.strokeStyle = L.dotRing; ctx.lineWidth = 2; ctx.stroke(); }
+        }
+      }
+      const by = y + th - p - (M.sc.kind === "one" ? 4 : 40);
+      ctx.font = L.tileFact; ctx.fillStyle = L.tileInk || L.ink;
+      ctx.fillText(fitText(ctx, `${estText(estOf(g.buys))} · ${plural(g.buys.length, "buy")}${M.sc.kind === "one" ? "" : ` · ${plural(g.ms.size, "member")}`}`, tw - 2 * p), x + p, by);
+      if (M.sc.kind !== "one") {
+        const top = g.people[0], fr = 15;
+        drawFace(ctx, imgs[k], top.m, x + p + fr, by + 24, fr, L);
+        ctx.font = L.tileSub || L.tileName; ctx.fillStyle = L.muted;
+        ctx.fillText(fitText(ctx, `Top buyer ${shortName(top.m)}, ${estText(estOf(top.buys))}`, tw - 2 * p - 2 * fr - 12), x + p + 2 * fr + 12, by + 30);
+      }
+    });
+  }
+  // a few big numbers in a row
+  function mkStats(ctx, M, box, L, opts = {}) {
+    const items = opts.items || mkStatItems(M);
+    const w = box.w / items.length;
+    items.forEach((s, k) => {
+      const x = box.x + k * w;
+      if (L.statRule && k) { ctx.strokeStyle = L.statRule; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x - 6, box.y); ctx.lineTo(x - 6, box.y + box.h); ctx.stroke(); }
+      ctx.textAlign = "left"; ctx.font = L.statLabel; ctx.fillStyle = L.muted; ctx.fillText(L.statUpper ? s.label.toUpperCase() : s.label, x + (k ? 10 : 0), box.y + 24);
+      let f = L.statNum, size = +(/(\d+)px/.exec(f) || [0, 36])[1]; ctx.font = f;
+      while (ctx.measureText(s.text).width > w - 24 && size > 18) { size -= 2; f = f.replace(/\d+px/, size + "px"); ctx.font = f; }
+      ctx.fillStyle = s.color === "sign" ? (s.v >= 0 ? L.up : L.down) : (L.statInk || L.ink);
+      ctx.fillText(fitText(ctx, s.text, w - 20), x + (k ? 10 : 0), box.y + box.h - (s.sub ? 26 : 6));
+      if (s.sub) { ctx.font = L.statSub || L.statLabel; ctx.fillStyle = L.muted; ctx.fillText(fitText(ctx, s.sub, w - 20), x + (k ? 10 : 0), box.y + box.h); }
+    });
+  }
+  function mkStatItems(M) {
+    const items = [{ label: "Estimated bought", text: estText(estOf(M.buys)) }, { label: "Buys", text: M.buys.length.toLocaleString(), sub: M.sells.length ? plural(M.sells.length, "sell") : "" }];
+    if (M.mode === "multi") items.push({ label: "Stocks", text: M.stocks.length.toLocaleString() });
+    else if (M.sc.kind !== "one") items.push({ label: "Members", text: M.buyers.length.toLocaleString() });
+    else items.push({ label: "Average buy price", text: price(M.avg), sub: `now ${price(M.last)}` });
+    if (M.since != null) items.push({ label: "Since they bought", text: pct(M.since), v: M.since, color: "sign", sub: M.spy != null ? `S&P 500 ${pct(M.spy)}` : "" });
+    return items;
+  }
+  function mkFooter(ctx, W, H, L, y0 = H - 70) {
+    ctx.textAlign = "left"; ctx.font = L.footFont || `500 17px ${UI}`; ctx.fillStyle = L.footInk || L.muted;
+    ctx.font = L.footBrandFont || `800 19px ${UI}`; const bw = ctx.measureText("HarryV12 Finance").width;
+    ctx.textAlign = "right"; ctx.fillStyle = L.footBrand || L.ink2 || L.ink; ctx.fillText("HarryV12 Finance", W - (L.footX ?? 64), y0);
+    ctx.textAlign = "left"; ctx.font = L.footFont || `500 17px ${UI}`; ctx.fillStyle = L.footInk || L.muted;
+    drawSiteLink(ctx, L.footX ?? 64, y0, `600 ${(L.footFont || "").match(/(\d+)px/)?.[1] || 17}px ${UI}`, L.footLink || (typeof L.line === "string" ? L.line : null) || L.ink2 || L.ink);
+  }
+  async function mkFaceOrNull(m, hd) { return m ? (hd ? photoHD(m) : photoImage(m)) : null; }
+
+  // ---------- small drawing helpers for the looks ----------
+  function mkCentered(ctx, text, cx, y, maxW, lineH, maxLines = 3) {
+    let lines = wrapLines(ctx, text, maxW);
+    if (lines.length > maxLines) { lines = lines.slice(0, maxLines); lines[maxLines - 1] = fitText(ctx, lines[maxLines - 1] + " …", maxW); }
+    ctx.textAlign = "center"; lines.forEach((l, i) => ctx.fillText(l, cx, y + i * lineH)); ctx.textAlign = "left";
+    return y + lines.length * lineH;
+  }
+  // the biggest font size (up to `max`) at which `text` fits `maxW`
+  function fitSize(ctx, text, fontFn, max, maxW, min = 18) {
+    let s = max; ctx.font = fontFn(s);
+    while (s > min && ctx.measureText(text).width > maxW) { s -= 2; ctx.font = fontFn(s); }
+    return s;
+  }
+  function grain(ctx, W, H, alpha) {
+    ctx.save();
+    for (let k = 0; k < 9000; k++) { ctx.fillStyle = Math.random() < 0.5 ? `rgba(255,255,255,${alpha})` : `rgba(0,0,0,${alpha * 1.6})`; ctx.fillRect(Math.random() * W, Math.random() * H, 1.6, 1.6); }
+    ctx.restore();
+  }
+  function laurel(ctx, cx, cy, r, color, big, small1, small2) {
+    ctx.save(); ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 2.5;
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI / 2 + side * 0.25, Math.PI / 2 + side * 2.55, side < 0); ctx.stroke();
+      for (let k = 0; k < 10; k++) {
+        const a = Math.PI / 2 + side * (0.35 + k * 0.23), x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        ctx.beginPath(); ctx.ellipse(x, y, 15 - k * 0.5, 6, a + side * (Math.PI / 2 + 0.55), 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.textAlign = "center";
+    ctx.font = `400 22px ${BEBAS}`; ctx.letterSpacing = "2px"; ctx.fillText(small1, cx, cy - r * 0.38);
+    ctx.font = `400 ${Math.round(r * 0.62)}px ${BEBAS}`; ctx.letterSpacing = "0px"; ctx.fillText(big, cx, cy + r * 0.2);
+    ctx.font = `400 19px ${BEBAS}`; ctx.letterSpacing = "2px"; ctx.fillText(small2, cx, cy + r * 0.52);
+    ctx.restore();
+  }
+  function arcText(ctx, text, cx, cy, r, font, color) {
+    ctx.save(); ctx.font = font; ctx.fillStyle = color; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const chars = [...text], step = (Math.PI * 2) / chars.length;
+    chars.forEach((ch, k) => { const a = -Math.PI / 2 + k * step; ctx.save(); ctx.translate(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.rotate(a + Math.PI / 2); ctx.fillText(ch, 0, 0); ctx.restore(); });
+    ctx.restore();
+  }
+  function heroPhoto(ctx, img, m, x, y, w, h, anchor = 0.18, filter = "none") {
+    ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    if (img) { ctx.imageSmoothingQuality = "high"; ctx.filter = filter; drawCover(ctx, img, x, y, w, h, anchor); ctx.filter = "none"; }
+    else { ctx.fillStyle = "rgba(128,128,128,0.25)"; ctx.fillRect(x, y, w, h); ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.font = `800 ${Math.round(w / 4)}px ${UI}`; ctx.textAlign = "center"; ctx.fillText(initials(m), x + w / 2, y + h * 0.55); ctx.textAlign = "left"; }
+    ctx.restore();
+  }
+  const sinceOrMove = (M) => M.since != null ? { v: M.since, what: "since they bought" } : { v: M.mode === "single" ? M.chg : null, what: `in ${M.periodShort}` };
+  function periodTag(M) { return { 90: "3 MO", 182: "6 MO", 365: "1 YR" }[P.window] || YEARS_SPAN; }
+
+  // ---------- 1. Classic: the site's own clean chart ----------
+  // one stock, drawn as the original market chart (face bubbles on the biggest trades, a small mark
+  // on every trade: dark = bought, red = sold) on axes laid out like a financial price chart: a wide
+  // price pane with its scale on the right, a trade-size pane under it sharing the dates, and the
+  // key numbers in a row at the bottom
+  async function classicSingle(ctx, W, H, M, th) {
+    // coins are priced as "BTC-USD" (Yahoo's symbols); the chip shows the coin's own symbol
+    const one = M.sc.kind === "one", pm = one ? M.sc.m : null, tk = M.tk.replace(/\d*-USD$/, ""), last = M.last, marks = M.marks;
+    const what = P.sells ? "buys and sells" : "buys";
+    header(ctx, W, th, one ? `${titleOf(pm)} ${shortName(pm)} · ${what}` : M.sc.kind === "committee" ? `${M.sc.short} · ${what}` : `${MK_KW} trades · ${what}`);
+    ctx.font = `700 52px ${MONO}`;
+    const priceW = ctx.measureText(price(last)).width;
+    ctx.fillStyle = th.ink; ctx.font = `800 ${W > 1000 ? 64 : 56}px ${UI}`;
+    ctx.fillText(fitText(ctx, M.name, W - 128 - priceW - 32), 64, 168);
+    // ticker chip, then the politician (portrait, name, party and seat) or the industry
+    ctx.font = `600 26px ${MONO}`;
+    const chipW = ctx.measureText(tk).width + 32;
+    ctx.fillStyle = th.chip; ctx.beginPath(); ctx.roundRect(64, 196, chipW, 44, 8); ctx.fill();
+    ctx.fillStyle = th.ink; ctx.fillText(tk, 80, 228);
+    if (one) {
+      drawFace(ctx, await photoImage(pm), pm, 64 + chipW + 40, 218, 22, th);
+      ctx.fillStyle = th.ink; ctx.font = `700 24px ${UI}`;
+      ctx.fillText(fitText(ctx, plainName(pm), 430), 64 + chipW + 76, 216);
+      const cm = (pm.committees || [])[0];
+      ctx.fillStyle = th.muted; ctx.font = `500 18px ${UI}`;
+      ctx.fillText(fitText(ctx, [party(pm), noSeat(pm) ? "" : cm && cname(cm)].filter(Boolean).join(" · "), 430), 64 + chipW + 76, 240);
+    } else {
+      ctx.fillStyle = th.muted; ctx.font = `500 22px ${UI}`;
+      ctx.fillText(fitText(ctx, M.sector, 520), 64 + chipW + 18, 227);
+    }
+    ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 52px ${MONO}`;
+    ctx.fillText(price(last), W - 64, 166);
+    ctx.font = `600 24px ${MONO}`; ctx.fillStyle = M.chg >= 0 ? th.up : th.down;
+    ctx.fillText(`${pct(M.chg)} ${P.window === "all" ? M.periodShort : "in " + M.periodShort}`, W - 64, 204);
+    ctx.fillStyle = th.muted; ctx.font = `500 19px ${UI}`;
+    ctx.fillText(`Latest close · ${fmtDate(M.lastDate)}`, W - 64, 232);
+    ctx.textAlign = "left";
+
+    // ---- the price pane: wider than tall, so moves aren't exaggerated ----
+    const left = 64, right = W - 150, top = 296, bottom = 990;
+    const box = { x: left, y: top, w: right - left, h: bottom - top };
+    const niceStep = (raw) => { const p10 = 10 ** Math.floor(Math.log10(raw)); return [1, 2, 2.5, 5, 10].map((k) => k * p10).find((s) => s >= raw); };
+    // price scale: the period's range plus a margin, rounded out to whole steps
+    let lo = Infinity, hi = -Infinity;
+    for (let i = M.s0; i <= M.end; i++) { const v = M.series[i]; if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }
+    const pad = (hi - lo || hi * 0.1) * 0.06; lo -= pad; hi += pad;
+    const step = niceStep((hi - lo) / 6);
+    lo = Math.max(0, Math.floor(lo / step) * step); hi = Math.ceil(hi / step) * step;
+    const X = (i) => left + (i - M.s0) / Math.max(1, M.end - M.s0) * (right - left);
+    const Y = (v) => bottom - (v - lo) / (hi - lo) * (bottom - top);
+    const sc = { X, Y, lo, hi };
+    // date ticks: month starts (every month, 2 or 3 months on longer periods; mid-month on short ones)
+    const dates = M.dates, span = (Date.parse(dates[M.end]) - Date.parse(dates[M.s0])) / DAY;
+    const every = span > 1100 ? 3 : span > 420 ? 2 : 1, ticks = [];
+    let prevKey = -1, midDone = -1;
+    for (let i = M.s0; i <= M.end; i++) {
+      const d = dates[i], yr = +d.slice(0, 4), mo = +d.slice(5, 7), day = +d.slice(8, 10), key = yr * 12 + mo;
+      if (key !== prevKey) {
+        prevKey = key;
+        if ((i > M.s0 || day <= 4) && (mo - 1) % every === 0) ticks.push({ i, yr, mo, major: true });
+      } else if (span <= 120 && day >= 15 && midDone !== key) { midDone = key; ticks.push({ i, yr, mo, major: false }); }
+    }
+    ctx.save();
+    // grid: price steps across, date ticks down
+    ctx.strokeStyle = th.grid; ctx.lineWidth = 1.5;
+    for (let v = lo; v <= hi + step / 2; v += step) { ctx.beginPath(); ctx.moveTo(left, Y(v)); ctx.lineTo(right, Y(v)); ctx.stroke(); }
+    ctx.lineWidth = 1;
+    for (const t of ticks) { const x = X(t.i); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke(); }
+    // axis lines: the price scale on the right, the date axis at the bottom
+    ctx.strokeStyle = th.muted; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(right, top); ctx.lineTo(right, bottom); ctx.lineTo(left, bottom); ctx.stroke();
+    ctx.restore();
+
+    // price line with the area under it
+    const L = { ...th, lineW: 3, lastDot: th.line };
+    mkLine(ctx, M, sc, box, L);
+
+    // average buy price as a dashed level line
+    const buys = M.buys, sells = M.sells;
+    const wsum = buys.reduce((a, t) => a + (t.amt || 1), 0);
+    // average cost per share: total dollars ÷ total shares (each buy's dollars ÷ that day's close)
+    const avg = buys.length ? wsum / buys.reduce((a, t) => a + (t.amt || 1) / t.T.ep, 0) : null;
+    if (avg) {
+      ctx.save(); ctx.setLineDash([9, 7]); ctx.strokeStyle = th.ink2; ctx.globalAlpha = 0.75; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(left, Y(avg)); ctx.lineTo(right, Y(avg)); ctx.stroke(); ctx.restore();
+    }
+    // price scale labels with tick marks; the average buy gets a tag on the scale
+    const tagH = 32, avgY = avg ? Y(avg) : null;
+    ctx.font = `500 18px ${MONO}`; ctx.textBaseline = "middle"; ctx.fillStyle = th.ink2; ctx.strokeStyle = th.muted; ctx.lineWidth = 1.5;
+    for (let v = lo; v <= hi + step / 2; v += step) {
+      const y = Y(v);
+      ctx.beginPath(); ctx.moveTo(right, y); ctx.lineTo(right + 8, y); ctx.stroke();
+      if (avgY != null && Math.abs(y - avgY) < tagH - 6) continue;
+      ctx.fillText(price(v), right + 14, y);
+    }
+    const tag = (y, text, fill, ink, edge) => {
+      ctx.font = `700 17px ${MONO}`; const w = Math.min(W - right - 8, ctx.measureText(text).width + 18);
+      ctx.fillStyle = fill; ctx.beginPath(); ctx.roundRect(right + 6, y - tagH / 2, w, tagH, 6); ctx.fill();
+      if (edge) { ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.stroke(); }
+      ctx.fillStyle = ink; ctx.fillText(fitText(ctx, text, w - 14), right + 15, y + 1);
+    };
+    if (avgY != null) tag(avgY, `Avg ${price(avg)}`, th.card, th.ink, th.ink2);
+    ctx.textBaseline = "alphabetic";
+
+    // ---- date axis: tick marks and months, then the years in a second row ----
+    ctx.save(); ctx.strokeStyle = th.muted; ctx.lineWidth = 1.5; ctx.textAlign = "center";
+    for (const t of ticks) {
+      const x = X(t.i);
+      ctx.beginPath(); ctx.moveTo(x, bottom); ctx.lineTo(x, bottom + (t.major ? 9 : 5)); ctx.stroke();
+      if (x - left < 16 || right - x < 16) continue;
+      ctx.font = t.major ? `600 18px ${UI}` : `500 16px ${UI}`; ctx.fillStyle = t.major ? th.ink2 : th.muted;
+      ctx.fillText(t.major ? new Date(Date.UTC(t.yr, t.mo - 1, 1)).toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" }) : "15", x, bottom + 32);
+    }
+    const years = new Map();
+    for (let i = M.s0; i <= M.end; i++) { const y = dates[i].slice(0, 4); const s = years.get(y) || { a: i, b: i }; s.b = i; years.set(y, s); }
+    ctx.font = `700 17px ${UI}`; ctx.fillStyle = th.ink;
+    for (const [y, s] of years) {
+      const x0 = X(s.a), x1 = X(s.b);
+      if (s.a > M.s0) { ctx.beginPath(); ctx.moveTo(x0, bottom); ctx.lineTo(x0, bottom + 50); ctx.stroke(); }
+      if (x1 - x0 >= 56) ctx.fillText(y, (x0 + x1) / 2, bottom + 58);
+    }
+    ctx.restore();
+
+    // ---- trade marks and face bubbles on the price pane ----
+    const PX = (t) => X(mkIdx(M, t)), PY = (t) => Y(mkVal(M, t));
+    for (const t of marks) {
+      ctx.beginPath(); ctx.arc(PX(t), PY(t), 7, 0, Math.PI * 2);
+      ctx.fillStyle = t.side === "S" ? th.sell : th.ink; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = th.card; ctx.stroke();
+    }
+    // face bubbles: 4 to 6, on the people (or, for one politician, the trades) with the most money,
+    // split between buys and sells by the dollars on each side. A side with under 15% of the money
+    // gets none, unless that's needed to show at least 4.
+    const groups = new Map();
+    for (const t of marks) { const g = groups.get(t.m) || { m: members[t.m], list: [] }; g.list.push(t); groups.set(t.m, g); }
+    const MAXLAB = 6, MINLAB = 4, isSell = (t) => t.side === "S";
+    const cands = (sell) => {
+      if (one) return marks.filter((t) => isSell(t) === sell).sort((x, y) => y.amt - x.amt).map((rep) => ({ g: { m: pm, list: [rep] }, rep, money: rep.amt }));
+      const per = new Map();
+      for (const t of marks) if (isSell(t) === sell) { const c = per.get(t.m) || { g: groups.get(t.m), rep: t, money: 0 }; c.money += t.amt; if (t.amt > c.rep.amt) c.rep = t; per.set(t.m, c); }
+      return [...per.values()].sort((x, y) => y.money - x.money);
+    };
+    const cB = cands(false), cS = cands(true);
+    const mB = cB.reduce((acc, c) => acc + c.money, 0), mS = cS.reduce((acc, c) => acc + c.money, 0), shareS = mS / ((mB + mS) || 1);
+    const N = Math.min(MAXLAB, cB.length + cS.length);
+    let nS = shareS < 0.15 ? 0 : shareS > 0.85 ? N : Math.round(N * shareS);
+    nS = Math.min(nS, cS.length);
+    let nB = Math.min(N - nS, cB.length);
+    nS = Math.min(cS.length, Math.max(nS, N - nB));                   // fill from sells if buys ran out
+    if (nB + nS < MINLAB) { nB = Math.min(cB.length, MINLAB - nS); nS = Math.min(cS.length, MINLAB - nB); }  // at least 4
+    let labels = [...cB.slice(0, nB), ...cS.slice(0, nS)].map((c) => ({ ...c, px: PX(c.rep), py: PY(c.rep) })).sort((x, y) => x.px - y.px);
+    // every bubble: what they paid, the date and how much; the face says who
+    const R = 32, BH = 80, placed = [];
+    for (const lb of labels) {
+      const rep = lb.rep;
+      lb.lines = [`${rep.side === "S" ? "Sold" : "Bought"} ${price(rep.T.ep)}`, `${shortDate(rep.d)}${rep.lo || rep.exact ? " · " + amountShort(rep) : ""}`];
+      ctx.font = `700 23px ${MONO}`; let tw = ctx.measureText(lb.lines[0]).width;
+      ctx.font = `500 18px ${UI}`; tw = Math.max(tw, ctx.measureText(lb.lines[1]).width);
+      lb.w = Math.min(400, Math.ceil(tw) + 2 * R + 46);
+    }
+    // each bubble goes to the nearby spot inside the price pane that best avoids the line, the marks
+    // and the other bubbles
+    const linePts = [];
+    for (let i = M.s0; i <= M.end; i += 2) if (M.series[i] != null) linePts.push([X(i), Y(M.series[i])]);
+    const dotPts = marks.map((t) => [PX(t), PY(t)]);
+    const inside = (b, x, y, padPx) => x > b.x - padPx && x < b.x + b.w + padPx && y > b.y - padPx && y < b.y + b.h + padPx;
+    const cost = (b, lb) => {
+      let c = Math.hypot(b.x + b.w / 2 - lb.px, b.y + b.h / 2 - lb.py) / 30;
+      for (const [x, y] of linePts) if (inside(b, x, y, 8)) c += 6;
+      for (const [x, y] of dotPts) if (inside(b, x, y, 12)) c += 60;
+      return c;
+    };
+    // bubbles never overlap: the biggest trades are placed first, and one with no free spot is left
+    // off (it counts as "not labeled")
+    const clash = (b) => placed.some((p) => b.x < p.x + p.w + 10 && p.x < b.x + b.w + 10 && b.y < p.y + p.h + 10 && p.y < b.y + b.h + 10);
+    for (const lb of [...labels].sort((a, b) => b.money - a.money)) {
+      let best = null, bestCost = Infinity;
+      for (let dy = -420; dy <= 420; dy += 24) {
+        if (Math.abs(dy) < 60) continue;
+        for (const dx of [-lb.w / 2, -R - 6, -lb.w + R + 6, -lb.w * 0.25, -lb.w * 0.75, -lb.w * 1.1, lb.w * 0.1, -lb.w * 1.4, lb.w * 0.4]) {
+          const b = { x: Math.max(left + 6, Math.min(right - lb.w - 6, lb.px + dx)), y: Math.max(top - 34, Math.min(bottom - BH - 8, lb.py + dy - BH / 2)), w: lb.w, h: BH };
+          if (clash(b)) continue;
+          const c = cost(b, lb);
+          if (c < bestCost) { bestCost = c; best = b; }
+        }
+      }
+      if (best) placed.push(best);
+      lb.box = best;
+    }
+    labels = labels.filter((lb) => lb.box);
+    const imgs = await Promise.all(labels.map((lb) => photoImage(lb.g.m)));
+    for (const lb of labels) {  // leader lines first, so every bubble sits on top of them
+      const b = lb.box;
+      ctx.strokeStyle = th.ink2; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(lb.px, lb.py); ctx.lineTo(b.x + R + 8, b.y + BH / 2); ctx.stroke();
+    }
+    labels.forEach((lb, k) => {
+      const b = lb.box, cx = b.x + R + 8, cy = b.y + BH / 2;
+      ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.12)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 4;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, BH, BH / 2); ctx.fill(); ctx.restore();
+      // neon edge: green for a buy, red for a sale, glowing only inward from the outline and fading
+      // out well before the face and text
+      const sold = lb.rep.side === "S", edge = sold ? th.sell : th.up, neon = sold ? "rgba(255,64,64,0.9)" : "rgba(34,214,110,0.9)";
+      ctx.save();
+      ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, BH, BH / 2); ctx.clip();
+      ctx.shadowColor = neon; ctx.shadowBlur = 20; ctx.strokeStyle = neon; ctx.lineWidth = 8; ctx.globalAlpha = 0.55;
+      for (let k2 = 0; k2 < 2; k2++) { ctx.beginPath(); ctx.roundRect(b.x - 4, b.y - 4, b.w + 8, BH + 8, BH / 2 + 4); ctx.stroke(); }
+      ctx.restore();
+      ctx.strokeStyle = edge; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(b.x, b.y, b.w, BH, BH / 2); ctx.stroke();  // crisp, no glow outside
+      drawFace(ctx, imgs[k], lb.g.m, cx, cy, R, th);
+      const tx = cx + R + 16, tw = b.x + b.w - tx - 22;
+      ctx.fillStyle = lb.rep.side === "S" ? th.sell : th.ink; ctx.font = `700 23px ${MONO}`;
+      ctx.fillText(fitText(ctx, lb.lines[0], tw), tx, cy - 4);
+      ctx.font = `500 18px ${UI}`; ctx.fillStyle = th.muted;
+      ctx.fillText(fitText(ctx, lb.lines[1], tw), tx, cy + 22);
+    });
+
+    // ---- key numbers ----
+    const unl = one ? marks.length - labels.length : groups.size - labels.length;
+    const eb = estOf(buys), es = estOf(sells);
+    const boughtCell = ["BOUGHT", buys.length ? estText(eb) : "–", buys.length ? likelyText(eb) : "no buys"];
+    const cells = [
+      one ? ["BUYS / SELLS", `${buys.length} / ${sells.length}`, unl > 0 ? `${unl} not labeled` : "all labeled"]
+        : ["PEOPLE", String(groups.size), unl > 0 ? `${unl} not labeled` : "all labeled"],
+      one ? boughtCell : ["BUYS / SELLS", `${buys.length} / ${sells.length}`, sells.length ? `sold ${estText(es)}` : "no sells"],
+      one ? ["SOLD", sells.length ? estText(es) : "–", sells.length ? likelyText(es) : "no sells"] : boughtCell,
+      ["AVG BUY", avg ? price(avg) : "–", avg ? "" : "no buys"],
+      avg ? ["SINCE AVG BUY", pct(last / avg - 1), M.spy != null ? `S&P 500 ${pct(M.spy)}` : ""]
+        : ["IN PERIOD", pct(M.chg), M.periodShort]];
+    const sy = 1110, cw = (W - 128) / cells.length;
+    ctx.strokeStyle = th.grid; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(64, sy); ctx.lineTo(W - 64, sy); ctx.stroke();
+    cells.forEach(([label, value, sub], k) => {
+      const x = 64 + k * cw, w = cw - 24;
+      if (k) { ctx.beginPath(); ctx.moveTo(x - 12, sy + 20); ctx.lineTo(x - 12, sy + 112); ctx.stroke(); }
+      ctx.fillStyle = th.muted; ctx.font = `700 15px ${UI}`; ctx.letterSpacing = "1.5px"; ctx.fillText(fitText(ctx, label, w), x, sy + 38); ctx.letterSpacing = "0px";
+      const good = k === cells.length - 1 && /^[+−]/.test(value) ? (value[0] === "+" ? th.up : th.down) : th.ink;
+      ctx.fillStyle = good; ctx.font = `700 ${fitSize(ctx, value, (s) => `700 ${s}px ${MONO}`, 30, w, 18)}px ${MONO}`; ctx.fillText(fitText(ctx, value, w), x, sy + 80);
+      ctx.fillStyle = th.muted; ctx.font = `500 ${fitSize(ctx, sub, (z) => `500 ${z}px ${UI}`, 16, w, 13)}px ${UI}`; ctx.fillText(fitText(ctx, sub, w), x, sy + 108);
+    });
+    // what the company does, in the space above the footer (sector and industry when there's no summary)
+    const st = stocks[M.tk] || [];
+    const about = (DESC || {})[M.tk] || [st[2], st[1]].filter(Boolean).join(" · ");
+    if (about || st[4]) {
+      // market cap on the right of the heading: grey label, bold value
+      let capW = 0;
+      if (st[4]) {
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 19px ${MONO}`; ctx.fillText(usd(st[4]), W - 64, sy + 143);
+        const vw = ctx.measureText(usd(st[4])).width;
+        ctx.fillStyle = th.muted; ctx.font = `700 14px ${UI}`; ctx.letterSpacing = "1.5px"; ctx.fillText("MARKET CAP", W - 64 - vw - 12, sy + 142); ctx.letterSpacing = "0px";
+        capW = vw + 12 + ctx.measureText("MARKET CAP").width + 32; ctx.textAlign = "left";
+      }
+      ctx.fillStyle = th.muted; ctx.font = `700 14px ${UI}`; ctx.letterSpacing = "1.5px";
+      ctx.fillText(fitText(ctx, "ABOUT " + cleanName(st[0] || tk).toUpperCase(), W - 128 - capW), 64, sy + 142); ctx.letterSpacing = "0px";
+      ctx.fillStyle = th.ink2; ctx.font = `500 18px ${UI}`;
+      drawWrapped(ctx, about, 64, sy + 168, W - 128, 24, 2);
+    }
+    footer(ctx, W, H, th, MK_SOURCE);
+  }
+  async function lookClassic(ctx, W, H, M) {
+    const th = THEMES[P.theme] || THEMES.light;
+    const L = { ...th, axis: th.muted, axisFont: `500 19px ${MONO}`, lineW: 4, dotRing: th.card, labelBg: th.card, labelBorder: th.grid,
+      labelInk: th.ink, labelSub: th.ink2, labelShadow: "rgba(0,0,0,0.12)", font1: `700 22px ${UI}`, font2: `600 19px ${MONO}`,
+      legendFont: `600 20px ${UI}`, legendNoteFont: `500 18px ${UI}`, keyName: `700 23px ${UI}`, keySub: `500 17px ${UI}`, keyNum: `700 22px ${MONO}`, keyRule: th.grid,
+      tileBg: th.card, tileTicker: `800 30px ${MONO}`, tileNum: `700 26px ${MONO}`, tileName: `500 17px ${UI}`, tileFact: `600 19px ${UI}`, tileSub: `500 16px ${UI}`,
+      statLabel: `600 17px ${UI}`, statNum: `800 36px ${UI}`, statSub: `500 16px ${UI}`, statRule: th.grid };
+    if (M.mode === "single") return classicSingle(ctx, W, H, M, th);
+    const one = M.sc.kind === "one";
+    header(ctx, W, th, (one ? `${titleOf(M.sc.m)} ${shortName(M.sc.m)}` : M.sc.kind === "committee" ? M.sc.name : `${MK_KW} stock trades`) + ` · ${M.periodShort}`);
+    {
+      ctx.fillStyle = th.ink; ctx.font = `800 62px ${UI}`; ctx.fillText(fitText(ctx, mkTitle(M), W - 128), 64, 166);
+      ctx.fillStyle = th.ink2; ctx.font = `500 23px ${UI}`; drawWrapped(ctx, mkDeck(M), 64, 212, W - 128, 31, 2);
+      mkStats(ctx, M, { x: 64, y: 272, w: W - 128, h: 92 }, L);
+      mkLegend(ctx, 64, 410, L, M);
+      await mkTiles(ctx, M, { x: 64, y: 440, w: W - 128, h: 820 }, L, 6, 2);
+    }
+    footer(ctx, W, H, th, MK_SOURCE);
+  }
+
+  // ---------- 2. Movie poster: the cast up top, title, a glowing chart, billing block ----------
+  async function lookMovie(ctx, W, H, M) {
+    const GOLD = "#ffcf6e";
+    const L = { ink: "#f3ede2", ink2: "#cfc6b8", muted: "#8f877b", grid: null, axis: "#8f877b", axisFont: `500 16px ${MONO}`, axisSide: "none", monthGap: 28, upper: true,
+      line: GOLD, lineW: 4, glow: "rgba(255,170,60,0.9)", glowBlur: 26, glowCore: "#fff3d6", area: "rgba(255,170,60,0.18)", padTop: 0.05, padBot: 0.08,
+      up: "#3ad37f", down: "#ff5a5a", dotRing: "#08080b", dotGlow: true, labelMode: "face", faceR: 21, D: "#4f8ef0", R: "#ef6464", I: "#9aa3ad", card: "#08080b", chip: "#26262c",
+      numBg: GOLD, numInk: "#08080b", leader: "rgba(255,207,110,0.6)", legendFont: `400 22px ${BEBAS}`, legendInk: "#cfc6b8", legendNoteFont: `400 20px ${BEBAS}`, sizeNote: "BIGGER DOT = BIGGER TRADE", lastDot: GOLD };
+    ctx.fillStyle = "#07070a"; ctx.fillRect(0, 0, W, H);
+    const stars = mkStars(M, 3), imgs = await Promise.all(stars.map((m) => photoHD(m)));
+    const heroH = 880, sw = W / stars.length;
+    stars.forEach((m, k) => heroPhoto(ctx, imgs[k], m, k * sw, 0, sw, heroH, 0.15, "grayscale(0.4) contrast(1.18) brightness(0.82)"));
+    ctx.save(); ctx.globalCompositeOperation = "soft-light"; ctx.fillStyle = "#0b6a80"; ctx.fillRect(0, 0, W, heroH);
+    ctx.globalCompositeOperation = "overlay"; const warm = ctx.createRadialGradient(W / 2, heroH * 0.35, 40, W / 2, heroH * 0.35, W * 0.7);
+    warm.addColorStop(0, "rgba(255,170,90,0.35)"); warm.addColorStop(1, "rgba(255,170,90,0)"); ctx.fillStyle = warm; ctx.fillRect(0, 0, W, heroH); ctx.restore();
+    for (let k = 1; k < stars.length; k++) { const g = ctx.createLinearGradient(k * sw - 40, 0, k * sw + 40, 0); g.addColorStop(0, "rgba(7,7,10,0)"); g.addColorStop(0.5, "rgba(7,7,10,0.85)"); g.addColorStop(1, "rgba(7,7,10,0)"); ctx.fillStyle = g; ctx.fillRect(k * sw - 40, 0, 80, heroH); }
+    const fade = ctx.createLinearGradient(0, 0, 0, heroH);
+    fade.addColorStop(0, "rgba(7,7,10,0.92)"); fade.addColorStop(0.16, "rgba(7,7,10,0.15)"); fade.addColorStop(0.6, "rgba(7,7,10,0.2)"); fade.addColorStop(1, "#07070a");
+    ctx.fillStyle = fade; ctx.fillRect(0, 0, W, heroH);
+    // names over the title, as on a film poster
+    ctx.fillStyle = L.ink; ctx.textAlign = "center"; ctx.letterSpacing = "6px";
+    if (stars.length === 1) { ctx.font = `400 50px ${BEBAS}`; ctx.fillText(plainName(stars[0]).toUpperCase(), W / 2, 84); }
+    else stars.forEach((m, k) => { ctx.font = `400 34px ${BEBAS}`; ctx.fillText(fitText(ctx, plainName(m).toUpperCase(), sw - 40), sw * k + sw / 2, 80); });
+    ctx.letterSpacing = "3px"; ctx.font = `400 22px ${BEBAS}`; ctx.fillStyle = GOLD;
+    ctx.fillText(M.sc.kind === "one" ? `${seatTitle(M.sc.m)} · ${party(M.sc.m)}` : stars.length > 1 ? "THE BIGGEST BUYERS" : "THE BIGGEST BUYER", W / 2, 118);
+    ctx.letterSpacing = "0px"; ctx.textAlign = "left";
+    // awards-style laurels carry the result
+    const res = sinceOrMove(M);
+    if (res.v != null) laurel(ctx, 128, 690, 82, res.v >= 0 ? "#7fe0a6" : "#ff8a8a", pct(res.v, 0), M.since != null ? "THEIR BUYS" : M.tk, M.since != null ? "SINCE BOUGHT" : res.what.toUpperCase());
+    if (M.spy != null) laurel(ctx, W - 128, 690, 82, "#d8d0c2", pct(M.spy, 0), "S&P 500", "SAME DAYS");
+    // title
+    const title = M.mode === "single" ? (M.name.length <= 14 ? M.name.toUpperCase() : M.tk) : M.sc.kind === "one" ? `${lastName(M.sc.m).toUpperCase()}'S PICKS` : "THE BUY LIST";
+    const ts = fitSize(ctx, title, (s) => `400 ${s}px ${BEBAS}`, 220, W - 110, 80);
+    ctx.save(); ctx.font = `400 ${ts}px ${BEBAS}`; ctx.textAlign = "center"; ctx.shadowColor = "rgba(0,0,0,0.7)"; ctx.shadowBlur = 30;
+    const tg = ctx.createLinearGradient(0, 940 - ts * 0.75, 0, 940); tg.addColorStop(0, "#fff7e6"); tg.addColorStop(1, "#e8c98a");
+    ctx.fillStyle = tg; ctx.fillText(title, W / 2, 940); ctx.restore();
+    ctx.textAlign = "center"; ctx.font = `400 30px ${BEBAS}`; ctx.letterSpacing = "4px"; ctx.fillStyle = L.ink2;
+    const sub = M.mode === "single" ? `${M.tk} · ${plural(M.buys.length, "BUY")} · EST. ${estText(estOf(M.buys))} · ${M.periodShort.toUpperCase()}`
+      : `${plural(M.stocks.length, "STOCK")} · ${plural(M.buys.length, "BUY")} · EST. ${estText(estOf(M.buys))} · ${M.periodShort.toUpperCase()}`;
+    ctx.fillText(fitText(ctx, sub, W - 100), W / 2, 988); ctx.letterSpacing = "0px"; ctx.textAlign = "left";
+    if (M.mode === "single") {
+      await mkChart(ctx, M, { x: 70, y: 1016, w: W - 140, h: 150 }, L, 4);
+      mkLegend(ctx, W / 2, 1222, L, M, "center");
+    } else {
+      // a film strip: the four stocks bought most, one per frame
+      const y0 = 1010, sh = 200, list = M.stocks.slice(0, 4), fw = (W - 100) / list.length;
+      ctx.fillStyle = "#121216"; ctx.fillRect(0, y0, W, sh);
+      ctx.fillStyle = "#07070a"; for (let x = 12; x < W; x += 34) { ctx.beginPath(); ctx.roundRect(x, y0 + 8, 18, 12, 3); ctx.fill(); ctx.beginPath(); ctx.roundRect(x, y0 + sh - 20, 18, 12, 3); ctx.fill(); }
+      list.forEach((g, k) => {
+        const x = 50 + k * fw + 8, w = fw - 16, y = y0 + 30, h = sh - 60;
+        ctx.fillStyle = "#1b1b21"; ctx.fillRect(x, y, w, h);
+        ctx.font = `400 38px ${BEBAS}`; ctx.fillStyle = L.ink; ctx.fillText(g.t, x + 12, y + 40);
+        if (g.since != null) { ctx.textAlign = "right"; ctx.font = `400 30px ${BEBAS}`; ctx.fillStyle = g.since >= 0 ? L.up : L.down; ctx.fillText(pct(g.since, 0), x + w - 10, y + 40); ctx.textAlign = "left"; }
+        const sp = sparkline(ctx, g.series, g.s0, g.end, x + 12, y + 54, w - 24, h - 92, GOLD, { width: 2.5 });
+        if (sp) for (const t of g.buys) { const i = Math.min(Math.max(idxOfDate(t.d), g.s0), g.end); ctx.beginPath(); ctx.arc(sp.X(i), sp.Y(g.series[i] ?? t.T.ep), 5, 0, Math.PI * 2); ctx.fillStyle = L.up; ctx.fill(); }
+        ctx.font = `400 21px ${BEBAS}`; ctx.fillStyle = L.ink2; ctx.letterSpacing = "1px"; ctx.fillText(fitText(ctx, `EST. ${estText(estOf(g.buys))}`, w - 24), x + 12, y + h - 10); ctx.letterSpacing = "0px";
+      });
+      mkLegend(ctx, W / 2, 1230, { ...L, sizeNote: "" }, M, "center");
+    }
+    // billing block
+    ctx.fillStyle = L.ink2; ctx.font = `600 24px ${COND}`; ctx.letterSpacing = "2px";
+    const billing = M.sc.kind === "one"
+      ? `STARRING ${plainName(M.sc.m).toUpperCase()} · ${M.mode === "single" ? `${plural(M.buys.length, "BUY")} OF ${M.tk}${M.avg ? ` · AVERAGE PRICE ${price(M.avg)}` : ""} · LATEST CLOSE ${price(M.last)}` : M.stocks.slice(0, 5).map((g) => `${g.t} ${estText(estOf(g.buys))}`).join(" · ")}`
+      : "STARRING " + M.buyers.slice(0, 5).map((g) => `${plainName(g.m).toUpperCase()} ${estText(estOf(g.buys))}`).join(" · ");
+    const yb = mkCentered(ctx, billing, W / 2, 1270, W - 120, 29, 2);
+    ctx.font = `600 17px ${COND}`; ctx.fillStyle = L.muted; ctx.letterSpacing = "1.5px";
+    mkCentered(ctx, `A CONGRESS TRADE CHECK PRESENTATION · BASED ON ${MK_SRC.toUpperCase()} · MARKS AT THE CLOSING PRICE ON THE TRADE DATE · AMOUNTS ARE REPORTED RANGES · FILERS CAN REPORT UP TO 45 DAYS AFTER TRADING`, W / 2, yb + 4, W - 140, 21, 2);
+    ctx.letterSpacing = "0px";
+    // a ratings-style box and the "release date"
+    ctx.strokeStyle = L.ink2; ctx.lineWidth = 2; ctx.strokeRect(60, H - 62, 260, 44);
+    ctx.fillStyle = L.ink; ctx.font = `400 36px ${BEBAS}`; ctx.fillText("NFA", 70, H - 26);
+    ctx.font = `600 14px ${COND}`; ctx.fillStyle = L.ink2; ctx.fillText("NOT FINANCIAL ADVICE", 132, H - 44); ctx.fillText("AMOUNTS ARE REPORTED RANGES", 132, H - 26);
+    ctx.textAlign = "right"; ctx.font = `400 30px ${BEBAS}`; ctx.fillStyle = GOLD; ctx.letterSpacing = "3px";
+    ctx.fillText(`IN THE FILINGS THROUGH ${fmtDate(D.prices_through).toUpperCase()}`, W - 60, H - 26); ctx.letterSpacing = "0px"; ctx.textAlign = "left";
+    grain(ctx, W, H, 0.035);
+  }
+
+  // ---------- 3. Japanese: washi paper, a red sun, candlesticks, a seal and waves ----------
+  async function lookJapan(ctx, W, H, M) {
+    const INK = "#1d1a16", SUN = "#c8102e", INDIGO = "#1f3a5f", PAPER = "#f3ead8";
+    const L = { ink: INK, ink2: "#3c362e", muted: "#6f665a", grid: "rgba(29,26,22,0.20)", gridDash: [2, 6], axis: "#6f665a", axisFont: `500 16px ${MONO}`,
+      candles: true, up: "#1f8a4c", down: "#c4122f", wick: "rgba(29,26,22,0.7)", dotRing: PAPER, dotGlyph: ["買", "売"], dotGlyphFont: JP, dotScale: 1.45,
+      labelMode: "pill", labelBg: "#fbf6ea", labelBorder: INK, labelBorderW: 2, labelRadius: 3, labelInk: INK, labelSub: "#6f665a", font1: `700 21px ${SERIF}`, font2: `500 17px ${MONO}`, labelH: 60,
+      leader: INK, leaderW: 1.5, D: "#2f5f9e", R: "#a33b3b", I: "#7a7f87", card: "#fbf6ea", chip: "#e6dcc6",
+      legendFont: `600 20px ${SERIF}`, buyWord: "買い Bought", sellWord: "売り Sold", legendNoteFont: `italic 400 18px ${SERIF}`, sizeNote: "Bigger mark = bigger trade",
+      keyName: `700 23px ${SERIF}`, keySub: `500 16px ${UI}`, keyNum: `600 21px ${MONO}`, keyRule: "rgba(29,26,22,0.35)", keyFaceR: 22, keyRowH: 62,
+      tileBg: "#fbf6ea", tileBorder: INK, tileBorderW: 1.5, tileR: 3, tileTicker: `800 30px ${SERIF}`, tileNum: `700 23px ${MONO}`, tileName: `500 15px ${UI}`, tileFact: `600 18px ${SERIF}`, tileSub: `500 15px ${UI}`, tileLine: INK, tileLineW: 2.5 };
+    ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.lineWidth = 1;  // paper fibres
+    for (let k = 0; k < 1400; k++) { const x = Math.random() * W, y = Math.random() * H, a = Math.random() * Math.PI; ctx.strokeStyle = `rgba(120,90,50,${0.03 + Math.random() * 0.05})`; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * 14, y + Math.sin(a) * 14); ctx.stroke(); }
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(W - 170, 158, 150, 0, Math.PI * 2); ctx.fillStyle = SUN; ctx.globalAlpha = 0.92; ctx.fill(); ctx.globalAlpha = 1;
+    // vertical title: 議会の株取引 ("Congress stock trades"); 政府 is "government", と "and"
+    ctx.fillStyle = INK; ctx.font = `900 62px ${JP}`; ctx.textAlign = "center";
+    [...(MK_KW === "Congress" ? "議会の株取引" : MK_KW.startsWith("Congress") ? "議会と政府の株取引" : "政府の株取引")].forEach((ch, k) => ctx.fillText(ch, 92, 140 + k * 70));
+    ctx.textAlign = "left";
+    ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(150, 90); ctx.lineTo(150, 980); ctx.stroke();
+    ctx.font = `700 17px ${UI}`; ctx.letterSpacing = "3px"; ctx.fillStyle = L.ink2;
+    ctx.fillText(`${MK_KW.toUpperCase()} STOCK TRADES · ${M.periodShort.toUpperCase()}`, 180, 120); ctx.letterSpacing = "0px";
+    const title = mkTitle(M), tsz = fitSize(ctx, title, (s) => `800 ${s}px ${SERIF}`, 82, W - 180 - 60, 28);
+    ctx.font = `800 ${tsz}px ${SERIF}`; ctx.fillStyle = INK; ctx.fillText(title, 180, 210);
+    // seal (hanko): the ticker, or 株 ("stocks")
+    ctx.save(); ctx.translate(240, 318); ctx.rotate(-0.05);
+    ctx.fillStyle = SUN; ctx.beginPath(); ctx.roundRect(-58, -58, 116, 116, 10); ctx.fill();
+    ctx.strokeStyle = PAPER; ctx.lineWidth = 3; ctx.beginPath(); ctx.roundRect(-48, -48, 96, 96, 6); ctx.stroke();
+    ctx.fillStyle = PAPER; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    if (M.mode === "single") { const s = fitSize(ctx, M.tk, (x) => `800 ${x}px ${COND}`, 50, 84, 20); ctx.font = `800 ${s}px ${COND}`; ctx.fillText(M.tk, 0, 3); }
+    else { ctx.font = `900 64px ${JP}`; ctx.fillText("株", 0, 4); }
+    ctx.restore(); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.font = `italic 400 25px ${SERIF}`; ctx.fillStyle = L.ink2; drawWrapped(ctx, mkDeck(M), 320, 290, W - 320 - 190, 33, 4);
+    const res = sinceOrMove(M);
+    if (res.v != null) {
+      ctx.font = `700 22px ${MONO}`; ctx.fillStyle = res.v >= 0 ? L.up : L.down;
+      ctx.fillText(fitText(ctx, `${res.v >= 0 ? "上昇" : "下落"} ${pct(res.v)} ${res.what}${M.spy != null ? ` · S&P 500 ${pct(M.spy)}` : ""}`, W - 320 - 64), 320, 446);
+    }
+    mkLegend(ctx, 180, 488, L, M);
+    if (M.mode === "single") {
+      await mkChart(ctx, M, { x: 180, y: 524, w: W - 180 - 130, h: 422 }, L, 4);
+      ctx.font = `900 26px ${JP}`; ctx.fillStyle = INK; const head = M.sc.kind === "one" ? "主な取引" : "主な買い手"; ctx.fillText(head, 180, 1040);
+      const hw = ctx.measureText(head).width; ctx.font = `italic 400 22px ${SERIF}`; ctx.fillStyle = L.ink2; ctx.fillText(M.sc.kind === "one" ? "Biggest trades" : "Biggest buyers", 180 + hw + 14, 1040);
+      await mkKey(ctx, M, { x: 180, y: 1056, w: W - 180 - 64, h: 186 }, L, 3);
+    } else {
+      await mkTiles(ctx, M, { x: 180, y: 518, w: W - 180 - 64, h: 724 }, L, 6, 2);
+    }
+    // seigaiha waves
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 1262, W, 98); ctx.clip();
+    const R = 34;
+    for (let row = 0; row < 7; row++) for (let col = -1; col < W / (2 * R) + 1; col++) {
+      const cx = col * 2 * R + (row % 2 ? R : 0), cy = 1262 + row * R / 2;
+      for (let k = 4; k >= 1; k--) { ctx.beginPath(); ctx.arc(cx, cy + R, R * k / 4, Math.PI, 0); ctx.fillStyle = k % 2 ? INDIGO : PAPER; ctx.fill(); }
+    }
+    ctx.restore();
+    mkFooter(ctx, W, H, { ...L, footFont: `500 16px ${UI}`, footBrandFont: `800 18px ${SERIF}`, footInk: L.ink2 }, H - 52);
+  }
+
+  // ---------- 4. Infographic fact sheet: big numbers, icons, chart, bars and a donut ----------
+  function icon(ctx, kind, cx, cy, r, bg, fg) {
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = bg; ctx.fill();
+    ctx.save(); ctx.translate(cx, cy); ctx.fillStyle = fg; ctx.strokeStyle = fg; ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    const s = r / 26;
+    if (kind === "people") { for (const dx of [-9, 9]) { ctx.beginPath(); ctx.arc(dx * s, -7 * s, 6 * s, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.ellipse(dx * s, 10 * s, 9 * s, 7 * s, 0, Math.PI, 0); ctx.fill(); } }
+    else if (kind === "coin") { ctx.font = `900 ${Math.round(30 * s)}px ${INTER}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("$", 0, 1); }
+    else if (kind === "list") { for (const y of [-9, 0, 9]) { ctx.beginPath(); ctx.moveTo(-10 * s, y * s); ctx.lineTo(11 * s, y * s); ctx.stroke(); } }
+    else if (kind === "stack") { for (const y of [-8, 0, 8]) { ctx.beginPath(); ctx.roundRect(-11 * s, (y - 3) * s, 22 * s, 6 * s, 2); ctx.fill(); } }
+    else if (kind === "up" || kind === "down") { const d = kind === "up" ? 1 : -1; ctx.beginPath(); ctx.moveTo(0, 10 * s * d); ctx.lineTo(0, -10 * s * d); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-8 * s, -2 * s * d); ctx.lineTo(0, -10 * s * d); ctx.lineTo(8 * s, -2 * s * d); ctx.stroke(); }
+    else if (kind === "clock") { ctx.beginPath(); ctx.arc(0, 0, 11 * s, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, -6 * s); ctx.lineTo(0, 0); ctx.lineTo(5 * s, 3 * s); ctx.stroke(); }
+    ctx.restore();
+  }
+  function donut(ctx, cx, cy, r, w, parts, L) {
+    const total = parts.reduce((a, p) => a + p.v, 0) || 1; let a = -Math.PI / 2;
+    for (const p of parts) { const da = p.v / total * Math.PI * 2; ctx.beginPath(); ctx.arc(cx, cy, r, a, a + da); ctx.arc(cx, cy, r - w, a + da, a, true); ctx.closePath(); ctx.fillStyle = p.color; ctx.fill(); ctx.strokeStyle = L.card; ctx.lineWidth = 3; ctx.stroke(); a += da; }
+    return total;
+  }
+  async function lookInfographic(ctx, W, H, M) {
+    const NAVY = "#14284b", YEL = "#ffc83d", TEAL = "#16a3a3", BG = "#f4f1ea", CAT = ["#14284b", "#16a3a3", "#ffc83d", "#7b61ff", "#f28c28", "#9aa5b8"];
+    const L = { ink: NAVY, ink2: "#3d4b66", muted: "#6b7486", grid: "#e6e2d9", axis: "#6b7486", axisFont: `600 16px ${INTER}`, line: NAVY, lineW: 4, area: "rgba(22,163,163,0.22)",
+      up: "#1a9c55", down: "#d63a3a", dotRing: "#ffffff", labelMode: "face", faceR: 23, numBg: YEL, numInk: NAVY, D: "#2f6fd6", R: "#d64545", I: "#7a7f87", card: "#ffffff", chip: "#eef1f5",
+      legendFont: `700 18px ${INTER}`, legendNoteFont: `500 16px ${INTER}`, statLabel: `700 15px ${INTER}`, statNum: `900 34px ${INTER}`, statSub: `600 15px ${INTER}`,
+      tileBg: "#ffffff", tileR: 14, tileShadow: "rgba(20,40,75,0.10)", tileTicker: `900 28px ${INTER}`, tileNum: `800 24px ${INTER}`, tileName: `500 15px ${INTER}`, tileFact: `700 17px ${INTER}`, tileSub: `500 14px ${INTER}`, tileLine: NAVY, tilePad: 16 };
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = NAVY; ctx.fillRect(0, 0, W, 268);
+    ctx.font = `800 19px ${INTER}`; ctx.letterSpacing = "3px"; ctx.fillStyle = YEL; ctx.fillText(`FACT SHEET · ${MK_KW.toUpperCase()} STOCK TRADES`, 60, 70); ctx.letterSpacing = "0px";
+    ctx.font = `800 19px ${INTER}`; const tag = M.periodShort.toUpperCase(), tgw = ctx.measureText(tag).width + 36;
+    ctx.fillStyle = YEL; ctx.beginPath(); ctx.roundRect(W - 60 - tgw, 42, tgw, 40, 20); ctx.fill(); ctx.fillStyle = NAVY; ctx.fillText(tag, W - 60 - tgw + 18, 69);
+    const title = M.mode === "single" ? `${M.name} (${M.tk})` : mkTitle(M), ts = fitSize(ctx, title, (s) => `900 ${s}px ${INTER}`, 64, W - 120, 34);
+    ctx.font = `900 ${ts}px ${INTER}`; ctx.fillStyle = "#ffffff"; ctx.fillText(title, 60, 150);
+    ctx.font = `500 22px ${INTER}`; ctx.fillStyle = "rgba(255,255,255,0.82)"; drawWrapped(ctx, mkDeck(M), 60, 196, W - 120, 30, 2);
+    // big-number cards
+    const res = sinceOrMove(M);
+    const cards = [
+      { ic: M.sc.kind === "one" ? "list" : "people", n: M.sc.kind === "one" ? M.buys.length.toLocaleString() : (M.mode === "multi" ? M.buyers.length : M.buyers.length).toLocaleString(), l: M.sc.kind === "one" ? "buys" : "members bought" },
+      { ic: "coin", n: estText(estOf(M.buys)), l: "estimated total" },
+      M.mode === "multi" ? { ic: "stack", n: M.stocks.length.toLocaleString(), l: "different stocks" } : { ic: "list", n: (M.buys.length + M.sells.length).toLocaleString(), l: M.sells.length ? `trades (${M.sells.length} sells)` : "buys in total" },
+      { ic: res.v == null || res.v >= 0 ? "up" : "down", n: pct(res.v), l: res.what, sign: res.v },
+    ];
+    const cw = (W - 120 - 3 * 16) / 4;
+    cards.forEach((c, k) => {
+      const x = 60 + k * (cw + 16), y = 296;
+      ctx.save(); ctx.shadowColor = "rgba(20,40,75,0.10)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 4; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.roundRect(x, y, cw, 140, 16); ctx.fill(); ctx.restore();
+      icon(ctx, c.ic, x + 38, y + 40, 22, k === 3 ? (c.sign == null ? "#9aa5b8" : c.sign >= 0 ? L.up : L.down) : k % 2 ? YEL : TEAL, k === 1 ? NAVY : "#fff");
+      const ns = fitSize(ctx, c.n, (s) => `900 ${s}px ${INTER}`, 34, cw - 30, 18);
+      ctx.font = `900 ${ns}px ${INTER}`; ctx.fillStyle = k === 3 && c.sign != null ? (c.sign >= 0 ? L.up : L.down) : NAVY; ctx.fillText(c.n, x + 16, y + 102);
+      ctx.font = `600 15px ${INTER}`; ctx.fillStyle = L.muted; ctx.fillText(fitText(ctx, c.l, cw - 30), x + 16, y + 126);
+    });
+    // chart (one stock) or tiles (every stock)
+    ctx.save(); ctx.shadowColor = "rgba(20,40,75,0.10)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 4; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.roundRect(60, 462, W - 120, 500, 18); ctx.fill(); ctx.restore();
+    if (M.mode === "single") {
+      ctx.font = `800 18px ${INTER}`; ctx.fillStyle = NAVY; ctx.fillText(`${M.tk} PRICE · ${price(M.last)}`, 88, 504);
+      mkLegend(ctx, W - 88, 498, L, M, "right");
+      await mkChart(ctx, M, { x: 88, y: 534, w: W - 88 - 160, h: 360 }, L, 5);
+    } else {
+      mkLegend(ctx, 88, 498, { ...L, sizeNote: "" }, M);
+      await mkTiles(ctx, M, { x: 80, y: 524, w: W - 160, h: 420 }, { ...L, tileBg: "#f7f6f2", tileShadow: null }, 6, 3);
+    }
+    // bottom: biggest buyers as bars, and a donut
+    const bx = 60, by = 992, bw = (W - 120) * 0.56, half = 60 + bw + 30;
+    ctx.font = `800 17px ${INTER}`; ctx.letterSpacing = "2px"; ctx.fillStyle = NAVY;
+    ctx.fillText(M.sc.kind === "one" ? (M.mode === "single" ? "BIGGEST TRADES" : "BIGGEST BUYS BY STOCK") : "BIGGEST BUYERS", bx, by + 18); ctx.letterSpacing = "0px";
+    const rows = M.sc.kind === "one"
+      ? (M.mode === "single" ? [...M.marks].sort((a, b) => b.amt - a.amt).slice(0, 5).map((t) => ({ name: `${shortDate(t.d)} · ${t.side === "S" ? "sold" : "bought"}`, v: t.amt, text: amountShort(t), side: t.side }))
+        : M.stocks.slice(0, 5).map((g) => ({ name: g.t, v: g.amt, text: estText(estOf(g.buys)) })))
+      : M.buyers.slice(0, 5).map((g, k) => ({ name: `${k + 1}  ${shortName(g.m)}`, v: g.amt, text: estText(estOf(g.buys)) }));
+    const vmax = Math.max(...rows.map((r) => r.v), 1);
+    rows.forEach((r, k) => {
+      const y = by + 44 + k * 52;
+      ctx.font = `700 18px ${INTER}`; ctx.fillStyle = NAVY; ctx.fillText(fitText(ctx, r.name, 200), bx, y + 22);
+      const x0 = bx + 210, wmax = bw - 210 - 130, w = Math.max(6, r.v / vmax * wmax);
+      ctx.fillStyle = r.side === "S" ? L.down : TEAL; ctx.beginPath(); ctx.roundRect(x0, y + 4, w, 26, 6); ctx.fill();
+      ctx.font = `700 17px ${INTER}`; ctx.fillStyle = L.ink2; ctx.fillText(r.text, x0 + w + 10, y + 23);
+    });
+    // donut: party split of the money (one stock, many members) or sectors (every stock)
+    let parts, dTitle;
+    if (M.mode === "single" && M.sc.kind !== "one") {
+      const by2 = { D: 0, R: 0, I: 0 }; for (const t of M.buys) by2[members[t.m].party in by2 ? members[t.m].party : "I"] += t.amt;
+      parts = [["D", "Democrats", "#2f6fd6"], ["R", "Republicans", "#d64545"], ["I", "Independents", "#9aa5b8"]].map(([k, l, c]) => ({ label: l, v: by2[k], color: c })).filter((p) => p.v > 0);
+      dTitle = "WHO BOUGHT, BY PARTY";
+    } else if (M.mode === "multi") {
+      const sec = new Map(); for (const t of M.buys) { const s = t.st[2] || "Other"; sec.set(s, (sec.get(s) || 0) + t.amt); }
+      const sorted = [...sec.entries()].sort((a, b) => b[1] - a[1]), top = sorted.slice(0, 5), rest = sorted.slice(5).reduce((a, [, v]) => a + v, 0);
+      parts = top.map(([l, v], k) => ({ label: l, v, color: CAT[k] })); if (rest) parts.push({ label: "Other", v: rest, color: CAT[5] });
+      dTitle = "WHERE THE MONEY WENT";
+    } else {
+      const dl = M.marks.filter((t) => t.delay != null && t.delay >= 0).map((t) => t.delay), med = dl.length ? median(dl) : null, late = dl.filter((d) => d > 45).length;
+      ctx.font = `800 17px ${INTER}`; ctx.letterSpacing = "2px"; ctx.fillStyle = NAVY; ctx.fillText("TIME TO REPORT", half, by + 18); ctx.letterSpacing = "0px";
+      icon(ctx, "clock", half + 40, by + 96, 36, TEAL, "#fff");
+      ctx.font = `900 64px ${INTER}`; ctx.fillStyle = NAVY; const medT = med == null ? "–" : String(med); ctx.fillText(medT, half + 92, by + 118);
+      const medW = ctx.measureText(medT).width; ctx.font = `600 18px ${INTER}`; ctx.fillStyle = L.muted; if (med != null) ctx.fillText("days, median", half + 104 + medW, by + 116);
+      ctx.font = `600 18px ${INTER}`; ctx.fillStyle = L.ink2;
+      drawWrapped(ctx, `From trade to filing. The STOCK Act allows 45 days${late ? `; ${late} of these were reported late` : ""}.`, half, by + 170, W - 60 - half, 26, 4);
+    }
+    if (parts) {
+      ctx.font = `800 17px ${INTER}`; ctx.letterSpacing = "2px"; ctx.fillStyle = NAVY; ctx.fillText(dTitle, half, by + 18); ctx.letterSpacing = "0px";
+      const total = donut(ctx, half + 80, by + 140, 78, 30, parts, L);
+      parts.slice(0, 6).forEach((p, k) => {
+        const y = by + 62 + k * 34; ctx.fillStyle = p.color; ctx.beginPath(); ctx.roundRect(half + 180, y - 13, 16, 16, 4); ctx.fill();
+        ctx.font = `600 16px ${INTER}`; ctx.fillStyle = L.ink2; ctx.fillText(fitText(ctx, `${p.label} ${Math.round(p.v / total * 100)}%`, W - 60 - half - 210), half + 204, y);
+      });
+    }
+    mkFooter(ctx, W, H, { ...L, footFont: `500 15px ${INTER}`, footBrandFont: `900 18px ${INTER}`, footBrand: NAVY }, H - 64);
+  }
+
+  // ---------- 5. Stock certificate: guilloche border, engraved chart, seal ----------
+  async function lookCertificate(ctx, W, H, M) {
+    const PAPER = "#f3efde", GREEN = "#2b5a47", INK = "#1f2a24";
+    const L = { ink: INK, ink2: "#3a4a41", muted: "#5f6e65", grid: "rgba(43,90,71,0.18)", axis: "#5f6e65", axisFont: `500 15px ${MONO}`, line: GREEN, lineW: 3, hatch: "rgba(43,90,71,0.35)",
+      up: "#1f8a4c", down: "#b3261e", dotRing: PAPER, labelMode: "num", numR: 15, numBg: GREEN, numInk: PAPER, numFont: `700 16px ${CINZEL}`, leader: GREEN, leaderW: 1.2,
+      legendFont: `600 18px ${CINZEL}`, legendNoteFont: `italic 400 18px ${SERIF}`, D: "#2f5f9e", R: "#a33b3b", I: "#7a7f87", card: PAPER, chip: "#e4dfca" };
+    ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+    const vg = ctx.createRadialGradient(W / 2, H / 2, 200, W / 2, H / 2, W); vg.addColorStop(0, "rgba(255,255,255,0)"); vg.addColorStop(1, "rgba(120,110,70,0.18)"); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    // guilloche border: woven sine waves running round a band
+    const o = 32, band = 58, mid = o + band / 2, per = 2 * ((W - 2 * mid) + (H - 2 * mid));
+    const along = (s) => { const w = W - 2 * mid, h = H - 2 * mid; if (s < w) return [mid + s, mid, 0, 1]; s -= w; if (s < h) return [W - mid, mid + s, -1, 0]; s -= h; if (s < w) return [W - mid - s, H - mid, 0, -1]; s -= w; return [mid, H - mid - s, 1, 0]; };
+    ctx.strokeStyle = GREEN; ctx.lineWidth = 0.9;
+    for (let ph = 0; ph < 6; ph++) {
+      ctx.beginPath();
+      for (let s = 0; s <= per; s += 3) { const [x, y, nx, ny] = along(s), a = Math.sin(s / 22 * Math.PI + ph * Math.PI / 3) * (band / 2 - 4); if (s) ctx.lineTo(x + nx * a, y + ny * a); else ctx.moveTo(x + nx * a, y + ny * a); }
+      ctx.closePath(); ctx.stroke();
+    }
+    ctx.lineWidth = 4; ctx.strokeRect(o, o, W - 2 * o, H - 2 * o); ctx.lineWidth = 2; ctx.strokeRect(o + band, o + band, W - 2 * (o + band), H - 2 * (o + band));
+    ctx.lineWidth = 1; ctx.strokeRect(o + band + 8, o + band + 8, W - 2 * (o + band + 8), H - 2 * (o + band + 8));
+    for (const [cx, cy] of [[mid, mid], [W - mid, mid], [mid, H - mid], [W - mid, H - mid]]) {  // corner rosettes
+      ctx.fillStyle = PAPER; ctx.beginPath(); ctx.arc(cx, cy, 40, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = GREEN; ctx.lineWidth = 0.9; ctx.beginPath();
+      for (let t = 0; t <= Math.PI * 2 * 9 + 0.01; t += 0.02) { const R = 30, r = 9, d = 22, x = (R - r) * Math.cos(t) + d * Math.cos((R - r) / r * t), y = (R - r) * Math.sin(t) - d * Math.sin((R - r) / r * t); if (t) ctx.lineTo(cx + x * 0.95, cy + y * 0.95); else ctx.moveTo(cx + x * 0.95, cy + y * 0.95); }
+      ctx.stroke();
+    }
+    // number boxes
+    const box = (x, label, val) => {
+      ctx.strokeStyle = GREEN; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(x, 124, 170, 78, 10); ctx.stroke(); ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(x + 5, 129, 160, 68, 7); ctx.stroke();
+      ctx.textAlign = "center"; ctx.fillStyle = GREEN; ctx.font = `700 13px ${CINZEL}`; ctx.letterSpacing = "2px"; ctx.fillText(label, x + 85, 150); ctx.letterSpacing = "0px";
+      ctx.fillStyle = INK; ctx.font = `800 28px ${CINZEL}`; ctx.fillText(fitText(ctx, val, 150), x + 85, 186); ctx.textAlign = "left";
+    };
+    box(124, "BUYS", M.buys.length.toLocaleString()); box(W - 294, "PERIOD", periodTag(M));
+    ctx.textAlign = "center"; ctx.fillStyle = GREEN; ctx.font = `800 30px ${CINZEL}`; ctx.letterSpacing = "3px";
+    ctx.fillText("CERTIFICATE", W / 2, 158); ctx.font = `700 16px ${CINZEL}`; ctx.letterSpacing = "1.5px"; ctx.fillText("OF DISCLOSED STOCK PURCHASES", W / 2, 188); ctx.letterSpacing = "0px";
+    ctx.font = `italic 400 27px ${SERIF}`; ctx.fillStyle = L.ink2; ctx.fillText("This certifies that", W / 2, 262);
+    const who = M.sc.kind === "one" ? M.sc.name.toUpperCase() : mkWho(M).toUpperCase();
+    let s = fitSize(ctx, who, (x) => `700 ${x}px ${CINZEL}`, 40, W - 300, 20); ctx.font = `700 ${s}px ${CINZEL}`; ctx.fillStyle = INK; ctx.fillText(who, W / 2, 314);
+    ctx.font = `italic 400 25px ${SERIF}`; ctx.fillStyle = L.ink2;
+    ctx.fillText(M.mode === "single" ? "reported buying shares of" : `reported buying shares of ${plural(M.stocks.length, "company", )}`.replace("companys", "companies"), W / 2, 360);
+    if (M.mode === "single") {
+      const nm = M.name.toUpperCase(); s = fitSize(ctx, nm, (x) => `800 ${x}px ${CINZEL}`, 58, W - 300, 24); ctx.font = `800 ${s}px ${CINZEL}`; ctx.fillStyle = GREEN; ctx.fillText(nm, W / 2, 426);
+    } else { ctx.font = `800 46px ${CINZEL}`; ctx.fillStyle = GREEN; ctx.fillText("AS LISTED BELOW", W / 2, 420); }
+    const firstD = M.buys.map((t) => t.d).sort()[0], lastD = M.buys.map((t) => t.d).sort().pop();
+    ctx.font = `italic 400 23px ${SERIF}`; ctx.fillStyle = L.ink2;
+    ctx.fillText(fitText(ctx, M.buys.length ? `for an estimated ${estText(estOf(M.buys))}, ${fmtDate(firstD)} to ${fmtDate(lastD)}` : M.inPeriod, W - 300), W / 2, 468);
+    ctx.textAlign = "left";
+    if (M.mode === "single") {
+      ctx.strokeStyle = GREEN; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(150, 500, W - 300, 430, 40); ctx.stroke(); ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(158, 508, W - 316, 414, 34); ctx.stroke();
+      await mkChart(ctx, M, { x: 196, y: 540, w: W - 196 - 250, h: 330 }, { ...L, axisSide: "right" }, 5);
+      mkLegend(ctx, W / 2, 960, L, M, "center");
+      // registered buyers (or the politician's biggest trades), two columns
+      ctx.textAlign = "center"; ctx.font = `700 19px ${CINZEL}`; ctx.fillStyle = GREEN; ctx.letterSpacing = "3px";
+      ctx.fillText(M.sc.kind === "one" ? "LARGEST TRADES" : "REGISTERED BUYERS", W / 2, 1012); ctx.letterSpacing = "0px"; ctx.textAlign = "left";
+      ctx.strokeStyle = GREEN; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(150, 1005); ctx.lineTo(W / 2 - 170, 1005); ctx.moveTo(W / 2 + 170, 1005); ctx.lineTo(W - 150, 1005); ctx.stroke();
+      const rows = M.sc.kind === "one" ? [...M.marks].sort((a, b) => b.amt - a.amt).slice(0, 4).map((t, k) => [`${k + 1}. ${fmtDate(t.d)}`, `${t.side === "S" ? "Sold" : "Bought"} ${amountShort(t)}`])
+        : M.buyers.slice(0, 4).map((g, k) => [`${k + 1}. ${plainName(g.m).toUpperCase()}`, estText(estOf(g.buys))]);
+      rows.forEach(([a, b], k) => {
+        const x = k % 2 ? W / 2 + 20 : 150, y = 1056 + Math.floor(k / 2) * 44, w = W / 2 - 170;
+        ctx.font = `600 18px ${CINZEL}`; ctx.fillStyle = INK; ctx.fillText(fitText(ctx, a, w - 150), x, y);
+        ctx.textAlign = "right"; ctx.font = `italic 600 20px ${SERIF}`; ctx.fillStyle = L.ink2; ctx.fillText(b, x + w, y); ctx.textAlign = "left";
+        ctx.strokeStyle = "rgba(43,90,71,0.35)"; ctx.setLineDash([2, 4]); ctx.beginPath(); ctx.moveTo(x, y + 12); ctx.lineTo(x + w, y + 12); ctx.stroke(); ctx.setLineDash([]);
+      });
+    } else {
+      // a ledger of the stocks bought most
+      const x0 = 150, x1 = W - 150, cols = [x0, x0 + 360, x0 + 470, x1];
+      ctx.font = `700 15px ${CINZEL}`; ctx.fillStyle = GREEN; ctx.letterSpacing = "2px";
+      ctx.fillText("COMPANY", cols[0], 528); ctx.fillText("BUYS", cols[1], 528); ctx.fillText("EST. AMOUNT", cols[2], 528); ctx.textAlign = "right"; ctx.fillText("SINCE BOUGHT", cols[3], 528); ctx.textAlign = "left"; ctx.letterSpacing = "0px";
+      ctx.strokeStyle = GREEN; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x0, 542); ctx.lineTo(x1, 542); ctx.stroke();
+      M.stocks.slice(0, 9).forEach((g, k) => {
+        const y = 584 + k * 52;
+        ctx.font = `800 21px ${CINZEL}`; ctx.fillStyle = INK; ctx.fillText(g.t, cols[0], y);
+        ctx.font = `italic 400 17px ${SERIF}`; ctx.fillStyle = L.muted; ctx.fillText(fitText(ctx, g.name, 240), cols[0] + 100, y);
+        ctx.font = `600 20px ${SERIF}`; ctx.fillStyle = INK; ctx.fillText(String(g.buys.length), cols[1], y); ctx.fillText(estText(estOf(g.buys)), cols[2], y);
+        ctx.textAlign = "right"; ctx.font = `700 20px ${MONO}`; ctx.fillStyle = g.since == null ? L.muted : g.since >= 0 ? L.up : L.down; ctx.fillText(pct(g.since), cols[3], y); ctx.textAlign = "left";
+        ctx.strokeStyle = "rgba(43,90,71,0.3)"; ctx.lineWidth = 1; ctx.setLineDash([2, 4]); ctx.beginPath(); ctx.moveTo(x0, y + 16); ctx.lineTo(x1, y + 16); ctx.stroke(); ctx.setLineDash([]);
+      });
+      const res = sinceOrMove(M);
+      ctx.textAlign = "center"; ctx.font = `italic 400 24px ${SERIF}`; ctx.fillStyle = L.ink2;
+      if (res.v != null) ctx.fillText(`Together these buys are ${res.v >= 0 ? "up" : "down"} ${pctAbs(res.v)} since they were made${M.spy != null ? `; the S&P 500 moved ${pct(M.spy)} over the same days` : ""}.`, W / 2, 1080);
+      ctx.textAlign = "left";
+    }
+    // seal and signature lines
+    const sx = 236, sy = 1214;
+    ctx.fillStyle = GREEN; ctx.beginPath();
+    for (let k = 0; k <= 72; k++) { const a = k / 72 * Math.PI * 2, r = k % 2 ? 80 : 88; if (k) ctx.lineTo(sx + Math.cos(a) * r, sy + Math.sin(a) * r); else ctx.moveTo(sx + Math.cos(a) * r, sy + Math.sin(a) * r); }
+    ctx.fill(); ctx.strokeStyle = PAPER; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx, sy, 70, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.arc(sx, sy, 46, 0, Math.PI * 2); ctx.stroke();
+    arcText(ctx, "CONGRESS TRADE CHECK ★ PUBLIC FILINGS ★ ", sx, sy, 58, `700 12px ${CINZEL}`, PAPER);
+    ctx.fillStyle = PAPER; ctx.font = `800 22px ${CINZEL}`; ctx.textAlign = "center"; ctx.fillText(D.prices_through.slice(0, 4), sx, sy + 8); ctx.textAlign = "left";
+    const sig = (x, w, a, b) => { ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, 1222); ctx.lineTo(x + w, 1222); ctx.stroke(); ctx.font = `italic 400 22px ${SERIF}`; ctx.fillStyle = L.ink2; ctx.fillText(fitText(ctx, a, w), x, 1210); ctx.font = `700 12px ${CINZEL}`; ctx.fillStyle = GREEN; ctx.letterSpacing = "1.5px"; ctx.fillText(b, x, 1244); ctx.letterSpacing = "0px"; };
+    sig(380, 260, "Periodic Transaction Reports", "SOURCE"); sig(680, 250, `Closing prices to ${shortDate(D.prices_through)}`, "PRICES");
+    ctx.textAlign = "center"; ctx.font = `500 15px ${UI}`; ctx.fillStyle = L.muted;
+    ctx.fillText("Marks sit at the closing price on the trade date · members can file up to 45 days after trading", W / 2, 1310);
+    ctx.fillText("Not financial advice · HarryV12 Finance", W / 2, 1330); ctx.textAlign = "left";
+  }
+
+  // ---------- 6. Swiss grid: one giant number, lower-case title, strict columns ----------
+  async function lookSwiss(ctx, W, H, M) {
+    const INK = "#111111", BG = "#efede7", m0 = 56;
+    const L = { ink: INK, ink2: "#2b2b2b", muted: "#5f5f5f", grid: null, axis: INK, axisFont: `600 16px ${INTER}`, line: INK, lineW: 6, up: "#0f8a3c", down: "#d11f1f",
+      dotRing: BG, labelMode: "num", numR: 16, numSquare: true, numBg: INK, numInk: BG, numFont: `800 17px ${INTER}`, leader: INK, leaderW: 2, upper: false,
+      legendFont: `700 18px ${INTER}`, legendNoteFont: `500 17px ${INTER}`, keyNums: true, keyFaces: false, keyName: `800 21px ${INTER}`, keySub: `500 15px ${INTER}`, keyNum: `800 20px ${INTER}`, keyRule: INK, keyRuleW: 1, keyRowH: 54,
+      D: "#2f6fd6", R: "#d64545", I: "#7a7f87", card: BG, chip: "#ddd" };
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = INK; ctx.fillRect(m0, 56, W - 2 * m0, 5);
+    const colW = (W - 2 * m0) / 3;
+    const block = (k, a, b) => { ctx.font = `800 20px ${INTER}`; ctx.fillStyle = INK; ctx.fillText(a, m0 + k * colW, 98); ctx.font = `500 20px ${INTER}`; ctx.fillText(fitText(ctx, b, colW - 20), m0 + k * colW, 124); };
+    block(0, MK_KW.replace(" & administration", " & admin."), M.sc.kind === "one" ? shortName(M.sc.m) : M.sc.kind === "committee" ? M.sc.short : "stock trades");
+    block(1, M.periodShort.replace(/^since /, "Since "), `to ${fmtDate(D.prices_through)}`); block(2, "Source", MK_SRC.replace(" Periodic Transaction Reports", " trade filings"));
+    const res = sinceOrMove(M), big = pct(res.v, 0);
+    ctx.save(); ctx.letterSpacing = "-10px"; const bs = fitSize(ctx, big, (s) => `900 ${s}px ${INTER}`, 300, W - 2 * m0, 100);
+    ctx.font = `900 ${bs}px ${INTER}`; ctx.fillStyle = res.v == null ? INK : res.v >= 0 ? L.up : L.down; ctx.fillText(big, m0 - 8, 150 + bs * 0.74); ctx.restore();
+    const yCap = 150 + bs * 0.74 + 46;
+    ctx.font = `500 22px ${INTER}`; ctx.fillStyle = INK;
+    ctx.fillText(fitText(ctx, `${M.since != null ? "Their buys, " + res.what : "The stock, " + res.what}.${M.spy != null ? ` S&P 500 over the same days: ${pct(M.spy)}.` : ""}`, W - 2 * m0), m0, yCap);
+    const title = mkTitle(M).toLowerCase(), ts = fitSize(ctx, title, (s) => `800 ${s}px ${INTER}`, 118, W - 2 * m0, 30);
+    ctx.save(); ctx.letterSpacing = "-3px"; ctx.font = `800 ${ts}px ${INTER}`; ctx.fillStyle = INK; ctx.fillText(title, m0 - 4, yCap + 30 + ts * 0.8); ctx.restore();
+    const yT = yCap + 30 + ts * 0.8;
+    ctx.font = `600 20px ${INTER}`; ctx.fillStyle = L.ink2;
+    ctx.fillText(fitText(ctx, M.mode === "single" ? `${M.tk} · ${M.sector} · ${price(M.last)} on ${shortDate(M.lastDate)}` : `${plural(M.stocks.length, "stock")} · ${plural(M.buys.length, "buy")} · ${estText(estOf(M.buys))}`, W - 2 * m0), m0, yT + 40);
+    if (M.mode === "single") {
+      const cy = yT + 80, ch = 1010 - cy;
+      mkLegend(ctx, W - m0, cy - 6, L, M, "right");
+      await mkChart(ctx, M, { x: m0, y: cy + 20, w: W - 2 * m0 - 90, h: ch - 20 }, L, 5);
+      ctx.fillStyle = INK; ctx.fillRect(m0, 1060, W - 2 * m0, 3);
+      await mkKey(ctx, M, { x: m0, y: 1074, w: colW * 2 - 30, h: 216 }, L, 4);
+      ctx.font = `500 19px ${INTER}`; ctx.fillStyle = INK; drawWrapped(ctx, mkDeck(M), m0 + colW * 2, 1100, colW, 27, 7);
+    } else {
+      const y0 = yT + 84, rows = M.stocks.slice(0, Math.min(9, Math.floor((1290 - y0) / 56)));
+      ctx.fillStyle = INK; ctx.fillRect(m0, y0 - 20, W - 2 * m0, 3);
+      const vmax = Math.max(...rows.map((g) => g.amt), 1);
+      rows.forEach((g, k) => {
+        const y = y0 + k * 56;
+        ctx.font = `800 30px ${INTER}`; ctx.fillStyle = INK; ctx.fillText(g.t, m0, y + 28);
+        ctx.font = `500 16px ${INTER}`; ctx.fillStyle = L.muted; ctx.fillText(fitText(ctx, g.name, 210), m0 + 130, y + 26);
+        const bx = m0 + 360, bw = Math.max(6, g.amt / vmax * 330);
+        ctx.fillStyle = INK; ctx.fillRect(bx, y + 8, bw, 22);
+        ctx.font = `600 17px ${INTER}`; ctx.fillStyle = INK; ctx.fillText(estText(estOf(g.buys)), bx + bw + 10, y + 26);
+        ctx.textAlign = "right"; ctx.font = `800 24px ${INTER}`; ctx.fillStyle = g.since == null ? L.muted : g.since >= 0 ? L.up : L.down; ctx.fillText(pct(g.since), W - m0, y + 28); ctx.textAlign = "left";
+        ctx.fillStyle = "rgba(17,17,17,0.25)"; ctx.fillRect(m0, y + 44, W - 2 * m0, 1);
+      });
+    }
+    ctx.fillStyle = INK; ctx.fillRect(m0, H - 104, W - 2 * m0, 3);
+    mkFooter(ctx, W, H, { ...L, footFont: `500 15px ${INTER}`, footBrandFont: `800 18px ${INTER}`, footX: m0, footInk: L.ink2 }, H - 70);
+  }
+
+  // ---------- 7. Neon: synthwave sunset, glowing chart ----------
+  async function lookNeon(ctx, W, H, M) {
+    const CYAN = "#2de2ff", MAG = "#ff2bd6", HOR = 990;
+    const L = { ink: "#f3ecff", ink2: "#d8cdf5", muted: "#a596cf", grid: "rgba(45,226,255,0.10)", axis: "#a596cf", axisFont: `500 15px ${ORBIT}`, upper: true,
+      line: CYAN, lineW: 4, glow: CYAN, glowBlur: 26, glowCore: "#e8fdff", area: "rgba(255,43,214,0.20)", lastDot: "#e8fdff",
+      up: "#39ff88", down: "#ff3b5c", dotRing: "#14002e", dotGlow: true, labelMode: "pill", labelBg: "rgba(14,2,36,0.88)", labelBorder: MAG, labelBorderW: 2, labelShadow: "rgba(255,43,214,0.6)", labelShadowBlur: 18,
+      labelInk: "#f3ecff", labelSub: CYAN, font1: `700 19px ${ORBIT}`, font2: `500 17px ${MONO}`, leader: "rgba(255,43,214,0.8)",
+      D: "#4f8ef0", R: "#ff5f7a", I: "#a596cf", card: "#14002e", chip: "#2a0b4a",
+      legendFont: `700 18px ${ORBIT}`, legendNoteFont: `500 16px ${ORBIT}`, sizeNote: "BIGGER DOT = BIGGER TRADE", buyWord: "BOUGHT", sellWord: "SOLD",
+      keyName: `700 21px ${ORBIT}`, keySub: `500 15px ${UI}`, keyNum: `700 20px ${MONO}`, keyAmt: CYAN, keyRule: "rgba(255,43,214,0.35)", keyRowH: 62, keyFaceR: 22,
+      tileBg: "rgba(14,2,36,0.82)", tileBorder: "rgba(45,226,255,0.55)", tileR: 10, tileTicker: `800 26px ${ORBIT}`, tileNum: `700 22px ${MONO}`, tileName: `500 14px ${UI}`, tileFact: `700 15px ${ORBIT}`, tileSub: `500 14px ${UI}`, tileLine: CYAN, tilePad: 16 };
+    const sky = ctx.createLinearGradient(0, 0, 0, HOR); sky.addColorStop(0, "#06021a"); sky.addColorStop(0.55, "#22093f"); sky.addColorStop(1, "#5a1270");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, HOR);
+    for (let k = 0; k < 140; k++) { ctx.fillStyle = `rgba(255,255,255,${0.2 + Math.random() * 0.6})`; ctx.fillRect(Math.random() * W, Math.random() * HOR * 0.6, 2, 2); }
+    // sun with stripes cut out
+    const sr = 205, sunG = ctx.createLinearGradient(0, HOR - sr, 0, HOR); sunG.addColorStop(0, "#ffe14d"); sunG.addColorStop(1, "#ff2f8e");
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, HOR); ctx.clip();
+    ctx.shadowColor = "rgba(255,80,160,0.8)"; ctx.shadowBlur = 60; ctx.beginPath(); ctx.arc(W / 2, HOR, sr, Math.PI, 0); ctx.fillStyle = sunG; ctx.fill(); ctx.shadowBlur = 0;
+    for (let k = 0; k < 6; k++) { const y = HOR - sr * 0.5 + k * 18, h = 3 + k * 2; const sg = ctx.createLinearGradient(0, HOR - sr, 0, HOR); sg.addColorStop(0, "#22093f"); sg.addColorStop(1, "#5a1270"); ctx.fillStyle = sg; ctx.fillRect(W / 2 - sr, y, 2 * sr, h); }
+    ctx.restore();
+    // floor grid
+    ctx.fillStyle = "#0b0118"; ctx.fillRect(0, HOR, W, H - HOR);
+    ctx.save(); ctx.strokeStyle = MAG; ctx.lineWidth = 2; ctx.shadowColor = MAG; ctx.shadowBlur = 12; ctx.globalAlpha = 0.55;
+    for (let k = 1; k < 16; k++) { const y = HOR + Math.pow(k / 15, 2.1) * (H - HOR); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    for (let k = -14; k <= 14; k++) { ctx.beginPath(); ctx.moveTo(W / 2 + k * 30, HOR); ctx.lineTo(W / 2 + k * 190, H); ctx.stroke(); }
+    ctx.restore();
+    ctx.fillStyle = CYAN; ctx.fillRect(0, HOR - 1, W, 2);
+    // title
+    ctx.font = `500 19px ${ORBIT}`; ctx.letterSpacing = "5px"; ctx.fillStyle = MAG; ctx.shadowColor = MAG; ctx.shadowBlur = 14;
+    ctx.fillText(`${MK_KW.toUpperCase()} TRADES · ${M.periodShort.toUpperCase()}`, 64, 82); ctx.letterSpacing = "0px";
+    const title = (M.mode === "single" ? M.name : mkTitle(M)).toUpperCase(), ts = fitSize(ctx, title, (s) => `800 ${s}px ${ORBIT}`, 66, W - 128, 28);
+    ctx.font = `800 ${ts}px ${ORBIT}`; ctx.shadowColor = CYAN; ctx.shadowBlur = 30; ctx.fillStyle = "#eafcff"; ctx.fillText(title, 64, 160); ctx.shadowBlur = 0;
+    ctx.font = `500 21px ${UI}`; ctx.fillStyle = L.ink2; drawWrapped(ctx, mkDeck(M), 64, 206, W - 128, 29, 2);
+    const res = sinceOrMove(M);
+    if (res.v != null) {
+      ctx.font = `800 30px ${ORBIT}`; ctx.fillStyle = res.v >= 0 ? L.up : L.down; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 18;
+      const tx = `${pct(res.v)} ${res.what.toUpperCase()}`; ctx.fillText(fitText(ctx, tx, W - 128), 64, 292); ctx.shadowBlur = 0;
+      if (M.spy != null) { ctx.font = `500 17px ${ORBIT}`; ctx.fillStyle = L.muted; ctx.fillText(`S&P 500 SAME DAYS ${pct(M.spy)}`, 64, 322); }
+    }
+    mkLegend(ctx, W - 64, 324, L, M, "right");
+    if (M.mode === "single") await mkChart(ctx, M, { x: 64, y: 370, w: W - 64 - 130, h: 370 }, L, 4);
+    else await mkTiles(ctx, M, { x: 64, y: 364, w: W - 128, h: 560 }, L, 6, 3);
+    if (!(M.sc.kind === "one" && M.mode === "multi")) {
+      ctx.save(); ctx.fillStyle = "rgba(8,0,22,0.78)"; ctx.shadowColor = MAG; ctx.shadowBlur = 16; ctx.beginPath(); ctx.roundRect(64, 1012, W - 128, 286, 14); ctx.fill(); ctx.restore();
+      await mkKey(ctx, M, { x: 88, y: 1024, w: W - 176, h: 262 }, { ...L, keyRule: null }, 4);
+    }
+    mkFooter(ctx, W, H, { ...L, footFont: `500 15px ${UI}`, footBrandFont: `800 17px ${ORBIT}`, footBrand: CYAN, footInk: L.muted }, H - 58);
+  }
+
+  // ---------- 8. Blueprint: technical drawing with dimensions, parts list and title block ----------
+  async function lookBlueprint(ctx, W, H, M) {
+    const BG = "#0f4d8a", LN = "#e8f1ff";
+    const L = { ink: LN, ink2: "#cfe0f7", muted: "#a9c3e6", grid: null, axis: "#cfe0f7", axisFont: `500 15px ${MONO}`, line: LN, lineW: 3, lastDot: LN,
+      up: "#62f08f", down: "#ff7a7a", dotRing: BG, labelMode: "num", numR: 16, numBg: BG, numEdge: LN, numInk: LN, numFont: `700 16px ${MONO}`, leader: LN, leaderW: 1.3, leaderDash: [6, 4],
+      legendFont: `400 21px ${HAND}`, legendNoteFont: `400 19px ${HAND}`, D: "#7fb0ff", R: "#ff9a9a", I: "#cfe0f7", card: BG, chip: "#1b5c9c",
+      tileBorder: LN, tileDash: [8, 5], tileBorderW: 1.5, tileR: 0, tileTicker: `400 30px ${HAND}`, tileNum: `700 20px ${MONO}`, tileName: `500 14px ${MONO}`, tileFact: `400 18px ${HAND}`, tileSub: `500 13px ${MONO}`, tileLine: LN, tileLineW: 2 };
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= W; x += 24) { ctx.strokeStyle = x % 120 ? "rgba(232,241,255,0.07)" : "rgba(232,241,255,0.15)"; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = 0; y <= H; y += 24) { ctx.strokeStyle = y % 120 ? "rgba(232,241,255,0.07)" : "rgba(232,241,255,0.15)"; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    ctx.strokeStyle = LN; ctx.lineWidth = 2.5; ctx.strokeRect(30, 30, W - 60, H - 60); ctx.lineWidth = 1; ctx.strokeRect(40, 40, W - 80, H - 80);
+    const title = (M.mode === "single" ? M.name : mkTitle(M)).toUpperCase(), ts = fitSize(ctx, title, (s) => `400 ${s}px ${HAND}`, 62, W - 140, 28);
+    ctx.font = `400 ${ts}px ${HAND}`; ctx.fillStyle = LN; ctx.fillText(title, 70, 128);
+    ctx.font = `500 17px ${MONO}`; ctx.fillStyle = L.ink2;
+    ctx.fillText(fitText(ctx, `DWG ${M.mode === "single" ? M.tk : "PORTFOLIO"}-${periodTag(M).replace(/\s+/g, "")} · ${mkWho(M).toUpperCase()}`, W - 140), 70, 164);
+    ctx.font = `400 22px ${HAND}`; ctx.fillStyle = L.ink2; drawWrapped(ctx, mkDeck(M), 70, 204, W - 140, 30, 2);
+    if (M.mode === "single") {
+      const box = { x: 150, y: 290, w: W - 150 - 200, h: 440 };
+      const { sc } = await mkChart(ctx, M, box, { ...L, axisSide: "left" }, 5);
+      // dimension lines: the move over the period, and the period itself
+      const arrow = (x, y, ang) => { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 12 * Math.cos(ang - 0.35), y - 12 * Math.sin(ang - 0.35)); ctx.moveTo(x, y); ctx.lineTo(x - 12 * Math.cos(ang + 0.35), y - 12 * Math.sin(ang + 0.35)); ctx.stroke(); };
+      ctx.strokeStyle = LN; ctx.lineWidth = 1.5;
+      const dx = box.x + box.w + 70, y1 = sc.Y(M.first), y2 = sc.Y(M.last);
+      ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(sc.X(M.s0), y1); ctx.lineTo(dx + 10, y1); ctx.moveTo(sc.X(M.end), y2); ctx.lineTo(dx + 10, y2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(dx, y1); ctx.lineTo(dx, y2); ctx.stroke(); arrow(dx, y2, y2 < y1 ? -Math.PI / 2 : Math.PI / 2); arrow(dx, y1, y2 < y1 ? Math.PI / 2 : -Math.PI / 2);
+      ctx.save(); ctx.translate(dx + 30, (y1 + y2) / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = "center"; ctx.font = `400 22px ${HAND}`; ctx.fillStyle = M.chg >= 0 ? L.up : L.down; ctx.fillText(`Δ ${pct(M.chg)}`, 0, 0); ctx.restore();
+      const hy = box.y + box.h + 62; ctx.strokeStyle = LN; ctx.beginPath(); ctx.moveTo(box.x, hy); ctx.lineTo(box.x + box.w, hy); ctx.stroke(); arrow(box.x + box.w, hy, 0); arrow(box.x, hy, Math.PI);
+      const dimT = `${M.periodShort.toUpperCase()} · ${M.end - M.s0 + 1} TRADING DAYS`; ctx.font = `400 21px ${HAND}`; const dimW = ctx.measureText(dimT).width + 28;
+      ctx.fillStyle = BG; ctx.fillRect(box.x + box.w / 2 - dimW / 2, hy - 14, dimW, 28);
+      ctx.fillStyle = LN; ctx.textAlign = "center"; ctx.fillText(dimT, box.x + box.w / 2, hy + 7); ctx.textAlign = "left";
+      mkLegend(ctx, 70, 846, L, M);
+    } else {
+      mkLegend(ctx, 70, 280, { ...L, sizeNote: "" }, M);
+      await mkTiles(ctx, M, { x: 70, y: 304, w: W - 140, h: 556 }, L, 6, 3);
+    }
+    // parts list
+    const one = M.sc.kind === "one", tx0 = 70, tx1 = W - 70, ty = 880;
+    const cols = one && M.mode === "single" ? [["ITEM", 0], ["DATE", 80], ["TRADE", 300], ["AMOUNT", 470], ["PRICE", 760]]
+      : one ? [["ITEM", 0], ["STOCK", 80], ["BUYS", 420], ["EST. AMOUNT", 530], ["SINCE", 790]] : [["ITEM", 0], ["MEMBER", 80], ["BUYS", 470], ["EST. AMOUNT", 580], ["SINCE", 820]];
+    const rows = one && M.mode === "single" ? [...M.marks].sort((a, b) => b.amt - a.amt).slice(0, 5).map((t, k) => [k + 1, fmtDate(t.d), t.side === "S" ? "SOLD" : "BOUGHT", amountShort(t), price(t.T.ep)])
+      : one ? M.stocks.slice(0, 5).map((g, k) => [k + 1, `${g.t} ${g.name}`, g.buys.length, estText(estOf(g.buys)), pct(g.since)])
+      : M.buyers.slice(0, 5).map((g, k) => [k + 1, plainName(g.m).toUpperCase(), g.buys.length, estText(estOf(g.buys)), pct(g.since)]);
+    ctx.strokeStyle = LN; ctx.lineWidth = 1.5; ctx.strokeRect(tx0, ty, tx1 - tx0, 40 + rows.length * 40);
+    ctx.font = `700 15px ${MONO}`; ctx.fillStyle = LN; cols.forEach(([c, x]) => ctx.fillText(c, tx0 + 14 + x, ty + 26));
+    ctx.beginPath(); ctx.moveTo(tx0, ty + 40); ctx.lineTo(tx1, ty + 40); ctx.stroke();
+    cols.slice(1).forEach(([, x]) => { ctx.beginPath(); ctx.moveTo(tx0 + x, ty); ctx.lineTo(tx0 + x, ty + 40 + rows.length * 40); ctx.stroke(); });
+    rows.forEach((r, k) => {
+      const y = ty + 40 + k * 40;
+      if (k) { ctx.strokeStyle = "rgba(232,241,255,0.4)"; ctx.beginPath(); ctx.moveTo(tx0, y); ctx.lineTo(tx1, y); ctx.stroke(); }
+      r.forEach((v, c) => {
+        const x = tx0 + 14 + cols[c][1], w = (cols[c + 1] ? cols[c + 1][1] : tx1 - tx0) - cols[c][1] - 24;
+        const sv = String(v), signCol = c === 4 && /^[+−]/.test(sv) ? (sv[0] === "+" ? L.up : L.down) : c === 2 && (sv === "SOLD" || sv === "BOUGHT") ? (sv === "SOLD" ? L.down : L.up) : LN;
+        ctx.font = c === 1 ? `400 21px ${HAND}` : `500 17px ${MONO}`; ctx.fillStyle = signCol; ctx.fillText(fitText(ctx, sv, w), x, y + 27);
+      });
+    });
+    // title block and notes
+    const bx = W - 520, by = 1150, bw = 450, bh = 200;
+    ctx.strokeStyle = LN; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh); ctx.lineWidth = 1;
+    const cell = (x, y, w, h, label, val, font = `400 22px ${HAND}`) => { ctx.strokeRect(x, y, w, h); ctx.font = `600 11px ${MONO}`; ctx.fillStyle = L.muted; ctx.fillText(label, x + 8, y + 16); ctx.font = font; ctx.fillStyle = LN; ctx.fillText(fitText(ctx, val, w - 16), x + 8, y + h - 12); };
+    cell(bx, by, bw, 70, "PROJECT", `${MK_KW.toUpperCase()} STOCK TRADES`, `400 26px ${HAND}`);
+    cell(bx, by + 70, bw / 2, 65, "SUBJECT", M.mode === "single" ? M.tk : `${M.stocks.length} STOCKS`); cell(bx + bw / 2, by + 70, bw / 2, 65, "PERIOD", M.periodShort.toUpperCase());
+    cell(bx, by + 135, bw / 3, 65, "SOURCE", "HOUSE PTRs"); cell(bx + bw / 3, by + 135, bw / 3, 65, "DATE", shortDate(D.prices_through).toUpperCase()); cell(bx + 2 * bw / 3, by + 135, bw / 3, 65, "SHEET", "1 OF 1");
+    ctx.font = `700 15px ${MONO}`; ctx.fillStyle = LN; ctx.fillText("NOTES", 70, by + 18);
+    ctx.font = `400 19px ${HAND}`; ctx.fillStyle = L.ink2;
+    ["1. AMOUNTS ARE REPORTED RANGES.", "2. MARKS = CLOSE ON TRADE DATE.", "3. FILED UP TO 45 DAYS LATER.", "4. NOT FINANCIAL ADVICE.", "CONGRESS TRADE CHECK"]
+      .forEach((l, k) => ctx.fillText(fitText(ctx, l, bx - 100), 70, by + 50 + k * 30));
+  }
+
+  // ---------- 9. Black & gold: art deco luxury ----------
+  async function lookLuxe(ctx, W, H, M) {
+    const GOLD = "#d9b45a", IVORY = "#f2ead6", BG = "#0b0a09";
+    const gold = (y0, y1) => { const g = ctx.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, "#fbecb0"); g.addColorStop(0.45, "#d8ab3c"); g.addColorStop(0.55, "#a67a1b"); g.addColorStop(1, "#f1d47a"); return g; };
+    const L = { ink: IVORY, ink2: "#d9cfb6", muted: "#9b8f73", grid: "rgba(217,180,90,0.13)", axis: "#9b8f73", axisFont: `500 15px ${MONO}`, line: GOLD, lineW: 3, glow: "rgba(217,180,90,0.55)", glowBlur: 18, area: "rgba(217,180,90,0.16)", lastDot: "#fbecb0",
+      up: "#2fbf71", down: "#e5484d", dotRing: BG, labelMode: "pill", labelBg: "rgba(11,10,9,0.92)", labelBorder: GOLD, labelBorderW: 1.5, labelInk: IVORY, labelSub: GOLD, labelRadius: 4,
+      font1: `600 19px ${CINZEL}`, font2: `italic 400 19px ${PLAYFAIR}`, leader: "rgba(217,180,90,0.7)", leaderW: 1.2,
+      D: "#7fa7e8", R: "#e88a8a", I: "#b9b1a0", card: BG, chip: "#1c1a16",
+      legendFont: `600 17px ${CINZEL}`, legendNoteFont: `italic 400 18px ${PLAYFAIR}`, sizeNote: "the larger the mark, the larger the trade", legendInk: IVORY,
+      keyName: `600 22px ${CINZEL}`, keySub: `italic 400 17px ${PLAYFAIR}`, keyNum: `700 21px ${PLAYFAIR}`, keyAmt: GOLD, keyRule: "rgba(217,180,90,0.3)", keyFaceR: 22, keyRowH: 62, keyUpper: true,
+      tileBg: "rgba(255,255,255,0.03)", tileBorder: "rgba(217,180,90,0.55)", tileBorderW: 1.2, tileR: 2, tileTicker: `700 26px ${CINZEL}`, tileNum: `700 22px ${PLAYFAIR}`, tileName: `italic 400 15px ${PLAYFAIR}`, tileFact: `600 15px ${CINZEL}`, tileSub: `italic 400 14px ${PLAYFAIR}`, tileLine: GOLD, tileLineW: 2.5, tilePad: 16 };
+    ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.strokeStyle = "rgba(217,180,90,0.07)"; ctx.lineWidth = 2;
+    for (let k = 0; k < 40; k++) { const a = Math.PI * (k / 39); ctx.beginPath(); ctx.moveTo(W / 2, -60); ctx.lineTo(W / 2 + Math.cos(a) * 1800, -60 + Math.sin(a) * 1800); ctx.stroke(); }
+    ctx.restore();
+    // deco frame with stepped corners
+    ctx.strokeStyle = GOLD; ctx.lineWidth = 2; ctx.strokeRect(36, 36, W - 72, H - 72); ctx.lineWidth = 1; ctx.strokeRect(46, 46, W - 92, H - 92);
+    for (const [x, y, sx, sy] of [[46, 46, 1, 1], [W - 46, 46, -1, 1], [46, H - 46, 1, -1], [W - 46, H - 46, -1, -1]]) {
+      ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, y + sy * 70); ctx.lineTo(x + sx * 20, y + sy * 70); ctx.lineTo(x + sx * 20, y + sy * 40); ctx.lineTo(x + sx * 40, y + sy * 40); ctx.lineTo(x + sx * 40, y + sy * 20); ctx.lineTo(x + sx * 70, y + sy * 20); ctx.lineTo(x + sx * 70, y); ctx.stroke();
+    }
+    const diamond = (cx, cy, r) => { ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy); ctx.closePath(); ctx.fill(); };
+    const ornament = (y, w) => { ctx.strokeStyle = GOLD; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(W / 2 - w, y); ctx.lineTo(W / 2 - 16, y); ctx.moveTo(W / 2 + 16, y); ctx.lineTo(W / 2 + w, y); ctx.stroke(); ctx.fillStyle = GOLD; diamond(W / 2, y, 7); };
+    ctx.textAlign = "center"; ctx.font = `600 19px ${CINZEL}`; ctx.letterSpacing = "7px"; ctx.fillStyle = GOLD;
+    ctx.fillText(`${MK_KW.toUpperCase()} · STOCK TRADES · ${periodTag(M)}`, W / 2, 112); ctx.letterSpacing = "0px"; ornament(138, 220);
+    const title = (M.mode === "single" ? M.name : mkTitle(M)).toUpperCase(), ts = fitSize(ctx, title, (s) => `800 ${s}px ${CINZEL}`, 70, W - 180, 28);
+    ctx.font = `800 ${ts}px ${CINZEL}`; ctx.fillStyle = gold(200 - ts * 0.8, 200); ctx.fillText(title, W / 2, 214);
+    ctx.font = `italic 400 27px ${PLAYFAIR}`; ctx.fillStyle = IVORY; ctx.fillText(fitText(ctx, M.mode === "single" ? `${M.tk} · ${mkWho(M)}` : mkWho(M), W - 200), W / 2, 262);
+    const res = sinceOrMove(M);
+    ctx.font = `900 118px ${PLAYFAIR}`; ctx.fillStyle = res.v == null ? IVORY : res.v >= 0 ? L.up : L.down; ctx.fillText(pct(res.v), W / 2, 392);
+    ctx.font = `600 16px ${CINZEL}`; ctx.letterSpacing = "4px"; ctx.fillStyle = L.ink2;
+    ctx.fillText(fitText(ctx, `${res.what.toUpperCase()}${M.spy != null ? ` · S&P 500 ${pct(M.spy)}` : ""} · EST. ${estText(estOf(M.buys))}`, W - 160), W / 2, 432); ctx.letterSpacing = "0px"; ctx.textAlign = "left";
+    if (M.mode === "single") {
+      await mkChart(ctx, M, { x: 100, y: 478, w: W - 100 - 160, h: 420 }, L, 4);
+      mkLegend(ctx, W / 2, 966, L, M, "center");
+    } else {
+      mkLegend(ctx, W / 2, 476, { ...L, sizeNote: "" }, M, "center");
+      await mkTiles(ctx, M, { x: 90, y: 506, w: W - 180, h: 480 }, L, 6, 3);
+    }
+    ctx.textAlign = "center"; ctx.font = `700 20px ${CINZEL}`; ctx.letterSpacing = "6px"; ctx.fillStyle = GOLD;
+    ctx.fillText(M.sc.kind === "one" ? (M.mode === "single" ? "THE TRADES" : "THE BUYS") : "THE BUYERS", W / 2, 1028); ctx.letterSpacing = "0px"; ctx.textAlign = "left"; ornament(1046, 300);
+    if (M.sc.kind === "one" && M.mode === "multi") {
+      M.stocks.slice(0, 4).forEach((g, k) => {
+        const y = 1092 + k * 52; ctx.font = `600 22px ${CINZEL}`; ctx.fillStyle = IVORY; ctx.fillText(`${g.t} · ${fitText(ctx, g.name, 420)}`, 110, y);
+        ctx.textAlign = "right"; ctx.font = `700 21px ${PLAYFAIR}`; ctx.fillStyle = GOLD; ctx.fillText(estText(estOf(g.buys)), W - 110, y); ctx.textAlign = "left";
+      });
+    } else await mkKey(ctx, M, { x: 110, y: 1062, w: W - 220, h: 250 }, L, 4);
+    ctx.textAlign = "center"; ctx.font = `500 14px ${UI}`; ctx.fillStyle = L.muted;
+    ctx.fillText(MK_SOURCE[0], W / 2, H - 92); ctx.fillText(MK_SOURCE[1], W / 2, H - 72);
+    ctx.font = `700 16px ${CINZEL}`; ctx.letterSpacing = "4px"; ctx.fillStyle = GOLD; ctx.fillText("CONGRESS TRADE CHECK", W / 2, H - 52); ctx.letterSpacing = "0px"; ctx.textAlign = "left";
+  }
+
+  // ---------- 10. Magazine cover: masthead, cover photo, cover lines, chart inset ----------
+  async function lookMagazine(ctx, W, H, M) {
+    const INK = "#121212", YEL = "#ffd23f";
+    const L = { ink: INK, ink2: "#333", muted: "#666", grid: "#ececec", axis: "#777", axisFont: `500 14px ${MONO}`, line: INK, lineW: 3.5, area: "rgba(0,0,0,0.06)",
+      up: "#12884a", down: "#d42a2a", dotRing: "#fff", labelMode: "face", faceR: 18, numBg: YEL, numInk: INK, D: "#2f6fd6", R: "#d64545", I: "#7a7f87", card: "#fff", chip: "#eee",
+      legendFont: `700 16px ${UI}`, legendNoteFont: `500 15px ${UI}`, padTop: 0.1,
+      tileBg: "#f6f4f0", tileR: 8, tileTicker: `900 22px ${PLAYFAIR}`, tileNum: `800 18px ${MONO}`, tileName: `500 12px ${UI}`, tileFact: `700 13px ${UI}`, tileSub: `500 12px ${UI}`, tileLine: INK, tilePad: 10, tileLineW: 2 };
+    const back = ctx.createLinearGradient(0, 0, 0, H); back.addColorStop(0, "#e9e3d8"); back.addColorStop(1, "#c9bfae"); ctx.fillStyle = back; ctx.fillRect(0, 0, W, H);
+    const star = mkStars(M, 1)[0], img = star ? await photoHD(star) : null;
+    heroPhoto(ctx, img, star, 330, 150, W - 330, 960, 0.12, "contrast(1.06) saturate(1.05)");
+    const lf = ctx.createLinearGradient(330, 0, 640, 0); lf.addColorStop(0, "rgba(225,218,205,1)"); lf.addColorStop(1, "rgba(225,218,205,0)"); ctx.fillStyle = lf; ctx.fillRect(330, 150, 310, 960);
+    const bf = ctx.createLinearGradient(0, 900, 0, 1110); bf.addColorStop(0, "rgba(201,191,174,0)"); bf.addColorStop(1, "rgba(201,191,174,1)"); ctx.fillStyle = bf; ctx.fillRect(330, 900, W - 330, 210);
+    // masthead (a made-up title)
+    ctx.font = `700 15px ${UI}`; ctx.letterSpacing = "3px"; ctx.fillStyle = INK;
+    ctx.fillText(`CONGRESS TRADE CHECK · ${fmtDate(D.prices_through, { month: "long", year: "numeric" }).toUpperCase()} · THE STOCK TRADES ISSUE`, 44, 44); ctx.letterSpacing = "0px";
+    const ms = fitSize(ctx, "THE LEDGER", (s) => `900 ${s}px ${PLAYFAIR}`, 190, W - 88, 90);
+    ctx.font = `900 ${ms}px ${PLAYFAIR}`; ctx.fillStyle = INK; ctx.fillText("THE LEDGER", 40, 52 + ms * 0.74);
+    ctx.fillStyle = YEL; ctx.fillRect(44, 66 + ms * 0.74, 240, 8);
+    // cover lines
+    let y = 330;
+    ctx.font = `800 17px ${UI}`; ctx.letterSpacing = "2px"; const kick = "COVER STORY", kw = ctx.measureText(kick).width + 22; ctx.fillStyle = YEL; ctx.fillRect(44, y - 24, kw, 34); ctx.fillStyle = INK; ctx.fillText(kick, 56, y); ctx.letterSpacing = "0px";
+    const head = M.mode === "single" ? (M.sc.kind === "one" ? `${M.sc.last}'s ${M.tk} ${M.buys.length ? "buys" : "sales"}` : `Who bought ${M.tk}?`)
+      : M.sc.kind === "one" ? `${M.sc.last}'s ${plural(M.stocks.length, "stock")}` : mkTitle(M);
+    ctx.font = `900 64px ${PLAYFAIR}`; ctx.fillStyle = INK; y = drawWrapped(ctx, head, 44, y + 74, 420, 66, 4);
+    ctx.font = `italic 400 25px ${PLAYFAIR}`; ctx.fillStyle = "#2a2a2a"; y = drawWrapped(ctx, mkDeck(M), 44, y + 6, 400, 32, 5);
+    const lines = [];
+    const res = sinceOrMove(M);
+    if (res.v != null) lines.push([pct(res.v), res.what + (M.spy != null ? `; S&P 500 ${pct(M.spy)}` : ""), res.v >= 0 ? L.up : L.down]);
+    lines.push([estText(estOf(M.buys)), "estimated total bought", INK]);
+    if (M.sc.kind !== "one" && M.buyers[0]) lines.push([shortName(M.buyers[0].m), `biggest buyer, ${estText(estOf(M.buyers[0].buys))}`, INK]);
+    else { const dl = (M.marks || M.buys).filter((t) => t.delay != null && t.delay >= 0).map((t) => t.delay); if (dl.length) lines.push([`${median(dl)} days`, "median wait before reporting", INK]); }
+    y += 18;
+    for (const [a, b, c] of lines) {
+      if (y > 1000) break;
+      ctx.fillStyle = INK; ctx.fillRect(44, y - 4, 60, 4);
+      ctx.font = `900 34px ${UI}`; ctx.fillStyle = c; ctx.fillText(fitText(ctx, a, 400), 44, y + 34);
+      ctx.font = `600 18px ${UI}`; ctx.fillStyle = "#2a2a2a"; y = drawWrapped(ctx, b, 44, y + 62, 380, 23, 2) + 14;
+    }
+    // inset chart card
+    ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.25)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.roundRect(40, 1080, W - 80, 262, 14); ctx.fill(); ctx.restore();
+    ctx.font = `900 22px ${PLAYFAIR}`; ctx.fillStyle = INK; ctx.fillText(M.mode === "single" ? `${M.tk} · ${price(M.last)}` : "The biggest buys", 66, 1118);
+    mkLegend(ctx, W - 66, 1112, M.mode === "single" ? L : { ...L, sizeNote: "" }, M, "right");
+    if (M.mode === "single") await mkChart(ctx, M, { x: 66, y: 1138, w: W - 66 - 130, h: 150 }, { ...L, monthGap: 26 }, 3);
+    else await mkTiles(ctx, M, { x: 60, y: 1132, w: W - 120, h: 196 }, L, 4, 4);
+    // barcode
+    const bx = W - 220, by = 980; ctx.fillStyle = "#fff"; ctx.fillRect(bx, by, 176, 84);
+    let seed = [...(M.tk || "CTC")].reduce((a, c) => a * 31 + c.charCodeAt(0), 7);
+    ctx.fillStyle = INK; for (let x = bx + 12; x < bx + 164;) { seed = (seed * 1103515245 + 12345) & 0x7fffffff; const w = 1 + (seed % 3); ctx.fillRect(x, by + 10, w, 50); x += w + 1 + ((seed >> 4) % 3); }
+    ctx.font = `600 12px ${MONO}`; ctx.fillText(`${M.mode === "single" ? M.tk : "CONGRESS"} · ${D.prices_through}`, bx + 12, by + 76);
+    ctx.font = `500 14px ${UI}`; ctx.fillStyle = "#333"; ctx.textAlign = "center";
+    ctx.fillText(MK_SOURCE[0], W / 2, H - 66); ctx.fillText(MK_SOURCE[1], W / 2, H - 46);
+    ctx.font = `700 14px ${UI}`; ctx.fillText("HarryV12 Finance · The Ledger is not a real magazine", W / 2, H - 24); ctx.textAlign = "left";
+  }
+
+  const LOOKS = { chart: lookClassic, movie: lookMovie, japan: lookJapan, infographic: lookInfographic, certificate: lookCertificate,
+    swiss: lookSwiss, neon: lookNeon, blueprint: lookBlueprint, luxe: lookLuxe, magazine: lookMagazine };
+  // every market look draws from the same content model
+  async function drawMarket(ctx, W, H) {
+    const M = marketModel();
+    if (typeof M === "string") return M;
+    setSource(M.people.map((g) => g.m));
+    setKeyword(M.people.map((g) => g.m), M.sc);
+    await LOOKS[P.style](ctx, W, H, M);
+    return null;
+  }
+
+  // Latest disclosures: the newest filers first, as many politicians as fit (up to 8), each with their
+  // largest trades in the period; leftover room adds more trades
+  async function drawRoundup(ctx, W, H, th) {
+    const since = today - (+P.days) * DAY;
+    const list = postTrades("any").filter((t) => (P.side === "both" ? t.side !== "O" : t.side === P.side) && t.ftime && t.ftime >= since && t.T.ep);
+    const noun = { B: "buys", S: "sells", both: "trades" }[P.side], noun1 = noun.slice(0, -1);
+    if (!list.length) {
+      const esc0 = postScope(), by = esc0.kind === "all" ? "members of Congress or the administration" : esc0.kind === "committee" ? `${groupWord(esc0.cid)}s of the ${esc0.name}` : esc0.name;
+      return `No stock ${noun} by ${by} were disclosed in the last ${P.days} days. Try a longer period${P.who !== "all" ? " or “Everyone”" : ""}${P.kept ? ", or untick “Apply the Filter”" : ""}.`;
+    }
+    // "best since" means the move went their way: up after a buy, down after a sale
+    const good = (t) => { const r = eff(t, t.T.r); return r == null ? -9 : t.side === "S" ? -r : r; };
+    const key = { amt: (t) => -t.amt || 0, recent: (t) => -t.ftime, gain: (t) => -good(t) }[P.sort];
+    const by = new Map();
+    for (const t of list) { const g = by.get(t.m) || { m: members[t.m], list: [], amt: 0, newest: 0, best: -9 }; g.list.push(t); g.amt += t.amt; g.newest = Math.max(g.newest, t.ftime); g.best = Math.max(g.best, good(t)); by.set(t.m, g); }
+    // politicians by their newest disclosure; each one's trades by money, top 2 first
+    const groups = [...by.values()].sort((a, b) => b.newest - a.newest || b.amt - a.amt);
+    for (const g of groups) g.list.sort((a, b) => b.amt - a.amt || b.ftime - a.ftime);
+    const TOP = 2, MAXG = 8;
+
+    header(ctx, W, th, `Disclosed ${fmtDate(new Date(since).toISOString().slice(0, 10), { month: "short", day: "numeric" })} – ${fmtDate(D.prices_through, { month: "short", day: "numeric", year: "numeric" })}`);
+    const lsc = postScope(), lwho = lsc.kind === "one" ? lsc.short : lsc.kind === "committee" ? `${lsc.short} Committee members` : "Congress";
+    const ltitle = { B: `What ${lwho} just bought`, S: `What ${lwho} just sold`, both: `Latest stock trades: ${lwho}` }[P.side];
+    ctx.fillStyle = th.ink; ctx.font = `800 ${fitSize(ctx, ltitle, (x) => `800 ${x}px ${UI}`, 60, W - 128, 34)}px ${UI}`;
+    ctx.fillText(fitText(ctx, ltitle, W - 128), 64, 162);
+
+    // politicians come first: as many as fit (up to 8), then up to 2 trades each; one shared
+    // row of column heads at the top instead of one per politician
+    const heads = 240, top = 256, bottom = H - 140, avail = bottom - top;
+    const HEAD = 54, COLS = 0, GAP = 8, ROW = 44, MORE = 20, block = HEAD + COLS + GAP + 6;
+    const fits = (shown) => shown.reduce((a, s, i) => a + block + s * ROW + (s < groups[i].list.length ? MORE : 0), 0) <= avail;
+    // first every politician that fits gets their largest trade...
+    let G = 1, shown = [1];
+    while (G < Math.min(MAXG, groups.length) && fits([...shown, 1])) { shown.push(1); G++; }
+    // ...then a second trade each, newest filers first
+    for (let i = 0; i < G; i++) if (groups[i].list.length > 1 && TOP > 1) { shown[i] = 2; if (!fits(shown)) shown[i] = 1; }
+    // ...then more trades, one at a time, for whoever has more to show
+    for (let added = true; added;) {
+      added = false;
+      for (let i = 0; i < G; i++) {
+        if (shown[i] >= groups[i].list.length) continue;
+        shown[i]++;
+        if (fits(shown)) added = true; else shown[i]--;
+      }
+    }
+    ctx.fillStyle = th.ink2; ctx.font = `500 23px ${UI}`;
+    ctx.fillText(fitText(ctx, `${plural(list.length, noun1)} by ${plural(groups.length, "politician")}${groups.length > G ? ` · ${G} shown` : ""}`, W - 128), 64, 204);
+
+    const X0 = 48, CW = W - 2 * X0, C = { stock: 68, trade: 236, amt: 330, dates: 482, px: 628, since: 744, meta: 860 }, R = W - 68;
+    const imgs = await Promise.all(groups.slice(0, G).map((g) => photoImage(g.m)));
+    ctx.fillStyle = th.muted; ctx.font = `700 11px ${UI}`; ctx.letterSpacing = "0.8px";
+    [["STOCK", C.stock], ["TRADE", C.trade], ["AMOUNT", C.amt], ["TRADED · FILED", C.dates], ["PRICE · NOW", C.px], ["SINCE · S&P", C.since], ["ACCOUNT · COMMITTEE", C.meta]].forEach(([l, x]) => ctx.fillText(l, x, heads));
+    ctx.letterSpacing = "0px";
+    let y = top;
+    groups.slice(0, G).forEach((g, gi) => {
+      const n = shown[gi], more = g.list.length - n, h = HEAD + COLS + n * ROW + (more > 0 ? MORE : 0) + 6;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(X0, y, CW, h, 18); ctx.fill();
+      // the politician
+      const fr = 24, fx = X0 + 22 + fr, fy = y + HEAD / 2 + 2;
+      drawFace(ctx, imgs[gi], g.m, fx, fy, fr, th);
+      const nx = fx + fr + 16;
+      ctx.fillStyle = th.ink; ctx.font = `800 25px ${UI}`; ctx.fillText(fitText(ctx, plainName(g.m), 520), nx, fy - 3);
+      ctx.fillStyle = th.muted; ctx.font = `500 16px ${UI}`;
+      const dates = g.list.map((t) => t.fd).sort();
+      ctx.fillText(fitText(ctx, `${tagline(g.m)} · ${plural(g.list.length, noun1)} · filed ${fmtDate(dates[0], { month: "short", day: "numeric" })}${dates.length > 1 && dates[dates.length - 1] !== dates[0] ? ` – ${fmtDate(dates[dates.length - 1], { month: "short", day: "numeric" })}` : ""}`, 600), nx, fy + 21);
+      ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 24px ${MONO}`; ctx.fillText(estText(estOf(g.list)), R, fy + 6); ctx.textAlign = "left";
+      // a rule between the politician and their trades
+      const hy = y + HEAD;
+      ctx.strokeStyle = th.grid; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(C.stock, hy); ctx.lineTo(R, hy); ctx.stroke();
+      // the trades
+      g.list.slice(0, n).forEach((t, k) => {
+        const ry = y + HEAD + COLS + k * ROW, l1 = ry + 20, l2 = ry + 38, sold = t.side === "S";
+        if (k) { ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(C.stock, ry + 4); ctx.lineTo(R, ry + 4); ctx.stroke(); }
+        const two = (x, w, a, b, fa, fb, ca, cb) => {
+          ctx.font = fa; ctx.fillStyle = ca; ctx.fillText(fitText(ctx, a, w), x, l1);
+          if (b) { ctx.font = fb; ctx.fillStyle = cb; ctx.fillText(fitText(ctx, b, w), x, l2); }
+        };
+        two(C.stock, C.trade - C.stock - 12, t.t.replace(/\d*-USD$/, ""), cleanName(t.st[0]) + (t.cls === "option" ? ` (${t.opt === "P" ? "put" : t.opt === "C" ? "call" : ""} option)` : ""),
+          `700 17px ${MONO}`, `500 13px ${UI}`, th.ink, th.muted);
+        two(C.trade, C.amt - C.trade - 10, sold ? (t.k === "SP" ? "PARTIAL SALE" : "SOLD") : "BOUGHT", t.fl && t.fl.length ? "check scan" : "",
+          `800 13px ${UI}`, `600 13px ${UI}`, sold ? th.down : th.up, th.down);
+        two(C.amt, C.dates - C.amt - 10, amountShort(t), t.exact || !t.lo || t.lo === t.hi ? "" : `reported ${usd(t.lo)}–${usd(t.hi)}`,
+          `700 16px ${MONO}`, `500 13px ${UI}`, th.ink, th.muted);
+        const late = t.delay > 45;
+        two(C.dates, C.px - C.dates - 10, `Traded ${fmtDate(t.d, { month: "short", day: "numeric", year: "2-digit" })}`, `Filed ${fmtDate(t.fd, { month: "short", day: "numeric" })} · ${t.delay}d${late ? " late" : ""}`,
+          `600 15px ${UI}`, `500 13px ${UI}`, th.ink2, late ? th.down : th.muted);
+        two(C.px, C.since - C.px - 10, price(t.T.ep), `now ${price(lastClose(t.t))}`, `700 16px ${MONO}`, `500 13px ${UI}`, th.ink, th.muted);
+        const v = eff(t, t.T.r);
+        two(C.since, C.meta - C.since - 10, v == null ? "–" : pct(v), t.T.sr == null ? "" : `S&P ${pct(t.T.sr)}`,
+          `700 17px ${MONO}`, `500 13px ${UI}`, v == null ? th.muted : v >= 0 ? th.up : th.down, th.muted);
+        const acct = ownUnknown(t) ? "–" : (OWNER[t.own] || "Own");
+        const comm = noSeat(g.m) ? "" : t.c && t.c.length ? committeeShort(t.c[0]) : "no match";
+        two(C.meta, R - C.meta, acct, comm, `600 15px ${UI}`, `500 13px ${UI}`, th.ink2, t.c && t.c.length && !noSeat(g.m) ? th.down : th.muted);
+      });
+      if (more > 0) { ctx.fillStyle = th.muted; ctx.font = `600 14px ${UI}`; ctx.fillText(`+ ${plural(more, noun1)} more, smaller ones, in this period`, C.stock, y + HEAD + COLS + n * ROW + 15); }
+      y += h + GAP;
+    });
+    footer(ctx, W, H, th, ["Source: House, Senate and OGE trade filings. Price = close on the trade date.",
+      "Since = the stock's move from the trade date; green = up, red = down. Not financial advice."]);
+    return null;
+  }
+
+  // ======================================================================
+  // Poster styles. Each shows different information:
+  //   chart …    ten market chart looks of one content model (drawMarket, above)
+  //   terminal   one stock as a trading-desk screen: quote, moves, Congress activity, tape
+  //   list       the newest disclosed buys or sells (drawRoundup)
+  //   breaking   one new trade, big and bold
+  //   scorecard  one politician against the S&P 500, both timings
+  //   leaders    best politicians to follow, by points
+  //   conflict   trading in industries their committees oversee
+  //   frontpage  a newspaper story about one trade
+  //   card       a politician's stats as a collectible card
+  //   receipt    a politician's recent buys, itemised
+  // ======================================================================
+  const COND = '"Barlow Condensed", "Arial Narrow", sans-serif', SERIF = '"Newsreader", Georgia, "Times New Roman", serif';
+  const titleOf = (m) => (m.former ? "Former " : "") + prefix(m);
+  // "Rep. D-CA17" under a name; a business leader's role on its own
+  const tagline = (m) => isBiz(m) ? m.role : `${titleOf(m)} ${party(m)}`;
+  const seatTitle = (m) => (m.former ? "FORMER " : "") + office(m).toUpperCase();
+  const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
+  const plainName = (m) => m.name.replace(/,? (Jr\.|Sr\.|III|II|IV)$/, "");
+  // "UnitedHealth Group Incorporated Common Stock (DE)" -> "UnitedHealth Group"
+  const cleanName = (s) => {
+    let out = String(s || ""), prev;
+    do {
+      prev = out;
+      out = out.replace(/\s*\([^)]*\)\s*$/, "")
+        .replace(/[\s,-]+(Common Stock|Common Shares|Ordinary Shares|Class [A-C](\s+(Common Stock|Common Shares|Ordinary Shares|Shares))?|American Depositary Shares?|Depositary Shares?|New York Registry Shares|Registry Shares|Sponsored ADR|Units?|Warrants?|ADS|ADR)$/i, "")
+        .replace(/[\s,-]+(Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?|Ltd\.?|Limited|plc|N\.V\.|S\.A\.)$/i, "").trim();
+    } while (out !== prev);
+    return out || String(s || "");
+  };
+  const windowStart = () => today - windowDays() * DAY;
+  const periodLong = () => ({ 90: "the last 3 months", 182: "the last 6 months", 365: "the last 12 months", ytd: `${YEAR} so far` }[P.window] || `${START_SHORT} to today`);
+  const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
+  // a single bound ending in 1 ($1,000,001) is the form's open top bracket ("over $1,000,000"); others are exact amounts
+  const amountShort = (t) => t.exact ? `${usdExact(t.exact)} exact` : !t.lo ? "–" : t.lo === t.hi ? (t.lo % 1000 === 1 ? `Over ${usd(t.lo - 1)}` : usd(t.lo)) : tradeRange(t);
+  const OWNER_PHRASE = { SP: " in a spouse's account", DC: " in a dependent child's account", JT: " in a joint account" };
+
+  // sharper portraits for posters that show a face large; falls back to the small ones
+  let noHD = false;  // set when the page is opened straight from disk (large images would block the download)
+  const hdCache = new Map();
+  function photoHD(m) {
+    if (noHD || !m.hd) return photoImage(m);
+    const src = `portraits/${m.id}.jpg`;
+    if (!hdCache.has(src)) hdCache.set(src, new Promise((resolve) => {
+      const im = new Image(); im.onload = () => resolve(im); im.onerror = () => resolve(null); im.src = src;
+    }).then((im) => im || photoImage(m)));
+    return hdCache.get(src);
+  }
+  function drawCover(ctx, img, x, y, w, h, anchorY = 0.25) {
+    const s = Math.max(w / img.width, h / img.height), dw = img.width * s, dh = img.height * s;
+    ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) * anchorY, dw, dh);
+  }
+  // `indent` shortens the first line (room for a bold lead-in drawn before it)
+  function wrapLines(ctx, text, maxW, indent = 0) {
+    const lines = []; let cur = "";
+    for (const w of String(text).split(/\s+/).filter(Boolean)) {
+      const t = cur ? cur + " " + w : w;
+      if (cur && ctx.measureText(t).width > (lines.length ? maxW : maxW - indent)) { lines.push(cur); cur = w; } else cur = t;
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+  function drawWrapped(ctx, text, x, y, maxW, lineH, maxLines = 99) {
+    let lines = wrapLines(ctx, text, maxW);
+    if (lines.length > maxLines) { lines = lines.slice(0, maxLines); lines[maxLines - 1] = fitText(ctx, lines[maxLines - 1] + " …", maxW); }
+    lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineH));
+    return y + lines.length * lineH;
+  }
+  // a stock's latest close can be a day or two older than the newest date in the file
+  function lastIdx(series) { let i = series.length - 1; while (i > 0 && series[i] == null) i--; return i; }
+  function priceRange(series, days) {
+    const dates = PRICES.dates, end = lastIdx(series);
+    const t0 = Date.parse(dates[end] + "T00:00:00Z") - days * DAY;
+    let i0 = Math.max(0, dates.findIndex((d) => Date.parse(d + "T00:00:00Z") >= t0));
+    while (i0 < end && series[i0] == null) i0++;
+    return [i0, end];
+  }
+  const idxOfDate = (d) => { const dates = PRICES.dates; let i = dates.indexOf(d); if (i < 0) i = dates.findIndex((x) => x >= d); return i < 0 ? dates.length - 1 : i; };
+  function sparkline(ctx, series, i0, i1, x, y, w, h, color, opts = {}) {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = i0; i <= i1; i++) if (series[i] != null) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
+    if (!isFinite(lo)) return null;
+    const pad = (hi - lo) * 0.08 || hi * 0.02; lo -= pad; hi += pad;
+    const X = (i) => x + (i - i0) / Math.max(1, i1 - i0) * w, Y = (v) => y + h - (v - lo) / (hi - lo) * h;
+    const path = new Path2D(); let started = false, lastX = x;
+    for (let i = i0; i <= i1; i++) {
+      if (series[i] == null) continue;
+      if (!started) { path.moveTo(X(i), Y(series[i])); started = true; } else path.lineTo(X(i), Y(series[i]));
+      lastX = X(i);
+    }
+    if (opts.fill) { const a = new Path2D(path); a.lineTo(lastX, y + h); a.lineTo(x, y + h); a.closePath(); ctx.fillStyle = opts.fill; ctx.fill(a); }
+    ctx.strokeStyle = color; ctx.lineWidth = opts.width || 3; ctx.lineJoin = "round"; ctx.stroke(path);
+    return { X, Y, lo, hi };
+  }
+  const tradeKey = (t) => [t.doc, t.m, t.t, t.d, t.k, t.lo].join("|");
+  const selectedTrade = () => trades.find((t) => tradeKey(t) === P.trade) || null;
+  const memberList = (mi, since, kind = "any") => trades.filter((t) => t.m === mi && t.st && (isSec(t) || (t.cls === "option" && S.options))
+    && t.time >= since && (kind === "any" ? t.side !== "O" : t.side === kind));
+
+  const ACCOUNT_WORD = { SP: "spouse's account", DC: "child's account", JT: "joint account" };
+  // tracker-style price line: grey up to the trade, in colour from the trade on
+  function splitLine(ctx, series, i0, i1, split, x, y, w, h, before, after, opts = {}) {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = i0; i <= i1; i++) if (series[i] != null) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
+    if (!isFinite(lo)) return null;
+    const pad = (hi - lo) * 0.08 || hi * 0.02; lo -= pad; hi += pad;
+    const X = (i) => x + (i - i0) / Math.max(1, i1 - i0) * w, Y = (v) => y + h - (v - lo) / (hi - lo) * h;
+    const seg = (a, b) => {
+      const path = new Path2D(); let on = false, first = null, last = null;
+      for (let i = a; i <= b; i++) {
+        if (series[i] == null) continue;
+        if (on) path.lineTo(X(i), Y(series[i])); else { path.moveTo(X(i), Y(series[i])); on = true; first = X(i); }
+        last = X(i);
+      }
+      return { path, first, last };
+    };
+    const k = Math.max(i0, Math.min(split, i1)), a = seg(i0, k), b = seg(k, i1);
+    if (opts.fill && b.last != null) {
+      const area = new Path2D(b.path); area.lineTo(b.last, y + h); area.lineTo(b.first, y + h); area.closePath();
+      ctx.fillStyle = opts.fill; ctx.fill(area);
+    }
+    ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.lineWidth = opts.width || 3;
+    ctx.strokeStyle = before; ctx.stroke(a.path);
+    ctx.strokeStyle = after; ctx.stroke(b.path);
+    return { X, Y };
+  }
+  // words that carry their own colour (a headline with one highlighted word), wrapped to a width
+  function richLines(ctx, tokens, maxW) {
+    const words = tokens.flatMap((tk) => String(tk.text).split(/\s+/).filter(Boolean).map((w) => ({ w, c: tk.color })));
+    const space = ctx.measureText(" ").width, lines = [[]];
+    let lineW = 0;
+    for (const wd of words) {
+      const ww = ctx.measureText(wd.w).width, cur = lines[lines.length - 1];
+      if (cur.length && lineW + space + ww > maxW) { lines.push([wd]); lineW = ww; }
+      else { lineW += (cur.length ? space : 0) + ww; cur.push(wd); }
+    }
+    return lines;
+  }
+  function drawRichLines(ctx, lines, x, y, lineH) {
+    const space = ctx.measureText(" ").width;
+    lines.forEach((ln, i) => {
+      let cx = x;
+      for (const wd of ln) { ctx.fillStyle = wd.c; ctx.fillText(wd.w, cx, y + i * lineH); cx += ctx.measureText(wd.w).width + space; }
+    });
+  }
+  // a photo printed the newspaper way: ink dots on a grid, bigger where the picture is darker
+  function halftone(ctx, img, x, y, w, h, opts = {}) {
+    const cell = opts.cell || 5, ink = opts.ink || "#151515", paper = opts.paper || "#f1efe8", anchorY = opts.anchorY ?? 0.3;
+    const cols = Math.ceil(w / cell), rows = Math.ceil(h / cell);
+    const off = document.createElement("canvas"); off.width = cols; off.height = rows;
+    const o = off.getContext("2d", { willReadFrequently: true });
+    o.fillStyle = "#ffffff"; o.fillRect(0, 0, cols, rows);
+    const s = Math.max(cols / img.width, rows / img.height), dw = img.width * s, dh = img.height * s;
+    o.drawImage(img, (cols - dw) / 2, (rows - dh) * anchorY, dw, dh);
+    let px;
+    try { px = o.getImageData(0, 0, cols, rows).data; }
+    catch (e) {
+      // the browser won't let the page read this photo: print it in plain greyscale instead
+      ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); ctx.filter = "grayscale(1)";
+      drawCover(ctx, img, x, y, w, h, anchorY); ctx.restore();
+      return;
+    }
+    ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    ctx.fillStyle = paper; ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = ink;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const q = (r * cols + c) * 4, lum = (0.299 * px[q] + 0.587 * px[q + 1] + 0.114 * px[q + 2]) / 255;
+        // lift the mid-tones, as newsprint does, so faces and studio backdrops don't print too heavy
+        const dark = Math.pow(Math.min(1, Math.max(0, (0.92 - lum) / 0.85)), 1.35), rad = cell * 0.66 * Math.sqrt(dark);
+        if (rad < 0.4) continue;
+        ctx.beginPath(); ctx.arc(x + c * cell + (r % 2 ? cell : cell / 2), y + r * cell + cell / 2, rad, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+  // a filing (one Periodic Transaction Report) and its stock trades
+  const filingTrades = (doc) => trades.filter((t) => String(t.doc) === String(doc) && t.st && t.side !== "O");
+  const selectedFiling = () => { const list = P.filing ? filingTrades(P.filing) : []; return list.length ? list : null; };
+  const yearRecord = (list) => {
+    const b = list.filter((t) => t.side === "B"), s2 = stats(b.filter((t) => t.T.r != null && t.T.sr != null), "T");
+    const dl = list.filter((t) => t.delay != null && t.delay >= 0).map((t) => t.delay);
+    return { n: list.length, b: b.length, s: list.length - b.length, vol: sumAmt(list), vv: list.reduce((a, t) => a + t.amtSd ** 2, 0), win: s2.n ? s2.win : null, diff: s2.n ? s2.diff : null, days: dl.length ? median(dl) : null };
+  };
+
+  // shares of one stock a person still holds, estimated from every filing since the data starts: each buy adds
+  // its best-estimate dollars ÷ that day's close, each sale takes them away, per account (own, spouse, child,
+  // joint). A House or Senate full sale ("S", as opposed to "S (partial)") empties that account; officials'
+  // forms don't mark partial sales, so theirs only subtract. Shares held before the data starts are unknown.
+  // Where an annual report (OGE 278e) gives their year-end holdings, the count starts there instead: each
+  // account row's best-estimate value ÷ that day's close, and only later trades are applied.
+  const annualStart = (m, tk) => { const b = HOLD0 && HOLD0[m.id]; return b && b.stocks[tk] ? b : null; };
+  function sharesLeft(m, tk, s) {
+    const acct = new Map(), base = annualStart(m, tk);
+    let any = false, bought = false, lastFull = false, from = -Infinity;
+    if (base) {
+      const px0 = s[idxOfDate(base.as_of)];
+      if (px0) {
+        // "None (or less than $1,001)" rows (stored as 0–1,000) mean they had sold out by then: they count as nothing
+        acct.set("self", base.stocks[tk].reduce((a, [lo, hi]) => a + (lo ? bandStats(lo, hi).mean : 0), 0) / px0);
+        from = Date.parse(base.as_of + "T23:59:59Z"); any = bought = true;
+      }
+    }
+    for (const t of trades.filter((t) => t.m === m.i && t.t === tk && t.side !== "O" && t.cls !== "option" && t.amt > 0 && t.time > from).sort((a, b) => a.time - b.time)) {
+      const px = s[idxOfDate(t.d)] ?? t.T.ep;
+      if (!px) continue;
+      const o = t.own || "self", h = acct.get(o) || 0;
+      any = true;
+      if (t.side === "B") { acct.set(o, h + t.amt / px); bought = true; lastFull = false; }
+      else { lastFull = t.k === "S" && !isExec(m); acct.set(o, lastFull ? 0 : Math.max(0, h - t.amt / px)); }
+    }
+    // only sales on file: they bought before the data starts, so what's left is unknown unless a full sale emptied it
+    if (!bought) return lastFull ? 0 : null;
+    return any ? [...acct.values()].reduce((a, v) => a + v, 0) : null;
+  }
+
+  // --- Terminal: one stock as a trading-desk screen ---
+  async function drawTerminal(ctx, W, H, th) {
+    const tk = PE.ticker, s = PRICES.px[tk];
+    if (!s) return "No congressional trades with daily prices in this period. Pick a longer period.";
+    const st = stocks[tk], dates = PRICES.dates, end = lastIdx(s), last = s[end];
+    const C = { bg: th.bg, panel: th.card, bar: th.chip, amber: th.ink, yellow: th.ink, green: th.up, red: th.down,
+      label: th.muted, text: th.ink, line: th.grid, menu: th.line };
+    const M = MONO, since = windowStart();
+    const list = trades.filter((t) => (!P.kept || !removalReason(t)) && t.t === tk && t.st && t.side !== "O" && t.time >= since && !isBiz(members[t.m])).sort((a, b) => b.time - a.time);
+    if (!list.length) return `No congressional trades in ${tk} in ${periodLong()}. Pick a longer period.`;
+    header(ctx, W, th, `${tk} · trades by members and officials · ${windowLabel()}`);
+    // quote
+    ctx.fillStyle = C.text; ctx.font = `800 52px ${UI}`;
+    ctx.font = `700 52px ${MONO}`;
+    const priceW = ctx.measureText(price(last)).width;  // the title uses the width the price leaves
+    ctx.fillStyle = C.text; ctx.fillText(fitName(ctx, cleanName(st[0]), 800, 52, 30, W - 56 - priceW - 40), 28, 150);
+    ctx.fillStyle = C.label; ctx.font = `500 19px ${UI}`;
+    ctx.fillText(fitText(ctx, [tk, st[3] || st[2], st[1]].filter(Boolean).join(" · "), 600), 28, 182);
+    const prev = s[end - 1], d1 = prev ? last / prev - 1 : null;
+    ctx.textAlign = "right"; ctx.fillStyle = C.amber; ctx.font = `700 52px ${M}`; ctx.fillText(price(last), W - 28, 142);
+    ctx.font = `600 21px ${M}`; ctx.fillStyle = (d1 ?? 0) >= 0 ? C.green : C.red;
+    ctx.fillText(d1 == null ? "–" : `${d1 >= 0 ? "▲" : "▼"} ${Math.abs(last - prev).toFixed(2)}  ${pct(d1, 2)} today`, W - 28, 174);
+    ctx.fillStyle = C.label; ctx.font = `500 16px ${M}`;
+    ctx.fillText(`Latest close · ${fmtDate(dates[end], { month: "short", day: "numeric", year: "numeric" })}`, W - 28, 198);
+    ctx.textAlign = "left";
+    // returns and range
+    const at = (days) => s[priceRange(s, days)[0]];
+    const ytd0 = s[Math.max(0, dates.findIndex((d) => d >= dates[end].slice(0, 4) + "-01-01"))];
+    let lo52 = Infinity, hi52 = -Infinity;
+    for (let i = priceRange(s, 365)[0]; i <= end; i++) if (s[i] != null) { lo52 = Math.min(lo52, s[i]); hi52 = Math.max(hi52, s[i]); }
+    const cells = [["1M", last / at(30) - 1], ["3M", last / at(91) - 1], ["YTD", ytd0 ? last / ytd0 - 1 : null], ["1Y", last / at(365) - 1],
+      ["52W HIGH", price(hi52)], ["52W LOW", price(lo52)], ["MKT CAP", st[4] ? usd(st[4]) : "–"]];
+    let y = 202;
+    ctx.fillStyle = C.panel; ctx.beginPath(); ctx.roundRect(28, y, W - 56, 84, 14); ctx.fill();
+    const cw = (W - 56) / cells.length;
+    cells.forEach(([l, v], i) => {
+      const x = 28 + i * cw + 14;
+      ctx.fillStyle = C.label; ctx.font = `500 15px ${M}`; ctx.fillText(l, x, y + 30);
+      ctx.font = `700 22px ${M}`;
+      if (typeof v === "string") { ctx.fillStyle = C.amber; ctx.fillText(v, x, y + 64); }
+      else { const ok = v != null && isFinite(v); ctx.fillStyle = !ok ? C.label : v >= 0 ? C.green : C.red; ctx.fillText(ok ? pct(v) : "–", x, y + 64); }
+    });
+    const bar = (title, yy, right) => {
+      ctx.fillStyle = C.bar; ctx.beginPath(); ctx.roundRect(28, yy, W - 56, 36, 8); ctx.fill();
+      ctx.fillStyle = C.yellow; ctx.font = `700 17px ${UI}`; ctx.letterSpacing = "1.5px"; ctx.fillText(title, 40, yy + 24); ctx.letterSpacing = "0px";
+      if (right) { ctx.textAlign = "right"; ctx.fillStyle = C.label; ctx.font = `500 15px ${M}`; ctx.fillText(right, W - 40, yy + 24); ctx.textAlign = "left"; }
+    };
+    // Congress activity in the period
+    y = 308; bar("CONGRESS ACTIVITY", y, periodLong().toUpperCase());
+    const buys = list.filter((t) => t.side === "B"), sells = list.filter((t) => t.side === "S");
+    const bAmt = sumAmt(buys), sAmt = sumAmt(sells), bsV = [...buys, ...sells].reduce((a, t) => a + t.amtSd ** 2, 0);
+    const six = [["BUYERS", new Set(buys.map((t) => t.m)).size, C.green], ["SELLERS", new Set(sells.map((t) => t.m)).size, C.red],
+      ["BUYS", buys.length, C.green], ["SELLS", sells.length, C.red], ["BOUGHT", listSpan(buys), C.green], ["SOLD", listSpan(sells), C.red]];
+    const sw = (W - 80) / six.length;
+    six.forEach(([l, v, col], i) => {
+      ctx.fillStyle = C.label; ctx.font = `500 15px ${M}`; ctx.fillText(l, 40 + i * sw, y + 64);
+      ctx.fillStyle = col; ctx.font = `700 ${fitSize(ctx, String(v), (z) => `700 ${z}px ${M}`, 30, sw - 12, 16)}px ${M}`; ctx.fillText(String(v), 40 + i * sw, y + 102);
+    });
+    const by = y + 122, tot = bAmt + sAmt || 1;
+    ctx.fillStyle = C.red; ctx.fillRect(40, by, W - 80, 10);
+    ctx.fillStyle = C.green; ctx.fillRect(40, by, (W - 80) * bAmt / tot, 10);
+    ctx.fillStyle = C.label; ctx.font = `500 15px ${M}`;
+    ctx.fillText(`NET ${bAmt >= sAmt ? "BUYING" : "SELLING"} ${sumSpan(Math.abs(bAmt - sAmt), bsV)} · ${Math.round(bAmt / tot * 100)}% OF DOLLARS BOUGHT`, 40, by + 32);
+    // everyone's average buy price (total dollars ÷ total shares) against today's price
+    const priced = buys.filter((t) => t.amt > 0 && t.T.ep), shares = priced.reduce((a, t) => a + t.amt / t.T.ep, 0);
+    if (shares > 0) {
+      const avgAll = priced.reduce((a, t) => a + t.amt, 0) / shares, ch = last / avgAll - 1;
+      ctx.textAlign = "right"; ctx.font = `700 16px ${M}`;
+      const chText = `${ch >= 0 ? "+" : "−"}${Math.abs(ch * 100).toFixed(1)}%`;
+      ctx.fillStyle = ch >= 0 ? C.green : C.red; ctx.fillText(chText, W - 40, by + 32);
+      const cw = ctx.measureText(chText).width + 14;
+      ctx.fillStyle = C.text || th.ink; ctx.fillText(`AVG BUY ${price(avgAll)} · NOW ${price(last)}`, W - 40 - cw, by + 32);
+      ctx.textAlign = "left";
+    }
+    // each politician's trades in the period, added up, biggest money first
+    const chartH = H > 1500 ? 330 : H > 1200 ? 260 : 170, gy = H - 64 - chartH;
+    const PAL = th === THEMES.dark ? ["#6ea8ff", "#c38bff", "#ffa25c", "#4fd1e0", "#ff7ad9", "#e8c24a"] : ["#1f5fd6", "#7c3aed", "#d9480f", "#0e8a9c", "#c0268f", "#a07500"];
+    const per = new Map();
+    for (const t of list) {
+      const g = per.get(t.m) || { m: members[t.m], buys: [], sells: [], money: 0 };
+      (t.side === "B" ? g.buys : g.sells).push(t); g.money += t.amt; per.set(t.m, g);
+    }
+    const people = [...per.values()].sort((p, q) => q.money - p.money);
+    for (const g of people) {
+      const pb = g.buys.filter((t) => t.T.ep), dol = pb.reduce((acc, t) => acc + (t.amt || 1), 0);
+      g.avg = pb.length ? dol / pb.reduce((acc, t) => acc + (t.amt || 1) / t.T.ep, 0) : null;  // cost per share
+      g.left = sharesLeft(g.m, tk, s); g.annual = annualStart(g.m, tk);
+    }
+    y = by + 50;
+    const cols = [["MEMBER", 40], ["BOUGHT", 330], ["SOLD", 506], ["AVG BUY", 676], ["CHANGE", 800], ["LEFT NOW", W - 40]];
+    ctx.fillStyle = C.bar; ctx.beginPath(); ctx.roundRect(28, y, W - 56, 34, 8); ctx.fill();
+    ctx.fillStyle = C.yellow; ctx.font = `700 15px ${M}`;
+    cols.forEach(([l, x], i) => { ctx.textAlign = i === cols.length - 1 ? "right" : "left"; ctx.fillText(l, x, y + 23); });
+    ctx.textAlign = "left";
+    const rowH = 40, avail = gy - 58 - (y + 34) - 62;  // 62: the note under the table (up to three lines)
+    let nRows = Math.max(1, Math.floor(avail / rowH));
+    if (people.length > nRows) nRows = Math.max(1, Math.floor((avail - 22) / rowH));
+    const shown = people.slice(0, nRows);
+    let ci = 0;  // colours go to the first six politicians with an average buy
+    for (const g of shown) g.col = g.avg && ci < PAL.length ? PAL[ci++] : null;
+    shown.forEach((g, k) => {
+      const ry = y + 34 + k * rowH, bl = ry + 27;
+      if (k % 2) { ctx.fillStyle = C.panel; ctx.fillRect(28, ry, W - 56, rowH); }
+      if (g.col) { ctx.fillStyle = g.col; ctx.beginPath(); ctx.roundRect(40, ry + 13, 14, 14, 3); ctx.fill(); }
+      ctx.font = `600 18px ${UI}`; ctx.fillStyle = C.text;
+      { const full = `${shortName(g.m)} · ${party(g.m)}`, w = 330 - 62 - 12; ctx.fillText(fitText(ctx, ctx.measureText(full).width <= w ? full : shortName(g.m), w), 62, bl); }
+      ctx.font = `600 17px ${M}`;
+      const shrink = (txt, w) => { let fs = 17; ctx.font = `600 ${fs}px ${M}`; while (fs > 12 && ctx.measureText(txt).width > w) ctx.font = `600 ${--fs}px ${M}`; return txt; };
+      ctx.fillStyle = g.buys.length ? C.green : C.label; ctx.fillText(fitText(ctx, shrink(g.buys.length ? `${estOf(g.buys).best ? usdEst(estOf(g.buys).best) : "–"} · ${plural(g.buys.length, "buy")}` : "–", 506 - 330 - 10), 506 - 330 - 10), 330, bl);
+      ctx.fillStyle = g.sells.length ? C.red : C.label; ctx.fillText(fitText(ctx, shrink(g.sells.length ? `${estOf(g.sells).best ? usdEst(estOf(g.sells).best) : "?"} · ${plural(g.sells.length, "sale")}` : "–", 676 - 506 - 10), 676 - 506 - 10), 506, bl);
+      ctx.font = `600 17px ${M}`;
+      ctx.fillStyle = g.col || C.amber; ctx.fillText(g.avg ? price(g.avg) : "–", 676, bl);
+      const r = g.avg ? last / g.avg - 1 : null;
+      ctx.fillStyle = r == null ? C.label : r >= 0 ? C.green : C.red; ctx.fillText(r == null ? "–" : pct(r), 800, bl);
+      // what they still hold: today's value of the estimated shares left, or "sold out"
+      ctx.textAlign = "right";
+      const v = g.left == null ? null : g.left * last;
+      ctx.fillStyle = v == null ? C.label : v < 1000 ? C.red : C.text;
+      ctx.fillText(v == null ? "unknown" : v < 1000 ? "sold out" : `≈${usdEst(v)}`, W - 40, bl); ctx.textAlign = "left";
+    });
+    let ny = y + 34 + shown.length * rowH + 22;
+    if (people.length > nRows) {
+      ctx.fillStyle = C.label; ctx.font = `500 15px ${M}`;
+      ctx.fillText(`+${people.length - nRows} MORE MEMBERS AND OFFICIALS TRADED ${tk} IN THIS PERIOD`, 40, ny); ny += 22;
+    }
+    ctx.fillStyle = C.label; ctx.font = `500 13px ${UI}`;
+    const fromAnnual = shown.filter((g) => g.annual).map((g) => `${shortName(g.m)}'s counted from the ${g.annual.as_of.slice(0, 4)} year-end holdings in the annual report`);
+    drawWrapped(ctx, `Bought and sold: best estimates in the period (totals over the number of trades shown; ? = amount unreadable). Change: today's price against their average buy. Left now: estimated shares still held (buys minus sales since ${START_SHORT}${fromAnnual.length ? `; ${fromAnnual.join(", ")}` : ""}), at today's price; unknown when they only sold shares bought earlier.`, 40, ny, W - 80, 18, 3);
+    // the price, white on black with a gridded scale, buys and sells marked
+    bar(`PRICE · ${periodLong().toUpperCase()}`, gy - 50, "▲ BUY   ▼ SELL   - - AVERAGE BUY");
+    const [i0, i1] = priceRange(s, windowDays());
+    let lo = Infinity, hi = -Infinity;
+    for (let i = i0; i <= i1; i++) if (s[i] != null) { lo = Math.min(lo, s[i]); hi = Math.max(hi, s[i]); }
+    const tagCol = shown.some((p) => p.col) ? 232 : 0;  // a column of name tags for the average-buy lines
+    const gw = W - 80 - 100 - tagCol;
+    const g = sparkline(ctx, s, i0, i1, 40, gy, gw, chartH - 10, th.line, { width: 3, fill: th.area });
+    if (g) {
+      ctx.font = `500 14px ${M}`;
+      for (let q = 0; q <= 3; q++) {
+        const v = lo + (hi - lo) * q / 3, yy = g.Y(v);
+        ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+        ctx.beginPath(); ctx.moveTo(40, yy); ctx.lineTo(40 + gw, yy); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = C.label; ctx.fillText(price(v), 40 + gw + 10, yy + 5);
+      }
+      for (const t of list) {
+        const i = idxOfDate(t.d); if (i < i0) continue;
+        const x = g.X(i), yv = g.Y(s[i] ?? t.T.ep), up = t.side === "B";
+        ctx.beginPath(); ctx.moveTo(x, up ? yv + 6 : yv - 6); ctx.lineTo(x - 7, up ? yv + 19 : yv - 19); ctx.lineTo(x + 7, up ? yv + 19 : yv - 19); ctx.closePath();
+        ctx.fillStyle = up ? C.green : C.red; ctx.fill();
+      }
+      // each politician's average buy price: a thin dashed line in their colour across the chart, and a
+      // name tag in a column right of the price scale (tags spread out so none overlap; a short
+      // connector runs from the line's end to its tag)
+      const lines = shown.filter((p) => p.col && p.avg >= lo * 0.5 && p.avg <= hi * 1.5)
+        .map((p) => ({ p, y: g.Y(Math.min(hi, Math.max(lo, p.avg))) })).sort((u, v) => u.y - v.y);
+      const TAG = 30, GAP = 6, top = gy, bot = gy + chartH - 10;
+      lines.forEach((ln, i) => { ln.ty = Math.max(ln.y, i ? lines[i - 1].ty + TAG + GAP : top + TAG / 2); });
+      const over = lines.length ? lines[lines.length - 1].ty - (bot - TAG / 2) : 0;   // pushed past the bottom: shift all up
+      if (over > 0) for (let i = lines.length - 1; i >= 0; i--) lines[i].ty = Math.min(lines[i].ty - over, i < lines.length - 1 ? lines[i + 1].ty - TAG - GAP : Infinity);
+      const tx = 40 + gw + 100, tw = tagCol - 12;
+      for (const ln of lines) {
+        ctx.save(); ctx.strokeStyle = ln.p.col; ctx.globalAlpha = 0.85; ctx.lineWidth = 2; ctx.setLineDash([7, 6]);
+        ctx.beginPath(); ctx.moveTo(40, ln.y); ctx.lineTo(40 + gw, ln.y); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = 0.6; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(40 + gw, ln.y); ctx.lineTo(tx - 6, ln.ty); ctx.stroke(); ctx.restore();
+        ctx.fillStyle = ln.p.col; ctx.beginPath(); ctx.roundRect(tx, ln.ty - TAG / 2, tw, TAG, 7); ctx.fill();
+        ctx.fillStyle = "#ffffff"; ctx.font = `700 15px ${UI}`; ctx.textBaseline = "middle";
+        ctx.fillText(fitText(ctx, lastName(ln.p.m), tw - 92), tx + 10, ln.ty + 1);
+        ctx.textAlign = "right"; ctx.font = `700 15px ${M}`; ctx.fillText(price(ln.p.avg), tx + tw - 10, ln.ty + 1);
+        ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      }
+      // last price tag on the scale
+      const ty = g.Y(last);
+      ctx.fillStyle = th.line; ctx.beginPath(); ctx.roundRect(40 + gw + 4, ty - 14, 96, 28, 6); ctx.fill();
+      ctx.fillStyle = th.card; ctx.font = `700 15px ${M}`; ctx.fillText(price(last), 40 + gw + 10, ty + 5);
+    }
+    drawSiteLink(ctx, 28, H - 22, `600 18px ${UI}`, th.line || th.ink2);
+    ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `800 19px ${UI}`; ctx.fillText("HarryV12 Finance", W - 28, H - 22); ctx.textAlign = "left";
+    return null;
+  }
+
+  // --- Breaking: one new trade, big and bold ---
+  async function drawBreaking(ctx, W, H, th) {
+    const t = selectedTrade();
+    if (!t) return "Pick a trade.";
+    const m = members[t.m], st = t.st, sold = t.side === "S", co = cleanName(st[0]);
+    const C = { bg: th.bg, red: th.down, green: th.up, text: th.ink, dim: th.ink2, line: th.grid, panel: th.chip,
+      D: th.D, R: th.R, I: th.I, card: th.card, chip: th.chip, ink2: th.ink2, grid: th.grid, muted: th.muted };
+    const story = H > 1500, portrait = H > 1200 && !story;
+    header(ctx, W, th, `New stock trade disclosed · filed ${fmtDate(t.fd, { month: "short", day: "numeric", year: "numeric" })}`);
+    // the photo
+    const img = await photoHD(m);
+    const pw = story ? 520 : portrait ? 440 : 400, ph = Math.round(pw * 550 / 450), px = story ? (W - pw) / 2 : 56, py = 116;
+    if (story && img) {
+      // the same portrait, enlarged, blurred and darkened behind it
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 100, W, ph + 32); ctx.clip();
+      ctx.filter = "blur(26px)"; drawCover(ctx, img, -60, 40, W + 120, ph + 160, 0.3); ctx.filter = "none";
+      ctx.fillStyle = th.bg; ctx.globalAlpha = 0.6; ctx.fillRect(0, 100, W, ph + 32); ctx.restore();
+    }
+    ctx.save(); ctx.beginPath(); ctx.roundRect(px, py, pw, ph, 18); ctx.clip();
+    ctx.fillStyle = C.panel; ctx.fillRect(px, py, pw, ph);
+    if (img) drawCover(ctx, img, px, py, pw, ph, 0.25);
+    ctx.restore();
+    ctx.fillStyle = C[m.party] || C.I; ctx.beginPath(); ctx.roundRect(px, py + ph - 6, pw, 6, [0, 0, 6, 6]); ctx.fill();
+    // the headline, as big as it fits; the verb carries buy (green) or sell (red)
+    const amountTxt = t.exact ? `${usdExact(t.exact)} of` : !t.lo ? "" : t.lo === t.hi ? `${usd(t.lo)} of` : `${tradeRange(t)} of`;
+    const what = t.cls === "option" ? `${co} ${t.opt === "P" ? "put" : t.opt === "C" ? "call" : ""} options` : `${co} (${t.t})`;
+    const tokens = [{ text: `${titleOf(m)} ${plainName(m)}`, color: C.text }, { text: sold ? "sold" : "bought", color: sold ? C.red : C.green },
+      { text: `${amountTxt} ${what}`, color: C.text }];
+    const hx = story ? 56 : px + pw + 40, hw = W - 56 - hx, hTop = story ? py + ph + 64 : py + 4;
+    const hMax = story ? 400 : portrait ? 380 : 320;
+    let fs = story ? 84 : portrait ? 64 : 58, lines;
+    for (;;) {
+      ctx.font = `800 ${fs}px ${UI}`;
+      lines = richLines(ctx, tokens, hw);
+      if (lines.length * fs <= hMax || fs <= 44) break;
+      fs -= 4;
+    }
+    const lh = Math.round(fs * 1.12);
+    drawRichLines(ctx, lines, hx, hTop + fs * 0.8, lh);
+    let y = hTop + fs * 0.8 + (lines.length - 1) * lh + (story ? 54 : 46);
+    ctx.fillStyle = C.dim; ctx.font = `500 ${story ? 29 : 24}px ${UI}`;
+    const deck = `Traded ${fmtDate(t.d, { month: "short", day: "numeric", year: "numeric" })}, disclosed ${fmtDate(t.fd, { month: "short", day: "numeric" })}`
+      + (t.delay != null ? ` (${t.delay} days later${t.delay > 45 ? ", past the 45-day limit" : ""})` : "") + (t.own ? ` · ${ACCOUNT_WORD[t.own] || "family account"}` : "") + ".";
+    y = drawWrapped(ctx, deck, hx, y, hw, story ? 38 : 33, 3);
+    // the facts
+    const s = PRICES.px[t.t], end = s ? lastIdx(s) : PRICES.dates.length - 1, ti = idxOfDate(t.d);
+    const last = s ? s[end] : null, chg = last && t.T.ep ? last / t.T.ep - 1 : null;
+    const spy = PRICES.px.SPY, spyChg = spy && spy[ti] ? spy[end] / spy[ti] - 1 : null, late = t.delay > 45;
+    const facts = [["PRICE THAT DAY", price(t.T.ep), C.text, "closing price"],
+      [`${t.t} SINCE`, chg == null ? "–" : pct(chg), chg == null ? C.dim : chg >= 0 ? C.green : C.red, `to ${fmtDate(PRICES.dates[end], { month: "short", day: "numeric" })}`],
+      ["S&P 500 SINCE", spyChg == null ? "–" : pct(spyChg), C.text, "same days"],
+      ["REPORTED AFTER", t.delay != null ? `${t.delay} DAYS` : "–", late ? C.red : C.text, late ? "past the 45-day limit" : "limit is 45 days"]];
+    const fy = story ? Math.max(y + 18, py + ph + 470) : py + ph + 40, fw = (W - 112) / 4, fh = 112;
+    facts.forEach(([l, v, col, sub], i) => {
+      const x = 56 + i * fw;
+      ctx.fillStyle = C.line; ctx.fillRect(x, fy, fw - 22, 2);
+      capsText(ctx, l, x, fy + 30, 15, C.dim, 700, 1.5);
+      ctx.fillStyle = col; ctx.font = `700 ${story ? 40 : 36}px ${MONO}`; ctx.fillText(fitText(ctx, v, fw - 26), x, fy + 76);
+      ctx.fillStyle = C.muted; ctx.font = `500 16px ${UI}`; ctx.fillText(fitText(ctx, sub, fw - 26), x, fy + 101);
+    });
+    y = fy + fh + 18;
+    // why it matters: the committee link, and what else was in the filing
+    const area = !!(t.c && t.c.length), comm = area ? t.c[0] : (m.committees || [])[0];
+    if (comm) {
+      ctx.font = `600 21px ${UI}`;
+      const cn = cname(comm), text = `${/committee/i.test(cn) ? cn : cn + " Committee"} · ${area ? "oversees this company's industry" : "no direct oversight of this industry"}`;
+      const w = Math.min(W - 112, ctx.measureText(text).width + 32);
+      ctx.fillStyle = C.chip; ctx.beginPath(); ctx.roundRect(56, y, w, 44, 22); ctx.fill();
+      ctx.fillStyle = area ? th.line : C.dim; ctx.fillText(fitText(ctx, text, w - 32), 72, y + 29);
+      y += 62;
+    }
+    const others = trades.filter((x) => String(x.doc) === String(t.doc) && x !== t && x.st && x.side !== "O");
+    if (others.length) {
+      const names = [...new Set(others.map((x) => x.t))];
+      ctx.fillStyle = C.dim; ctx.font = `500 20px ${UI}`;
+      ctx.fillText(fitText(ctx, `Also in this filing: ${plural(others.length, "more stock trade")} (${names.slice(0, 5).join(", ")}${names.length > 5 ? "…" : ""})`, W - 112), 56, y + 22);
+      y += 46;
+    }
+    // with room left: the stock before (grey) and after (white) the trade
+    const gTop = y + 20, gBot = H - 150;
+    if (s && gBot - gTop > 120) {
+      const i0 = Math.max(0, ti - 63);
+      capsText(ctx, `${t.t} · CLOSING PRICE, GREY BEFORE THE TRADE`, 56, gTop, 15, C.dim, 700, 1.5);
+      const g = splitLine(ctx, s, i0, end, ti, 56, gTop + 26, W - 112 - 150, gBot - gTop - 30, th.muted, th.line, { width: 3, fill: th.area });
+      if (g) {
+        const dx = g.X(ti), dy = g.Y(s[ti] ?? t.T.ep), ex = g.X(end), ey = g.Y(last);
+        ctx.beginPath(); ctx.arc(dx, dy, 11, 0, Math.PI * 2); ctx.fillStyle = sold ? C.red : C.green; ctx.fill();
+        ctx.lineWidth = 5; ctx.strokeStyle = C.bg; ctx.stroke();
+        ctx.font = `700 22px ${MONO}`; ctx.letterSpacing = "0px";
+        const tag = `${sold ? "SOLD" : "BOUGHT"} ${price(t.T.ep)}`, tw = ctx.measureText(tag).width;
+        ctx.fillStyle = sold ? C.red : C.green;
+        ctx.fillText(tag, Math.max(56, Math.min(W - 56 - 150 - tw, dx - tw / 2)), dy - 24 > gTop + 50 ? dy - 24 : dy + 42);
+        ctx.fillStyle = th.ink; ctx.fillText(`NOW ${price(last)}`, ex + 16, ey + 8);
+        ctx.letterSpacing = "0px";
+      }
+    }
+    footer(ctx, W, H, th, ["Source: House, Senate and OGE trade filings. Price = close on the trade date.",
+      t.exact ? "Amount exact, from shares reported in the filing. Not financial advice." : "Members report amounts as ranges. Not financial advice."]);
+    return null;
+  }
+
+  const STATE_NAMES = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware",
+    FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana",
+    ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana",
+    NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina",
+    ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+    SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia",
+    WI: "Wisconsin", WY: "Wyoming", DC: "the District of Columbia", PR: "Puerto Rico", GU: "Guam", VI: "the U.S. Virgin Islands",
+    AS: "American Samoa", MP: "the Northern Mariana Islands" };
+  const A_PARTY = { D: "a Democrat", R: "a Republican", I: "an independent" };
+  const committeePhrase = (cid) => {
+    const n = cname(cid).replace(/^(Senate|House) /, ""), pre = cid.startsWith("SS") ? "Senate " : cid.startsWith("HS") ? "House " : "";
+    return /committee/i.test(n) ? `the ${pre}${n}` : `the ${pre}${n} Committee`;
+  };
+  const sumAmt = (list) => list.reduce((a, t) => a + t.amt, 0);
+  const pctAbs = (x) => (Math.abs(x) * 100).toFixed(1) + "%";
+  function capsText(ctx, text, x, y, size, color, weight = 700, spacing = 2, family = UI) {
+    ctx.font = `${weight} ${size}px ${family}`; ctx.fillStyle = color; ctx.letterSpacing = spacing + "px";
+    ctx.fillText(text, x, y); ctx.letterSpacing = "0px";
+  }
+  function pill(ctx, text, x, y, size, bg, fg, fromRight = false) {
+    ctx.font = `700 ${size}px ${UI}`; ctx.letterSpacing = "1.5px";
+    const w = ctx.measureText(text).width + size * 1.5, h = Math.round(size * 2.1), x0 = fromRight ? x - w : x;
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(x0, y, w, h, h / 2); ctx.fill();
+    ctx.fillStyle = fg; ctx.fillText(text, x0 + size * 0.75, y + h * 0.68); ctx.letterSpacing = "0px";
+  }
+  // paragraphs that stop at `bottom`: only the first may be cut short; `lead` is a bold lead-in (a dateline)
+  function flowParas(ctx, paras, x, y, w, lineH, bottom, font, lead, leadFont) {
+    for (let n = 0; n < paras.length; n++) {
+      let leadW = 0;
+      if (n === 0 && lead) { ctx.font = leadFont; leadW = ctx.measureText(lead).width; }
+      ctx.font = font;
+      let lines = wrapLines(ctx, paras[n], w, leadW);
+      const room = Math.floor((bottom - y) / lineH) + 1;
+      if (lines.length > room) {
+        if (n > 0 || room < 1) break;
+        lines = lines.slice(0, room); lines[room - 1] = fitText(ctx, lines[room - 1] + " …", w);
+      }
+      lines.forEach((l, i) => {
+        if (i === 0 && leadW) { ctx.font = leadFont; ctx.fillText(lead, x, y); ctx.font = font; ctx.fillText(l, x + leadW, y); }
+        else ctx.fillText(l, x, y);
+        y += lineH;
+      });
+      y += Math.round(lineH * 0.45);
+    }
+    return y;
+  }
+
+  // --- Scorecard: one politician's buys against the S&P 500, timed both ways ---
+  async function drawScorecardPoster(ctx, W, H, th) {
+    const m = PE.member;
+    if (!m) return "Pick a politician.";
+    // "Exclude large caps and funds": isBig covers S&P 500 companies, the market-cap limit, the exclusion list and funds
+    const all = trades.filter((t) => t.m === m.i && t.st && (isSec(t) || (t.cls === "option" && S.options)) && t.side !== "O" && !(P.noBig && isBig(t)));
+    const buysAll = all.filter((t) => t.side === "B" && t.T.r != null && t.T.sr != null);
+    if (!buysAll.length) return P.noBig ? `No priced buys by ${m.name} outside large caps and funds. Untick “Exclude large caps and funds”.` : `No priced stock buys by ${m.name} yet.`;
+    const since = windowStart(), buysWin = buysAll.filter((t) => t.time >= since), pool = buysWin.length ? buysWin : buysAll;
+    const perName = buysWin.length && P.window === "ytd" ? `${YEAR} SO FAR` : buysWin.length && P.window !== "all" ? `LAST ${windowLabel().toUpperCase()}` : `SINCE ${START_SHORT.toUpperCase()}`;
+    const k = H > 1500 ? 1.4 : H > 1400 ? 1.24 : H > 1200 ? 1.12 : 1, z = (v) => Math.round(v * k);
+    const NAVY = th.card, ACC = th.line;
+    ctx.fillStyle = th.bg; ctx.fillRect(0, 0, W, H);
+    // title band, like the top of a fund factsheet
+    const bandH = z(178);
+    ctx.fillStyle = NAVY; ctx.fillRect(0, 0, W, bandH); ctx.fillStyle = th.grid; ctx.fillRect(0, bandH - 2, W, 2);
+    capsText(ctx, P.noBig ? "FACTSHEET · EXCLUDING LARGE CAPS AND FUNDS" : "STOCK TRADING FACTSHEET", 56, z(54), z(P.noBig ? 15 : 16), th.muted, 700, P.noBig ? 1.5 : 2);
+    const r = z(52), fcx = W - 56 - r, fcy = bandH / 2 + z(4);
+    drawFace(ctx, await photoHD(m), m, fcx, fcy, r, { ...th, card: NAVY });
+    const tw = fcx - r - 40 - 56;
+    ctx.fillStyle = th.ink; ctx.font = `800 ${z(50)}px ${UI}`; ctx.fillText(fitText(ctx, plainName(m), tw), 56, z(112));
+    const partyWord = { D: "Democrat", R: "Republican", I: "Independent" }[m.party] || "";
+    const stateName = (STATE_NAMES[m.state] || m.state || "").replace(/^the /, "");
+    const seatTxt = isBiz(m) ? [m.role, "SEC Form 4"].join(" · ") : isExec(m) ? [m.role, m.agency.replace(/\/Office of The Secretary$/, ""), partyWord].filter(Boolean).join(" · ") : [`${m.former ? "Former " : ""}${office(m)}`, stateName,
+      chamberOf(m) === "H" && m.district ? `district ${m.district}` : "", partyWord].filter(Boolean).join(" · ");
+    ctx.fillStyle = th.ink2; ctx.font = `500 ${z(21)}px ${UI}`; ctx.fillText(fitText(ctx, seatTxt, tw), 56, z(148));
+    ctx.textAlign = "right"; ctx.fillStyle = th.muted; ctx.font = `600 ${z(15)}px ${UI}`;
+    ctx.fillText(`As of ${fmtDate(D.prices_through)}`, fcx - r - 24, z(54)); ctx.textAlign = "left";
+    // two columns of boxed sections
+    const L = 48, gap = z(26), colL = Math.round((W - 2 * L - gap) * 0.43), colR = W - 2 * L - gap - colL, xL = L, xR = L + colL + gap;
+    const top = bandH + z(34), bottom = H - 142;
+    const head = (x, yy, w, title) => {
+      capsText(ctx, title, x, yy, z(15), ACC, 800, 1.5);
+      ctx.fillStyle = ACC; ctx.fillRect(x, yy + z(10), w, 2);
+      return yy + z(12);
+    };
+    // left: key facts
+    let yl = head(xL, top, colL, "KEY FACTS");
+    ctx.fillStyle = th.muted; ctx.font = `500 ${z(16)}px ${UI}`; ctx.fillText("Committees", xL, yl + z(24));
+    ctx.fillStyle = th.ink; ctx.font = `600 ${z(17)}px ${UI}`;
+    yl = drawWrapped(ctx, (m.committees || []).map(cname).join(", ") || (m.former ? "None (no longer in Congress)" : "None listed"), xL, yl + z(48), colL, z(23), 3) - z(23) + z(16);
+    const delays = all.filter((t) => t.delay != null && t.delay >= 0).map((t) => t.delay), lateN = delays.filter((d) => d > 45).length;
+    const own = new Map(); for (const t of all) if (!ownUnknown(t)) own.set(t.own || "self", (own.get(t.own || "self") || 0) + t.amt);
+    const ownTop = [...own.entries()].sort((a, b) => b[1] - a[1])[0], volAll = sumAmt(all);
+    const nB = all.filter((t) => t.side === "B").length;
+    const rowsKF = [[`Stock trades since ${START_SHORT}`, all.length.toLocaleString()], ["Buys · sells", `${nB.toLocaleString()} · ${(all.length - nB).toLocaleString()}`],
+      ["Dollars traded", listSpan(all)], ["Median days to report", delays.length ? String(median(delays)) : "–"],
+      ["Reported after 45 days", lateN.toLocaleString()],
+      ["Main account", ownTop ? `${{ self: "Own", SP: "Spouse", DC: "Child", JT: "Joint" }[ownTop[0]] || ownTop[0]} · ${Math.round(ownTop[1] / (volAll || 1) * 100)}%` : "–"]];
+    for (const [l, v] of rowsKF) {
+      ctx.fillStyle = th.grid; ctx.fillRect(xL, yl, colL, 1);
+      ctx.fillStyle = th.muted; ctx.font = `500 ${z(16)}px ${UI}`; ctx.fillText(l, xL, yl + z(25));
+      ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 ${z(17)}px ${UI}`; ctx.fillText(v, xL + colL, yl + z(25)); ctx.textAlign = "left";
+      yl += z(36);
+    }
+    // left: hit rate as 20 squares, each 5% of their buys
+    yl += z(34);
+    yl = head(xL, yl, colL, `BEAT THE S&P 500 · ${perName}`);
+    const sW = stats(pool, "T"), wins = Math.round(sW.win * sW.n);
+    ctx.fillStyle = th.ink; ctx.font = `800 ${z(48)}px ${UI}`;
+    const hr = `${Math.round(sW.win * 100)}%`;
+    ctx.fillText(hr, xL, yl + z(58));
+    const sqX = xL + Math.max(z(120), ctx.measureText(hr).width + z(20)), sqGap = z(5);
+    const sq = Math.min(z(22), (xL + colL - sqX - 9 * sqGap) / 10), filled = Math.round(sW.win * 20);
+    for (let i = 0; i < 20; i++) {
+      ctx.fillStyle = i < filled ? th.up : th.grid; ctx.beginPath();
+      ctx.roundRect(sqX + (i % 10) * (sq + sqGap), yl + z(14) + Math.floor(i / 10) * (sq + sqGap), sq, sq, 3); ctx.fill();
+    }
+    ctx.fillStyle = th.muted; ctx.font = `500 ${z(15)}px ${UI}`;
+    ctx.fillText(fitText(ctx, `${wins.toLocaleString()} of ${sW.n.toLocaleString()} buys · each square is 5%`, colL), xL, yl + z(90));
+    yl += z(116);
+    // left: sector mix of what they bought
+    const sec = new Map(); for (const t of pool) sec.set(t.st[1] || "Other", (sec.get(t.st[1] || "Other") || 0) + t.amt);
+    const secRows = [...sec.entries()].sort((a, b) => b[1] - a[1]), secTot = sumAmt(pool) || 1;
+    const nSec = Math.min(secRows.length, 7, Math.floor((bottom - yl - z(40)) / z(40)));
+    if (nSec >= 2) {
+      yl = head(xL, yl + z(14), colL, `SECTORS BOUGHT · ${perName}`);
+      secRows.slice(0, nSec).forEach(([name, amt], i) => {
+        const yy = yl + z(28) + i * z(40), share = amt / secTot;
+        ctx.fillStyle = th.ink2; ctx.fillText(fitName(ctx, name, 500, z(15), z(12), colL - z(60)), xL, yy);
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 ${z(15)}px ${MONO}`; ctx.fillText(`${Math.round(share * 100)}%`, xL + colL, yy); ctx.textAlign = "left";
+        ctx.fillStyle = th.grid; ctx.fillRect(xL, yy + z(8), colL, z(9));
+        ctx.fillStyle = ACC; ctx.fillRect(xL, yy + z(8), Math.max(2, colL * share), z(9));
+      });
+      yl += z(28) + (nSec - 1) * z(40) + z(20);
+    }
+    // right: performance table, every period, against the S&P 500 over the same days
+    let yr = head(xR, top, colR, "PERFORMANCE VS THE S&P 500");
+    const periods = [["3M", 91], ["6M", 182], ["1Y", 365], [`SINCE ${D.start.slice(0, 4)}`, null]].map(([l, d]) => {
+      const b = buysAll.filter((t) => d == null || t.time >= today - d * DAY);
+      return { l, n: b.length, s: stats(b, "T"), c: stats(b, "P") };
+    });
+    const c0 = z(170), cw4 = (colR - c0) / 4;
+    ctx.fillStyle = th.muted; ctx.font = `700 ${z(12)}px ${UI}`; ctx.letterSpacing = "0.5px"; ctx.textAlign = "right";
+    periods.forEach((p, i) => {
+      const x = xR + c0 + (i + 1) * cw4;
+      if (ctx.measureText(p.l).width <= cw4 - z(8) || !p.l.includes(" ")) ctx.fillText(p.l, x, yr + z(26));
+      else { const [a, b] = p.l.split(" "); ctx.fillText(a, x, yr + z(12)); ctx.fillText(b, x, yr + z(26)); }  // "SINCE" over "2023"
+    });
+    ctx.letterSpacing = "0px"; ctx.textAlign = "left";
+    yr += z(36);
+    // two groups: measured from the trade date (their own timing) and from the disclosure date (copying the filing)
+    const diffCol = (d) => d >= 0 ? th.up : th.down;
+    const tRows = [["FROM TRADE DATE"],
+      ["Their buys", (p) => p.s.n ? pct(p.s.ret) : "–", () => th.ink],
+      ["S&P 500, same days", (p) => p.s.n ? pct(p.s.spyRet) : "–", () => th.muted],
+      ["Difference", (p) => p.s.n ? pts(p.s.diff) : "–", (p) => diffCol(p.s.diff), true],
+      ["FROM DISCLOSURE DATE"],
+      ["Their buys", (p) => p.c.n ? pct(p.c.ret) : "–", () => th.ink],
+      ["S&P 500, same days", (p) => p.c.n ? pct(p.c.spyRet) : "–", () => th.muted],
+      ["Difference", (p) => p.c.n ? pts(p.c.diff) : "–", (p) => diffCol(p.c.diff), true],
+      [null],
+      ["Buys counted", (p) => p.n.toLocaleString(), () => th.muted]];
+    let band = 0;
+    for (const [label, val, col, bold] of tRows) {
+      if (label === null) { yr += z(8); continue; }
+      if (!val) {  // group label
+        capsText(ctx, label, xR + z(8), yr + z(22), z(12), th.muted, 800, 1.2);
+        yr += z(30); band = 0; continue;
+      }
+      if (band++ % 2 === 0) { ctx.fillStyle = th.card; ctx.fillRect(xR, yr, colR, z(32)); }
+      ctx.fillStyle = bold ? th.ink : th.ink2; ctx.font = `${bold ? 700 : 500} ${z(16)}px ${UI}`; ctx.fillText(label, xR + z(8), yr + z(22));
+      ctx.textAlign = "right"; ctx.font = `${bold ? 700 : 600} ${z(16)}px ${MONO}`;
+      periods.forEach((p, j) => { ctx.fillStyle = (val === tRows[9][1] ? p.n : p.s.n) ? col(p) : th.muted; ctx.fillText(val(p), xR + c0 + (j + 1) * cw4, yr + z(22)); });
+      ctx.textAlign = "left";
+      yr += z(32);
+    }
+    yr += z(6);
+    ctx.fillStyle = th.muted; ctx.font = `500 ${z(13)}px ${UI}`;
+    ctx.fillText(fitText(ctx, "Buys made in each period, valued to today or their sale.", colR), xR, yr + z(16));
+    yr += z(58);
+    // right: grouped bars for the same table, when there's room
+    const chartH = bottom - yr > z(420) ? z(190) : 0;
+    if (chartH) {
+      yr = head(xR, yr, colR, "TRADE DATE: BUYS (GREEN) VS S&P 500 (BLUE)");
+      const vals = periods.flatMap((p) => p.s.n ? [p.s.ret, p.s.spyRet] : []);
+      const vmin = Math.min(0, ...vals), vmax = Math.max(vmin + 0.02, 0, ...vals);
+      const Yb = (v) => yr + z(36) + (vmax - v) / (vmax - vmin) * (chartH - z(70));
+      ctx.fillStyle = th.grid; ctx.fillRect(xR, Yb(0), colR, 1);
+      const gw = colR / periods.length, bw = Math.min(z(34), gw / 3.2);
+      periods.forEach((p, i) => {
+        const cx = xR + i * gw + gw / 2;
+        if (p.s.n) {
+          // their buys green, the S&P 500 blue, each with its number at the bar's end
+          for (const [v, col, dx] of [[p.s.ret, th.up, -bw - 2], [p.s.spyRet, th.line, 2]]) {
+            const y1 = Yb(Math.max(0, v)), y2 = Yb(Math.min(0, v));
+            ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(cx + dx, y1, bw, Math.max(2, y2 - y1), 3); ctx.fill();
+            ctx.font = `700 ${z(12)}px ${MONO}`; ctx.textAlign = "center";
+            ctx.fillText(pct(v, Math.abs(v) < 0.1 ? 1 : 0), cx + dx + bw / 2, v >= 0 ? y1 - z(6) : y2 + z(14));
+          }
+        }
+        ctx.fillStyle = th.muted; ctx.font = `600 ${z(13)}px ${UI}`; ctx.textAlign = "center"; ctx.fillText(p.l.replace("SINCE ", "Since "), cx, yr + chartH + z(4)); ctx.textAlign = "left";
+      });
+      yr += chartH + z(30);
+    }
+    // right: their largest buys
+    // one row per stock: its largest buy, with how many buys of it there were
+    const nOf = new Map(); for (const t of pool) nOf.set(t.t, (nOf.get(t.t) || 0) + 1);
+    const big = [...pool].sort((a, b) => b.amt - a.amt || b.time - a.time).filter((t, i, arr) => arr.findIndex((u) => u.t === t.t) === i);
+    const nBig = Math.min(big.length, 6, Math.floor((bottom - yr - z(44)) / z(36)));
+    if (nBig >= 1) {
+      yr = head(xR, yr, colR, `LARGEST BUYS · ${perName}`);
+      big.slice(0, nBig).forEach((t, i) => {
+        const yy = yr + z(30) + i * z(36), v = eff(t, t.T.r);
+        ctx.fillStyle = th.ink; ctx.font = `700 ${z(16)}px ${MONO}`; ctx.fillText(t.t, xR, yy);
+        const kind = t.cls === "option" ? (t.opt === "P" ? " (puts)" : t.opt === "C" ? " (calls)" : " (options)") : "";
+        const many = nOf.get(t.t) > 1 ? ` (${nOf.get(t.t)} buys)` : "", nw = colR - z(70) - z(200);
+        let nm = cleanName(t.st[0]).replace(/[,.]?\s+(Inc|Corp|Co|Ltd|Plc|Group Inc|N\.?V|S\.?A)\.?$/i, "") + kind;
+        // the full name comes first: the buy count is added only when it still fits
+        ctx.font = `500 ${z(13)}px ${UI}`;
+        if (ctx.measureText(nm + many).width <= nw) nm += many;
+        else { ctx.font = `500 ${z(15)}px ${UI}`; while (nm.includes(" ") && ctx.measureText(nm).width > nw) nm = nm.slice(0, nm.lastIndexOf(" ")); }  // drop whole words, never cut one
+        ctx.fillStyle = th.ink2; ctx.font = `500 ${fitSize(ctx, nm, (q) => `500 ${q}px ${UI}`, z(15), nw, z(13))}px ${UI}`;
+        ctx.fillText(fitText(ctx, nm, nw), xR + z(70), yy);
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `500 ${z(15)}px ${MONO}`; ctx.fillText(amountShort(t), xR + colR - z(84), yy);
+        ctx.fillStyle = v >= 0 ? th.up : th.down; ctx.font = `700 ${z(15)}px ${MONO}`; ctx.fillText(pct(v, 0), xR + colR, yy); ctx.textAlign = "left";
+        ctx.fillStyle = th.grid; ctx.fillRect(xR, yy + z(12), colR, 1);
+      });
+      yr += z(30) + (nBig - 1) * z(36) + z(14);
+    }
+    // full width: their latest disclosed trades, filling the room the sections above leave
+    let yb = Math.max(yl + z(24), yr + z(14));
+    const latest = all.filter((t) => t.ftime).sort((a, b) => b.ftime - a.ftime || b.amt - a.amt);
+    const nLat = Math.min(latest.length, 9, Math.floor((bottom - yb - z(50)) / z(34)));
+    if (nLat >= 3) {
+      const fw = W - 2 * L;
+      yb = head(xL, yb, fw, "LATEST DISCLOSED TRADES");
+      latest.slice(0, nLat).forEach((t, i) => {
+        const yy = yb + z(30) + i * z(34), sold = t.side === "S";
+        ctx.fillStyle = th.muted; ctx.font = `500 ${z(15)}px ${MONO}`; ctx.fillText(fmtDate(t.d, { month: "short", day: "numeric", year: "2-digit" }), xL, yy);
+        ctx.fillStyle = sold ? th.down : th.up; ctx.font = `700 ${z(14)}px ${UI}`; ctx.fillText(sold ? (t.k === "SP" ? "PART SOLD" : "SOLD") : "BOUGHT", xL + z(110), yy);
+        ctx.fillStyle = th.ink; ctx.font = `700 ${z(16)}px ${MONO}`; ctx.fillText(t.t, xL + z(215), yy);
+        ctx.fillStyle = th.ink2; ctx.fillText(fitName(ctx, cleanName(t.st[0]), 500, z(15), z(12), fw - z(215) - z(80) - z(340)), xL + z(295), yy);
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `500 ${z(15)}px ${MONO}`; ctx.fillText(amountShort(t), xL + fw - z(150), yy);
+        ctx.fillStyle = th.muted; ctx.fillText(`filed ${fmtDate(t.fd, { month: "short", day: "numeric" })}`, xL + fw, yy); ctx.textAlign = "left";
+        ctx.fillStyle = th.grid; ctx.fillRect(xL, yy + z(12), fw, 1);
+      });
+    }
+    footer(ctx, W, H, th, ["Buys held until a full sale is reported.",
+      "Past results don't predict future returns. Not financial advice."]);
+    return null;
+  }
+
+  // --- Democrats vs Republicans: one stock, what each party bought and sold, and how their buys did ---
+  // Members and officials by party (business leaders left out; independents counted apart). Returns are
+  // each party's buys from the trade date to today or their sale, weighted by best-estimate dollars,
+  // against the S&P 500 over the same days.
+  async function drawParties(ctx, W, H, th) {
+    const tk = PE.ticker, s = PRICES.px[tk];
+    if (!s) return "Pick a stock.";
+    const st = stocks[tk], since = windowStart(), end = lastIdx(s), last = s[end];
+    const list = trades.filter((t) => t.t === tk && t.st && t.side !== "O" && t.time >= since && !isBiz(members[t.m]));
+    if (!list.length) return `No trades in ${tk} in ${periodLong()}. Pick a longer period.`;
+    const side = { D: [], R: [], I: [] };
+    for (const t of list) (side[members[t.m].party] || side.I).push(t);
+    header(ctx, W, th, `${tk} · Democrats vs Republicans · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
+    ctx.fillStyle = th.ink; ctx.fillText(fitName(ctx, cleanName(st[0]), 800, 52, 34, 640), 64, 156);
+    ctx.fillStyle = th.muted; ctx.font = `500 19px ${UI}`; ctx.fillText(fitText(ctx, [tk, st[3] || st[2]].filter(Boolean).join(" · "), 640), 64, 190);
+    ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 46px ${MONO}`; ctx.fillText(price(last), W - 64, 150);
+    ctx.fillStyle = th.muted; ctx.font = `500 15px ${MONO}`; ctx.fillText(`close ${fmtDate(PRICES.dates[end], { day: "numeric", month: "short" })}`, W - 64, 178); ctx.textAlign = "left";
+    // the two party cards
+    const P2 = [["D", "Democrats", th.D], ["R", "Republicans", th.R]].map(([k, name, col]) => {
+      const L = side[k], buys = L.filter((t) => t.side === "B"), sells = L.filter((t) => t.side === "S");
+      const pb = buys.filter((t) => t.amt > 0 && t.T.ep), sh = pb.reduce((a, t) => a + t.amt / t.T.ep, 0);
+      return { k, name, col, L, buys, sells, eb: estOf(buys), es: estOf(sells), avg: sh ? pb.reduce((a, t) => a + t.amt, 0) / sh : null,
+        st: stats(buys, "T"), who: new Set(L.map((t) => t.m)) };
+    });
+    const cy = 222, cw = (W - 128 - 24) / 2, ch = 372;
+    P2.forEach((g, i) => {
+      const x = 64 + i * (cw + 24);
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, cy, cw, ch, 14); ctx.fill();
+      ctx.fillStyle = g.col; ctx.beginPath(); ctx.roundRect(x, cy, cw, 8, [14, 14, 0, 0]); ctx.fill();
+      ctx.fillStyle = g.col; ctx.font = `800 30px ${UI}`; ctx.fillText(g.name, x + 24, cy + 52);
+      ctx.fillStyle = th.muted; ctx.font = `500 15px ${UI}`;
+      ctx.fillText(g.L.length ? `${g.who.size} ${g.who.size === 1 ? "person" : "people"} · ${plural(g.buys.length, "buy")} · ${plural(g.sells.length, "sale")}` : "No trades in this period", x + 24, cy + 78);
+      if (!g.L.length) return;
+      const net = g.eb.best - g.es.best, r = g.avg ? last / g.avg - 1 : null;
+      const rows = [
+        ["Bought", g.buys.length ? estText(g.eb) : "–", g.buys.length ? th.up : th.muted],
+        ["Sold", g.sells.length ? estText(g.es) : "–", g.sells.length ? th.down : th.muted],
+        ["Net", `${net >= 0 ? "+" : "−"}${usdEst(Math.abs(net))}`, net >= 0 ? th.up : th.down],
+        ["Average buy", g.avg ? price(g.avg) : "–", th.ink],
+        ["Price since then", r == null ? "–" : pct(r), r == null ? th.muted : r >= 0 ? th.up : th.down],
+        ["Their buys returned", g.st.n ? pct(g.st.ret) : "–", g.st.n ? (g.st.ret >= 0 ? th.up : th.down) : th.muted],
+        ["S&P 500, same days", g.st.n ? pct(g.st.spyRet) : "–", th.muted],
+        ["Ahead of the S&P 500", g.st.n ? pts(g.st.diff) : "–", g.st.n ? (g.st.diff >= 0 ? th.up : th.down) : th.muted],
+      ];
+      rows.forEach(([l, v, c], j) => {
+        const yy = cy + 116 + j * 32;
+        if (j % 2 === 0) { ctx.fillStyle = th.chip; ctx.fillRect(x + 12, yy - 22, cw - 24, 32); }
+        ctx.fillStyle = th.ink2; ctx.font = `${j === 7 ? 700 : 500} 16px ${UI}`; ctx.fillText(l, x + 24, yy);
+        ctx.textAlign = "right"; ctx.fillStyle = c; ctx.font = `700 17px ${MONO}`; ctx.fillText(fitText(ctx, v, cw * 0.5), x + cw - 24, yy); ctx.textAlign = "left";
+      });
+    });
+    // one line on who did better
+    const [Dg, Rg] = P2;
+    let verdict = "";
+    if (Dg.st.n && Rg.st.n) {
+      const better = Dg.st.diff >= Rg.st.diff ? Dg : Rg, worse = better === Dg ? Rg : Dg;
+      verdict = `${better.name}' buys did better: ${pts(better.st.diff)} against the S&P 500, versus ${pts(worse.st.diff)} for ${worse.name}.`;
+    } else if (Dg.st.n || Rg.st.n) { const g = Dg.st.n ? Dg : Rg; verdict = `Only ${g.name} bought ${tk} in this period: ${pts(g.st.diff)} against the S&P 500.`; }
+    else verdict = `Neither party bought ${tk} in this period; only sales are on file.`;
+    ctx.fillStyle = th.ink; ctx.font = `700 19px ${UI}`; ctx.fillText(fitText(ctx, verdict, W - 128), 64, cy + ch + 40);
+    // price chart, trades marked in party colours, each party's average buy dashed
+    const gy = cy + ch + 70, gh = 300, gw = W - 128 - 96;
+    const [i0, i1] = priceRange(s, windowDays());
+    const sp = sparkline(ctx, s, i0, i1, 64, gy, gw, gh, th.ink2, { width: 2.5, fill: th.area });
+    if (sp) {
+      ctx.font = `500 14px ${MONO}`;
+      for (let q = 0; q <= 3; q++) {
+        const v = sp.lo + (sp.hi - sp.lo) * q / 3, yy = sp.Y(v);
+        ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(64, yy); ctx.lineTo(64 + gw, yy); ctx.stroke();
+        ctx.fillStyle = th.muted; ctx.fillText(price(v), 64 + gw + 10, yy + 5);
+      }
+      for (const g of P2) {
+        if (g.avg && g.avg >= sp.lo && g.avg <= sp.hi) {
+          ctx.save(); ctx.strokeStyle = g.col; ctx.lineWidth = 2; ctx.setLineDash([7, 6]); ctx.beginPath(); ctx.moveTo(64, sp.Y(g.avg)); ctx.lineTo(64 + gw, sp.Y(g.avg)); ctx.stroke(); ctx.restore();
+        }
+        for (const t of g.L) {
+          const i = idxOfDate(t.d); if (i < i0) continue;
+          const x = sp.X(i), yv = sp.Y(s[i] ?? t.T.ep), up = t.side === "B";
+          ctx.beginPath(); ctx.moveTo(x, up ? yv + 5 : yv - 5); ctx.lineTo(x - 7, up ? yv + 18 : yv - 18); ctx.lineTo(x + 7, up ? yv + 18 : yv - 18); ctx.closePath();
+          if (up) { ctx.fillStyle = g.col; ctx.fill(); } else { ctx.fillStyle = th.card; ctx.fill(); ctx.strokeStyle = g.col; ctx.lineWidth = 2; ctx.stroke(); }
+        }
+      }
+      ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
+      ctx.fillText("▲ filled: buy   ▽ outline: sale   dashed: the party's average buy   blue Democrats · red Republicans", 64, gy + gh + 26);
+    }
+    // each party's biggest traders
+    const ty = gy + gh + 64;
+    for (const [i, g] of P2.entries()) {
+      const x = 64 + i * (cw + 24), per = new Map();
+      for (const t of g.L) { const e = per.get(t.m) || { m: members[t.m], b: 0, s: 0 }; if (t.side === "B") e.b += t.amt; else e.s += t.amt; per.set(t.m, e); }
+      const topP = [...per.values()].sort((a, b) => (b.b + b.s) - (a.b + a.s)).slice(0, 3);
+      ctx.fillStyle = g.col; ctx.font = `700 14px ${UI}`; ctx.letterSpacing = "1px"; ctx.fillText(`MOST ACTIVE ${g.name.toUpperCase()}`, x, ty); ctx.letterSpacing = "0px";
+      for (const [j, e] of topP.entries()) {
+        const yy = ty + 30 + j * 40;
+        drawFace(ctx, await photoImage(e.m), e.m, x + 15, yy - 6, 15, th);
+        ctx.fillStyle = th.ink; ctx.font = `600 16px ${UI}`; ctx.fillText(fitText(ctx, shortName(e.m), cw - 230), x + 40, yy);
+        ctx.textAlign = "right"; ctx.font = `600 15px ${MONO}`;
+        ctx.fillStyle = e.b ? th.up : th.muted; ctx.fillText(e.b ? `+${usdEst(e.b)}` : "–", x + cw - 100, yy);
+        ctx.fillStyle = e.s ? th.down : th.muted; ctx.fillText(e.s ? `−${usdEst(e.s)}` : "–", x + cw, yy); ctx.textAlign = "left";
+      }
+      if (!topP.length) { ctx.fillStyle = th.muted; ctx.font = `500 15px ${UI}`; ctx.fillText("No trades", x, ty + 30); }
+    }
+    if (side.I.length) { ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`; ctx.fillText(`Independents also made ${plural(side.I.length, "trade")} in ${tk} (not shown).`, 64, H - 138); }
+    footer(ctx, W, H, th);
+    return null;
+  }
+
+  // bond issuers as filings abbreviate them ("MICHIGAN ST HOSP FI") written out ("Michigan State Hospital Finance").
+  // Word by word; "St" is "State" after a state name and "St." (Saint) elsewhere; state abbreviations other than
+  // the first word become the state's name. Words cut off by the filing's length limit can't be recovered.
+  const US_STATES = ["Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+    "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri",
+    "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
+    "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia",
+    "Wisconsin", "Wyoming"];
+  const STATE_ABBR = { ALA: "Alabama", AL: "Alabama", ALASKA: "Alaska", ARIZ: "Arizona", AZ: "Arizona", ARK: "Arkansas", CALIF: "California", CA: "California",
+    COLO: "Colorado", CONN: "Connecticut", CT: "Connecticut", FLA: "Florida", FL: "Florida", GA: "Georgia", ILL: "Illinois", IL: "Illinois", IND: "Indiana",
+    KAN: "Kansas", KANS: "Kansas", KS: "Kansas", KY: "Kentucky", MASS: "Massachusetts", MD: "Maryland", MICH: "Michigan", MI: "Michigan", MINN: "Minnesota",
+    MN: "Minnesota", MISS: "Mississippi", MO: "Missouri", MONT: "Montana", NEB: "Nebraska", NEV: "Nevada", NJ: "New Jersey", NC: "North Carolina",
+    NY: "New York", OKLA: "Oklahoma", OK: "Oklahoma", ORE: "Oregon", PA: "Pennsylvania", SC: "South Carolina", TENN: "Tennessee", TN: "Tennessee",
+    TEX: "Texas", TX: "Texas", VA: "Virginia", VT: "Vermont", WASH: "Washington", WA: "Washington", WIS: "Wisconsin", WISC: "Wisconsin", WI: "Wisconsin",
+    WYO: "Wyoming", NH: "New Hampshire", RI: "Rhode Island", WV: "West Virginia", NM: "New Mexico", DC: "D.C." };
+  const WORD_ABBR = { HOSP: "Hospital", HOSPS: "Hospitals", FI: "Finance", FIN: "Finance", FING: "Financing", FINL: "Financial", AUTH: "Authority",
+    CNTY: "County", CNTYS: "Counties", SCH: "School", SCHS: "Schools", DIST: "District", DISTS: "Districts", REV: "Revenue", RV: "Revenue", REVS: "Revenue",
+    GO: "General Obligation", HSG: "Housing", WTR: "Water", WTRWKS: "Waterworks", SPLY: "Supply", PUB: "Public", IMPT: "Improvement", IMPTS: "Improvements",
+    BLDG: "Building", UNIV: "University", UNI: "University", EDL: "Educational", EDUC: "Education", HLTH: "Health", HLTHCARE: "Healthcare", HEALTHCARE: "Healthcare",
+    FAC: "Facility", FACS: "Facilities", DEV: "Development", REDEV: "Redevelopment", AGY: "Agency", CMNTY: "Community", CMNTYS: "Communities", MTG: "Mortgage",
+    MUN: "Municipal", MUNI: "Municipal", TWP: "Township", BORO: "Borough", TRANSN: "Transportation", TRANS: "Transportation", TRNSMSN: "Transmission",
+    CNTRCT: "Contract", RFDG: "Refunding", REF: "Refunding", SER: "Series", SR: "Senior", PWR: "Power", ELEC: "Electric", UTIL: "Utility", UTILS: "Utilities",
+    TPK: "Turnpike", TPKE: "Turnpike", TWY: "Tollway", BRDG: "Bridge", BRDGS: "Bridges", TUNL: "Tunnel", ARPT: "Airport", INTL: "International",
+    GOVT: "Government", GEN: "General", OBLIG: "Obligation", MLTIFAM: "Multifamily", MLTI: "Multi", APTS: "Apartments", SETTLMT: "Settlement",
+    PMT: "Payment", MSTR: "Master", TOB: "Tobacco", RCPTS: "Receipts", CTF: "Certificates", CTFS: "Certificates", PARTN: "Participation", WKS: "Works",
+    DEPT: "Department", SVCS: "Services", SVC: "Service", MED: "Medical", CTR: "Center", CTRS: "Centers", CMWLTH: "Commonwealth", ASSN: "Association",
+    PKG: "Parking", SWR: "Sewer", SYS: "System", METRO: "Metropolitan", METROP: "Metropolitan", NATL: "National", NAT: "Natural", RES: "Resources",
+    RESH: "Research", ENVIR: "Environmental", ENV: "Environmental", COLL: "College", CMNTYCOLL: "Community College", LN: "Loan", LNS: "Loans",
+    STUD: "Student", HWY: "Highway", HWYS: "Highways", PORT: "Port", RR: "Railroad", TRAN: "Transit", INDL: "Industrial", INDT: "Independent",
+    CONS: "Consolidated", CONSOL: "Consolidated", PROJ: "Project", PJ: "Project", PREPAY: "Prepayment", DB: "Bond", BDS: "Bonds", BD: "Bond",
+    ST: "State", STS: "Streets", JR: "Junior", LTD: "Limited", TX: "Tax", INCR: "Increment", ASSMT: "Assessment", SPL: "Special", EXCH: "Exchange",
+    COOP: "Cooperative", ENERGY: "Energy", AVIATION: "Aviation", COMWLTH: "Commonwealth", COMMWLTH: "Commonwealth", COMMN: "Commission",
+    WASTEWTR: "Wastewater", PURP: "Purpose", INDPT: "Independent", STR: "Street", ED: "Education", EDUCL: "Educational", MGMT: "Management",
+    CORR: "Correctional", RECR: "Recreation", HOUS: "Housing", GTD: "Guaranteed", INS: "Insured", LEASE: "Lease", SANTN: "Sanitation" };
+  function readableIssuer(name) {
+    const words = name.replace(/\bN Y\b/gi, "NY").replace(/\bN Mex\b/gi, "NM").replace(/\bW Va\b/gi, "WV").replace(/&/g, " & ").split(/\s+/).filter(Boolean);
+    const out = [];
+    words.forEach((w, i) => {
+      const up = w.toUpperCase().replace(/[.,]$/, "");
+      const prev = out.length ? out[out.length - 1] : "";
+      if (up === "ST") out.push(US_STATES.includes(prev) || US_STATES.some((x) => x.endsWith(" " + prev)) ? "State" : i === 0 || /^[A-Z]/.test(words[i + 1] || "") && !US_STATES.includes(prev) && i < 2 ? "St." : "State");
+      else if (i > 0 && STATE_ABBR[up] && !(up === "MO" && /^[A-Z][a-z]/.test(words[i + 1] || "") && false)) out.push(STATE_ABBR[up]);
+      else if (up === "UNI" && /^SCH/i.test(words[i + 1] || "")) out.push("Unified");  // "UNI SCH DIST": Unified School District
+      else if (WORD_ABBR[up] && !(up === "TX" && i > 0 && out.includes("Texas"))) out.push(WORD_ABBR[up]);
+      else out.push(w.length <= 3 && w === w.toUpperCase() && !/\d/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+    });
+    // a state written twice in a row ("Texas Texas") or "State State" collapses to one
+    // a word or two-word place written twice in a row ("New York New York City") is kept once
+    return out.filter((w, i) => w !== out[i - 1]).join(" ").replace(/\b([A-Z][a-z]+(?: [A-Z][a-z]+)?) \1\b/g, "$1").replace(/\s+&\s+/g, " & ");
+  }
+
+  // --- Bonds and debt: Treasuries, municipal and corporate bonds, bank notes and bond funds ---
+  const DEBT_RE = /\bDUE\b|\d%|\bREV\b|\bBDS?\b|\bNOTES?\b|\bNTS\b|\bBONDS?\b|\bMUNI|TREAS|T-BILL|\bBILLS?\b|\bCDS?\b|CERTIFICATE OF DEPOSIT|\bGO\b|DEBENTURE|\bLINKED\b|\bPERP\b/i;
+  const isDebt = (t) => t.cls !== "option" && t.side !== "O" && (t.st ? /\b(BOND|TREASURY|MUNI)/i.test(t.st[0]) : DEBT_RE.test(t.a || ""));
+  const DEBT_KINDS = [["treasury", "U.S. Treasury"], ["muni", "Municipal"], ["corp", "Corporate"], ["bank", "Bank notes & CDs"], ["fund", "Bond funds"]];
+  function debtInfo(t) {
+    const a = (t.st ? t.st[0] : t.a || "").replace(/\s+/g, " ").trim(), up = a.toUpperCase();
+    // bank notes first: "linked to S&P 500 Index" notes are bank IOUs, not index funds
+    const kind = !t.st && /\bLINKED\b|STRUCTURED|\bCDS?\b|CERTIFICATE OF DEPOSIT|\bBANK\b.*\bNOTE/.test(up) ? "bank"
+      : /\b(ETF|FUND|FD|INDEX|SWEEP|MONEY MARKET|TRUST)\b/.test(up) || (t.st && true) ? "fund"
+      : /TREAS|T-BILL|\bU\.?S\.? (GOVT|GOVERNMENT)\b|UNITED STATES/.test(up) ? "treasury"
+      : /\b(ST|STATE|CNTY|COUNTY|CITY|AUTH|DIST|SCH|SCHOOL|REV|GO|HOSP|HSG|WTR|TRANSIT|TURNPIKE|PORT|UNIV|PUB|MUNI|MUN|TWP|BORO|COMMONWEALTH|AIRPORT|AVIATION|TOLL|UTIL)\b/.test(up) ? "muni" : "corp";
+    const cm = up.match(/(\d{1,2}(?:\.\d{1,5})?)\s?%/), coupon = cm && +cm[1] > 0 && +cm[1] < 20 ? +cm[1] : null;
+    // maturity from bond_maturity.js: a CUSIP lookup, the filing's "due" date, or a likely date after the coupon
+    const mt = MATURITY && MATURITY[t.a], mdate = mt ? mt[0] : null, msrc = mt ? mt[1] : null, year = mdate ? +mdate.slice(0, 4) : null;
+    // a readable name: the issuer, before the coupon, series and maturity details
+    let name = a.replace(/\s+(B\/E|BE\/R|SER(IES)?\b|RFDG|DUE\b|DTD\b|FC\b|PTC\b).*$/i, "").replace(/\s*\d{1,2}(\.\d+)?\s?%.*$/, "").replace(/\s+\d{1,2}\/\d{1,2}\/\d{2,4}.*$/, "").trim();
+    if (kind === "treasury") name = /BILL/.test(up) ? "U.S. Treasury bills" : /BOND/.test(up) && !/NOTE/.test(up) ? "U.S. Treasury bonds" : "U.S. Treasury notes";
+    name = name.length > 4 && name === name.toUpperCase() ? titleCase(name) : name;
+    if (kind === "muni" || kind === "corp" || kind === "bank") name = readableIssuer(name);
+    return { kind, coupon, year, mdate, msrc, name: name || a };
+  }
+  // --- Bonds and debt, by issuer: who bought one issuer's bonds, with each person's coupons and maturities ---
+  async function drawBondIssuer(ctx, W, H, th) {
+    const since = windowStart(), name = PE.bond;
+    if (!name) return `No bond purchases in ${periodLong()}.`;
+    const KC = { treasury: th.line, muni: "#1baf7a", corp: "#eb6834", bank: "#6f4cc3", fund: "#8e96a3" };
+    const pool = trades.filter((t) => t.time >= since && t.lo && isDebt(t) && !isBiz(members[t.m]) && (t.debt = t.debt || debtInfo(t)).name === name);
+    const buys = pool.filter((t) => t.side === "B"), sells = pool.filter((t) => t.side === "S");
+    if (!buys.length) return `No purchases of ${name} in ${periodLong()}. Pick a longer period.`;
+    const kind = buys[0].debt.kind, eb = estOf(buys), es = estOf(sells);
+    const per = new Map();
+    for (const t of pool) {
+      const e = per.get(t.m) || { m: members[t.m], b: [], s: [], issues: new Map() };
+      (t.side === "B" ? e.b : e.s).push(t);
+      if (t.side === "B") { const k = `${t.debt.coupon ?? ""}|${t.debt.mdate || ""}`; e.issues.set(k, t.debt); }
+      per.set(t.m, e);
+    }
+    const rows = [...per.values()].filter((e) => e.b.length).map((e) => ({ ...e, eb: estOf(e.b), es: estOf(e.s) })).sort((a, b) => b.eb.best - a.eb.best);
+    header(ctx, W, th, `${DEBT_KINDS.find(([k]) => k === kind)[1]} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
+    ctx.fillStyle = th.ink; ctx.font = `800 52px ${UI}`;
+    ctx.fillText(fitName(ctx, `Who bought ${name}`, 800, 52, 32, W - 128, UI, 4), 64, 156);
+    ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
+    ctx.fillText(fitText(ctx, `${rows.length === 1 ? "One person" : `${rows.length} people`} bought its bonds ${P.window === "all" ? `since ${START_SHORT}` : `in ${periodLong()}`}`, W - 128), 64, 196);
+    // facts
+    const fy = 230, fw = (W - 128 - 2 * 20) / 3;
+    const facts = [
+      [th.line, usdEst(eb.best), "Bought", `${plural(buys.length, "purchase")}${eb.exact ? "" : `, likely ${spanText(eb.lo, eb.hi)}`}.`],
+      [th.down, sells.length ? usdEst(es.best) : "$0", "Sold or redeemed", sells.length ? `${plural(sells.length, "sale")}${es.exact ? "" : `, likely ${spanText(es.lo, es.hi)}`}.` : "None in this period."],
+      [KC[kind], String(rows.length), rows.length === 1 ? "Person" : "People", `${{ treasury: "U.S. Treasuries", muni: "municipal bonds", corp: "corporate bonds", bank: "bank notes and CDs", fund: "bond funds" }[kind]} bought by members and officials.`],
+    ];
+    facts.forEach(([c, big, head, body], i) => {
+      const x = 64 + i * (fw + 20);
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, fy, fw, 132, 14); ctx.fill();
+      ctx.fillStyle = c; ctx.font = `700 34px ${MONO}`; ctx.fillText(fitText(ctx, big, fw - 40), x + 20, fy + 46);
+      ctx.fillStyle = th.ink; ctx.font = `700 16px ${UI}`; ctx.fillText(head, x + 20, fy + 72);
+      ctx.fillStyle = th.ink2; ctx.font = `500 13.5px ${UI}`; drawWrapped(ctx, body, x + 20, fy + 96, fw - 40, 18, 2);
+    });
+    // one row per person: face, name, which issues (coupon · maturity), bought and sold
+    let y = fy + 172;
+    const cols = [["PERSON", 64], ["ISSUES (COUPON · MATURES)", 440], ["BOUGHT", 860], ["SOLD", W - 64]];
+    ctx.fillStyle = th.chip; ctx.beginPath(); ctx.roundRect(48, y - 4, W - 96, 32, 8); ctx.fill();
+    ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1px";
+    cols.forEach(([l, x], i) => { ctx.textAlign = i >= 2 ? "right" : "left"; ctx.fillText(l, i === 2 ? x + 0 : x, y + 17); });
+    ctx.textAlign = "left"; ctx.letterSpacing = "0px";
+    const rowH = 56, n = Math.min(rows.length, Math.floor((H - 200 - (y + 30)) / rowH));
+    for (let i = 0; i < n; i++) {
+      const e = rows[i], ry = y + 30 + i * rowH, cy = ry + rowH / 2;
+      if (i % 2) { ctx.fillStyle = th.card; ctx.fillRect(48, ry, W - 96, rowH); }
+      drawFace(ctx, await photoImage(e.m), e.m, 84, cy, 18, th);
+      ctx.fillStyle = th.ink; ctx.font = `600 17px ${UI}`; ctx.fillText(fitText(ctx, `${shortName(e.m)} · ${party(e.m)}`, 440 - 114 - 16), 114, cy - 2);
+      ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`; ctx.fillText(plural(e.b.length, "purchase"), 114, cy + 17);
+      const iss = [...e.issues.values()].map((d) => [d.coupon != null ? `${+d.coupon.toFixed(3)}%` : "", d.mdate ? fmtDate(d.mdate, { month: "short", year: "numeric" }) : ""].filter(Boolean).join(" · ") || "not given");
+      ctx.fillStyle = th.ink2; ctx.font = `500 14px ${MONO}`;
+      ctx.fillText(fitText(ctx, iss.slice(0, 3).join("   ") + (iss.length > 3 ? `   +${iss.length - 3}` : ""), 860 - 440 - 120), 440, cy + 5);
+      ctx.textAlign = "right"; ctx.font = `700 15px ${MONO}`;
+      ctx.fillStyle = th.ink; ctx.fillText(e.b.length === 1 ? amountShort(e.b[0]) : usdEst(e.eb.best), 860, cy + 5);
+      ctx.fillStyle = e.s.length ? th.down : th.muted; ctx.fillText(e.s.length ? usdEst(e.es.best) : "–", W - 64, cy + 5); ctx.textAlign = "left";
+    }
+    if (rows.length > n) { ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; ctx.fillText(`+${rows.length - n} more people`, 64, y + 30 + n * rowH + 22); }
+    ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`;
+    ctx.fillText(fitText(ctx, "Best estimates of the ranges; one purchase shows its likely range. Issuer names are the filings' abbreviations written out.", W - 128), 64, H - 140);
+    footer(ctx, W, H, th);
+    return null;
+  }
+
+  async function drawBonds(ctx, W, H, th) {
+    if (P.bby === "issuer") return drawBondIssuer(ctx, W, H, th);
+    const since = windowStart(), KC = { treasury: th.line, muni: "#1baf7a", corp: "#eb6834", bank: "#6f4cc3", fund: "#8e96a3" };
+    const all = PE.memberKey === "all";
+    const m = PE.member;
+    const poolAll = trades.filter((t) => t.time >= since && t.lo && isDebt(t) && !isBiz(members[t.m]) && (all || t.m === m.i));
+    for (const t of poolAll) t.debt = t.debt || debtInfo(t);
+    // "Type of debt": one kind only, or all of them
+    const DT = DEBT_KINDS.some(([k]) => k === P.debt) ? P.debt : "all";
+    const WHAT = { all: "bonds and debt", treasury: "U.S. Treasuries", muni: "municipal bonds", corp: "corporate bonds", bank: "bank notes and CDs", fund: "bond funds" }[DT];
+    const pool = DT === "all" ? poolAll : poolAll.filter((t) => t.debt.kind === DT);
+    const buys = pool.filter((t) => t.side === "B"), sells = pool.filter((t) => t.side === "S");
+    if (!buys.length) return all ? `No purchases of ${WHAT} in ${periodLong()}.` : `No purchases of ${WHAT} by ${m.name} in ${periodLong()}. Pick a longer period, another type, or "All of Congress".`;
+    const per = (all ? "everyone" : null), eb = estOf(buys), es = estOf(sells);
+    header(ctx, W, th, all ? `Members and officials · ${WHAT} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}` : `${titleOf(m)} ${shortName(m)} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
+    ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`;
+    ctx.fillText(fitText(ctx, all ? `Who buys ${WHAT}` : `${lastName(m)}’s ${WHAT}`, W - 128 - (all ? 0 : 150)), 64, 160);
+    ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
+    ctx.fillText(fitText(ctx, DT !== "all" ? `Only ${WHAT}; the bar below shows all their debt for comparison`
+      : all ? "U.S. Treasuries, municipal and corporate bonds, bank notes and bond funds they bought" : "Treasuries, municipal and corporate bonds, bank notes and bond funds", W - 128 - (all ? 0 : 150)), 64, 200);
+    if (!all) drawFace(ctx, await photoHD(m), m, W - 64 - 60, 140, 60, th);
+    // facts
+    const fy = 236, fw = (W - 128 - 2 * 20) / 3;
+    const theirAll = all ? null : trades.filter((t) => t.m === m.i && t.time >= since && t.side === "B" && t.lo && t.cls !== "option");
+    const facts = [
+      [th.line, usdEst(eb.best), "Bought", `${plural(buys.length, "purchase")}${eb.exact ? "" : `, likely ${spanText(eb.lo, eb.hi)}`}.`],
+      [th.down, sells.length ? usdEst(es.best) : "$0", "Sold or redeemed", sells.length ? `${plural(sells.length, "sale")}${es.exact ? "" : `, likely ${spanText(es.lo, es.hi)}`}.` : "None in this period."],
+      all ? [th.ink, String(new Set(buys.map((t) => t.m)).size), "People", `members and officials who bought ${WHAT} in this period.`]
+        : [th.ink, `${Math.round(eb.best / (estOf(theirAll).best || 1) * 100)}%`, "Of all their buying", `went into ${WHAT}${DT === "all" ? " rather than stocks or funds" : ""}.`],
+    ];
+    facts.forEach(([c, big, head, body], i) => {
+      const x = 64 + i * (fw + 20);
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, fy, fw, 132, 14); ctx.fill();
+      ctx.fillStyle = c; ctx.font = `700 34px ${MONO}`; ctx.fillText(fitText(ctx, big, fw - 40), x + 20, fy + 46);
+      ctx.fillStyle = th.ink; ctx.font = `700 16px ${UI}`; ctx.fillText(head, x + 20, fy + 72);
+      ctx.fillStyle = th.ink2; ctx.font = `500 13.5px ${UI}`; drawWrapped(ctx, body, x + 20, fy + 96, fw - 40, 18, 2);
+    });
+    // split by kind: one stacked bar with its legend
+    let y = fy + 170;
+    const byKind = new Map(DEBT_KINDS.map(([k]) => [k, 0]));
+    for (const t of poolAll) if (t.side === "B") byKind.set(t.debt.kind, byKind.get(t.debt.kind) + t.amt);
+    const tot = [...byKind.values()].reduce((a, v) => a + v, 0) || 1;
+    capsText(ctx, "WHAT KIND OF DEBT", 64, y, 14, th.muted, 700, 1.5);
+    y += 16; let bx = 64;
+    for (const [k] of DEBT_KINDS) { const w = (W - 128) * byKind.get(k) / tot; if (w > 0) { ctx.globalAlpha = DT === "all" || DT === k ? 1 : 0.25; ctx.fillStyle = KC[k]; ctx.fillRect(bx, y, Math.max(2, w - 2), 22); ctx.globalAlpha = 1; bx += w; } }
+    y += 50; let lx = 64;
+    ctx.font = `600 15px ${UI}`;
+    for (const [k, label] of DEBT_KINDS) {
+      const v = byKind.get(k); if (!v) continue;
+      const t = `${label} ${usdEst(v)} · ${Math.round(v / tot * 100)}%`;
+      if (lx + 24 + ctx.measureText(t).width > W - 64) { lx = 64; y += 28; }
+      ctx.globalAlpha = DT === "all" || DT === k ? 1 : 0.4;
+      ctx.fillStyle = KC[k]; ctx.beginPath(); ctx.roundRect(lx, y - 12, 14, 14, 3); ctx.fill();
+      ctx.fillStyle = th.ink2; ctx.font = `${DT === k ? 700 : 600} 15px ${UI}`; ctx.fillText(t, lx + 22, y); ctx.globalAlpha = 1; lx += 22 + ctx.measureText(t).width + 28;
+    }
+    y += 44;
+    if (all) {
+      // ranking: who bought the most
+      const pp = new Map();
+      for (const t of buys) { const e = pp.get(t.m) || { m: members[t.m], list: [], kinds: new Map() }; e.list.push(t); e.kinds.set(t.debt.kind, (e.kinds.get(t.debt.kind) || 0) + t.amt); pp.set(t.m, e); }
+      const rank = [...pp.values()].map((e) => ({ ...e, est: estOf(e.list) })).sort((a, b) => b.est.best - a.est.best);
+      capsText(ctx, "WHO BOUGHT THE MOST", 64, y, 14, th.muted, 700, 1.5);
+      const rowH = 54, n = Math.min(rank.length, Math.floor((H - 160 - (y + 20)) / rowH)), maxV = rank[0].est.best || 1;
+      for (let i = 0; i < n; i++) {
+        const e = rank[i], ry = y + 24 + i * rowH, cyy = ry + rowH / 2;
+        if (i % 2 === 0) { ctx.fillStyle = th.card; ctx.fillRect(48, ry, W - 96, rowH); }
+        drawFace(ctx, await photoImage(e.m), e.m, 84, cyy, 18, th);
+        ctx.fillStyle = th.ink; ctx.font = `600 17px ${UI}`; ctx.fillText(fitText(ctx, `${shortName(e.m)} · ${party(e.m)}`, 300), 114, cyy - 2);
+        const topK = [...e.kinds.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`; ctx.fillText(`${plural(e.list.length, "purchase")}${DT === "all" ? ` · mostly ${{ treasury: "U.S. Treasuries", muni: "municipal bonds", corp: "corporate bonds", bank: "bank notes and CDs", fund: "bond funds" }[topK]}` : ""}`, 114, cyy + 17);
+        const bx0 = 440, bw = W - 64 - 200 - bx0; let x = bx0;
+        for (const [k] of DEBT_KINDS) { const w = bw * (e.kinds.get(k) || 0) / maxV; if (w > 0) { ctx.fillStyle = KC[k]; ctx.fillRect(x, cyy - 8, w, 16); x += w; } }
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 17px ${MONO}`; ctx.fillText(usdEst(e.est.best), W - 64, cyy + 5); ctx.textAlign = "left";
+      }
+    } else {
+      // their bonds: one row per issue, biggest first
+      const gs = new Map();
+      for (const t of buys) {
+        const d = t.debt, k = `${d.name}|${d.coupon}|${d.mdate}`;
+        const g = gs.get(k) || { d, list: [] }; g.list.push(t); gs.set(k, g);
+      }
+      const rows = [...gs.values()].map((g) => ({ ...g, est: estOf(g.list) })).sort((a, b) => b.est.best - a.est.best);
+      const cols = [["ISSUER", 64], ["TYPE", 560], ["COUPON", 700], ["MATURES", 800], ["BOUGHT", W - 64]];
+      ctx.fillStyle = th.chip; ctx.beginPath(); ctx.roundRect(48, y - 4, W - 96, 32, 8); ctx.fill();
+      ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1px";
+      cols.forEach(([l, x], i) => { ctx.textAlign = i === cols.length - 1 ? "right" : "left"; ctx.fillText(l, x, y + 17); });
+      ctx.textAlign = "left"; ctx.letterSpacing = "0px";
+      // room for the rows, the "+N more issues" line and the note under them
+      const rowH = 38, n = Math.min(rows.length, Math.floor((H - 196 - (y + 30)) / rowH));
+      for (let i = 0; i < n; i++) {
+        const g = rows[i], ry = y + 30 + i * rowH, bl = ry + 25;
+        if (i % 2) { ctx.fillStyle = th.card; ctx.fillRect(48, ry, W - 96, rowH); }
+        ctx.fillStyle = KC[g.d.kind]; ctx.beginPath(); ctx.roundRect(64, ry + 13, 10, 12, 2); ctx.fill();
+        ctx.fillStyle = th.ink; ctx.font = `600 16px ${UI}`;
+        ctx.fillText(fitName(ctx, g.d.name, 600, 16, 12, 470), 84, bl);
+        ctx.fillStyle = th.ink2; ctx.font = `500 14px ${UI}`; ctx.fillText(DEBT_KINDS.find(([k]) => k === g.d.kind)[1].replace(" & CDs", ""), 560, bl);
+        ctx.font = `600 15px ${MONO}`; ctx.fillStyle = th.ink2;
+        ctx.fillText(g.d.coupon != null ? `${+g.d.coupon.toFixed(3)}%` : "–", 700, bl);
+        ctx.fillStyle = g.d.msrc === "likely" ? th.muted : th.ink2;  // grey: likely rather than stated or looked up
+        ctx.fillText(g.d.mdate ? fmtDate(g.d.mdate, { month: "short", year: "numeric" }) : "–", 800, bl);
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 15px ${MONO}`;
+        ctx.fillText(`${g.list.length === 1 ? amountShort(g.list[0]) : usdEst(g.est.best)}${g.list.length > 1 ? ` · ${g.list.length} buys` : ""}`, W - 64, bl); ctx.textAlign = "left";
+      }
+      if (rows.length > n) { ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; ctx.fillText(`+${rows.length - n} more issues`, 64, y + 30 + n * rowH + 22); }
+    }
+    ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`;
+    ctx.fillText(fitText(ctx, "Best estimates of the ranges. Maturity: from the filing or a CUSIP lookup (OpenFIGI); grey = likely; – = not given.", W - 128), 64, H - 140);
+    footer(ctx, W, H, th);
+    return null;
+  }
+
+  // --- Biggest buys: one person's largest buys in the period as a ring, each with what they also sold ---
+  // Amounts are the best estimates; the totals also show their likely range (7 times in 10). Logos come from
+  // Simple Icons where it has the brand; everything else gets a letter badge in the brand's colour.
+  // BRAND: ticker -> [colour, Simple Icons slug (or "ms" for Microsoft's squares), dark badge background, badge letters]
+  const BRAND = {
+    META: ["#0866FF", "meta"], MSFT: ["#7FBA00", "ms"], AMZN: ["#FF9900", "amazon", "#232F3E"], AAPL: ["#1D1D1F", "apple"],
+    NVDA: ["#76B900", "nvidia", "#111111"], GOOGL: ["#4285F4", "google"], GOOG: ["#4285F4", "google"], AVGO: ["#CC092F", "broadcom"],
+    TSLA: ["#CC0000", "tesla"], NFLX: ["#E50914", "netflix"], ADBE: ["#FA0F00", "adobe"], ORCL: ["#C74634", "oracle"],
+    INTC: ["#0071C5", "intel"], AMD: ["#ED1C24", "amd"], CSCO: ["#1BA0D7", "cisco"], IBM: ["#1F70C1", "ibm"], CRM: ["#00A1E0", "salesforce"],
+    PLTR: ["#101113", "palantir"], QCOM: ["#3253DC", "qualcomm"], UBER: ["#000000", "uber"], PYPL: ["#003087", "paypal"],
+    V: ["#1A1F71", "visa"], MA: ["#EB001B", "mastercard"], SHOP: ["#7AB55C", "shopify"], SPOT: ["#1DB954", "spotify"],
+    DIS: ["#113CCF", null, null, "D"], SBUX: ["#006241", "starbucks"], MCD: ["#DA291C", "mcdonalds"], KO: ["#F40009", "cocacola"],
+    PEP: ["#2151A1", "pepsi"], NKE: ["#111111", "nike"], WMT: ["#0071CE", "walmart"], TGT: ["#CC0000", "target"],
+    COST: ["#E31837", null, null, "C"], HD: ["#F96302", null, null, "HD"], LOW: ["#004990", null, null, "L"],
+    CMCSA: ["#6138F5", "nbc"], T: ["#00A8E0", "att"], VZ: ["#CD040B", "verizon"], BA: ["#0D2D6C", "boeing"],
+    JPM: ["#5C3D2E", null, null, "JPM"], GS: ["#6B9BD1", "goldmansachs"], BAC: ["#E31837", "bankofamerica"], WFC: ["#D71E28", "wellsfargo"],
+    UNH: ["#002677", null, null, "U"], LLY: ["#D52B1E", null, null, "L"], JNJ: ["#D51900", null, null, "J"], PFE: ["#0093D0", "pfizer"],
+    ABT: ["#0099D8", null, null, "A"], XOM: ["#ED1B2D", null, null, "X"], CVX: ["#0054A4", "chevron"],
+    CPAY: ["#E8541E", null, null, "C"], GWW: ["#D50032", null, null, "G"], FIS: ["#3BAA35", null, null, "FIS"],
+  };
+  const LOGO_CDN = "https://cdn.jsdelivr.net/npm/simple-icons@11.14.0/icons/";
+  const logoCache = new Map();
+  const loadLogo = (slug) => {
+    if (!logoCache.has(slug)) logoCache.set(slug, new Promise((res) => {
+      const im = new Image(), t = setTimeout(() => res(null), 4000);
+      im.crossOrigin = "anonymous"; im.onload = () => { clearTimeout(t); res(im); }; im.onerror = () => { clearTimeout(t); res(null); };
+      im.src = LOGO_CDN + slug + ".svg";
+    }));
+    return logoCache.get(slug);
+  };
+  const mixHex = (a, b, f) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * (1 - f) + parseInt(b.slice(i, i + 2), 16) * f).toString(16).padStart(2, "0")).join("");
+  const HOLD_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#e87ba4", "#6f4cc3", "#d4a017", "#2bb3c0", "#c0392b", "#5b8c2a", "#8e96a3"];
+  // one key per holding: the ticker, or the description without account numbers and share-class words
+  // descriptions without a ticker: drop owner codes in front ("DC Visa Inc"), account numbers, share-class words
+  const plainDesc = (t) => (t.a || "").toUpperCase().replace(/^[^A-Z0-9$]+/, "").replace(/^(SP|DC|JT)\s+/, "").replace(/\s+E\d{6,}.*$/, "")
+    .replace(/\bET\b/, "ETF").replace(/[,\s]+(UNSOLICITED|CL [A-Z]|COM|CMN|SHS|COMMON STOCK)\b.*$/, "").trim();
+  const holdingKey = (t) => (/^GOOG/.test(t.t || "") ? "GOOGL" : t.t) || plainDesc(t).slice(0, 48);  // Alphabet's share classes count as one
+  // brand by ticker (Alphabet's other share lines count as Alphabet), or by fund family for funds without one
+  const brandOf = (t) => BRAND[t.t] || (/^GOOG/.test(t.t || "") ? BRAND.GOOGL : null)
+    || (/VANGUARD/i.test(t.a || "") ? ["#96151D", null, null, "V"] : /ISHARES/i.test(t.a || "") ? ["#3A3F47", null, null, "iS"]
+    : /SPDR/i.test(t.a || "") ? ["#1F3A93", null, null, "S"] : null);
+  const titleCase = (x) => x.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase()).replace(/\bEtf\b/g, "ETF").replace(/\bS&p\b/g, "S&P");
+  function holdingInfo(t) {
+    const up = (t.a || "").toUpperCase();
+    const bond = !t.st && !/\bETF\b/.test(up) && /\bDUE\b|\d%|\bREV\b|\bBDS?\b|\bNOTES?\b|\bBONDS?\b|\bMUNI|\bLINKED\b|\bSTRUCTURED\b/.test(up);
+    const fund = !bond && (t.cls === "fund" || /\b(ETF|FUND|INDEX|TRUST|ISHARES|VANGUARD|SPDR)\b/.test(up));
+    let name;
+    if (t.st && t.st[1] !== "Funds") name = cleanName(t.st[0]).replace(/\s*-?\s*(American )?Depositary Shares?.*$/i, "").replace(/[,.]?\s+(Inc|Corp|Corporation|Ltd|Plc|Co)\.?$/i, "");
+    else if (/DIVIDEND APPRECIATION/.test(up)) name = "Vanguard Dividend ETF";
+    else if (/VANGUARD S&P 500/.test(up)) name = "Vanguard S&P 500 ETF";
+    else if (/COMMODITY/.test(up)) name = "Commodities ETF";
+    else if (/INTERNATIONAL TREASURY/.test(up)) name = "Intl. Treasury ETF";
+    else if (/U\.?S\.? TREASURY/.test(up)) name = "U.S. Treasury ETF";
+    else if (/\bLINKED\b|\bSTRUCTURED\b/.test(up)) name = titleCase(plainDesc(t).replace(/\b(FINANCE|BANK|LLC|PLC|INC|CORP|LINKED|NOTES?)\b.*$/, "").trim().split(" ").slice(0, 3).join(" ") || "Bank") + " linked note";
+    else if (bond) name = readableIssuer(plainDesc(t).split(/\s\d/)[0].replace(/\s+(B\/E|BE\/R|SER(IES)?\b|RFDG|DUE\b).*$/i, "").split(" ").slice(0, 4).join(" ")) + " bond";
+    else name = titleCase(plainDesc(t).split(" ").slice(0, 4).join(" "));
+    const badge = bond ? "$" : t.t ? t.t.slice(0, 4) : name.split(" ").filter((w) => /^[A-Z]/.test(w)).slice(0, 2).map((w) => w[0]).join("") || "•";
+    return { kind: bond ? "bond" : fund ? "fund" : "stock", name, badge };
+  }
+  async function drawHoldings(ctx, W, H, th) {
+    // By politician: one person's largest buys. By stock: the people who bought one stock, biggest buyers first.
+    const byStock = P.hby === "stock", tk = PE.ticker, m = byStock ? null : PE.member;
+    if (byStock ? !tk || !stocks[tk] : !m) return byStock ? "Pick a stock." : "Pick a politician.";
+    const since = windowStart();
+    const mine = trades.filter((t) => (byStock ? t.t === tk && !isBiz(members[t.m]) : t.m === m.i) && t.time >= since && t.side !== "O" && t.cls !== "option" && t.lo);
+    const by = new Map();
+    for (const t of mine) {
+      const k = byStock ? t.m : holdingKey(t);
+      if (k == null || k === "") continue;
+      const pm = members[t.m];
+      const g = by.get(k) || (byStock ? { k, m: pm, info: { name: `${shortName(pm)} · ${isExec(pm) ? pm.party : party(pm)}`, kind: "stock", badge: "" }, t: tk, first: t, b: 0, s: 0, nb: 0, ns: 0 }
+        : { k, info: holdingInfo(t), t: t.t, first: t, b: 0, s: 0, nb: 0, ns: 0 });
+      if (t.side === "B") { g.b += t.amt; g.nb++; } else { g.s += t.amt; g.ns++; }
+      by.set(k, g);
+    }
+    const all = [...by.values()], top = all.filter((g) => g.b > 0).sort((a, b) => b.b - a.b).slice(0, 15);
+    if (!top.length) return byStock ? `Nobody bought ${tk} in ${periodLong()}. Pick a longer period.` : `No buys by ${m.name} in ${periodLong()}. Pick a longer period.`;
+    const buys = mine.filter((t) => t.side === "B"), sells = mine.filter((t) => t.side === "S");
+    const eb = estOf(buys), es = estOf(sells), total = top.reduce((a, g) => a + g.b, 0);
+    const money = (v) => v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e8 ? `$${Math.round(v / 1e6)}M` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${Math.round(v / 1e3)}K` : `$${Math.round(v)}`;
+    // colours: the brand's, or the next palette colour; the ring uses a softer shade
+    let pi = 0;
+    const party3 = { D: 0, R: 0, I: 0 };
+    for (const g of top) {
+      if (byStock) {  // a colour of its own for each person (their party shows in the ring around their face)
+        g.col = HOLD_PALETTE[pi++ % HOLD_PALETTE.length]; g.photo = await photoImage(g.m);
+      } else {
+        const b = brandOf(g.first);
+        g.col = b ? b[0] : HOLD_PALETTE[pi++ % HOLD_PALETTE.length];
+        g.logo = b && b[1] && b[1] !== "ms" ? await loadLogo(b[1]) : null;
+        g.brand = b;
+      }
+      g.soft = mixHex(g.col, th.muted, 0.3);
+    }
+    const inP = P.window === "all" ? `since ${START_SHORT}` : P.window === "ytd" ? `in ${YEAR} so far` : `in ${periodLong()}`;
+    const stName = byStock ? cleanName(stocks[tk][0]) : "";
+    header(ctx, W, th, byStock ? `${tk} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}` : `${titleOf(m)} ${shortName(m)} · ${P.window === "all" ? `since ${START_SHORT}` : windowLabel()}`);
+    ctx.fillStyle = th.ink;
+    // a long company name: a smaller title first; only then whole words off the end, keeping at least two of the name's
+    let ttl = byStock ? `Who bought ${stName}` : `${lastName(m)}’s biggest buys`;
+    ctx.fillText(fitName(ctx, ttl, 800, 58, 38, W - 128, UI, 4), 64, 160);
+    ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
+    ctx.fillText(fitText(ctx, byStock ? `The ${top.length === 1 ? "buyer" : `${top.length} biggest buyers`} ${inP}, and how much each also sold`
+      : `${top.length === 1 ? "The largest buy" : `The ${top.length} largest buys`} ${inP}, and how much of each was also sold`, W - 128), 64, 200);
+    let g0Badge = null;  // the company's logo in the middle (By stock)
+    // ring
+    const CX = W / 2, CY = 600, RO = 228, RI = 146;
+    // one slice over 40%: centre it on the right, so the small ones spread down the left side instead of bunching at the top
+    let a = top.length > 1 && top[0].b / total > 0.4 ? -Math.PI * top[0].b / total : -Math.PI / 2;
+    for (const g of top) {
+      const sw = Math.PI * 2 * g.b / total; g.mid = a + sw / 2;
+      ctx.beginPath(); ctx.arc(CX, CY, RO, a, a + sw); ctx.arc(CX, CY, RI, a + sw, a, true); ctx.closePath();
+      ctx.fillStyle = g.soft; ctx.fill(); if (top.length > 1) { ctx.lineWidth = 3; ctx.strokeStyle = th.bg; ctx.stroke(); }
+      a += sw;
+    }
+    if (byStock) {
+      const b = brandOf({ t: tk, a: stocks[tk][0] }), r = RI - 18;
+      ctx.beginPath(); ctx.arc(CX, CY, r, 0, Math.PI * 2); ctx.fillStyle = th.card; ctx.fill();
+      const center = { brand: b || [th.line, null, null, tk.slice(0, 4)], info: { badge: tk.slice(0, 4) }, col: b ? b[0] : th.line, logo: b && b[1] && b[1] !== "ms" ? await loadLogo(b[1]) : null };
+      g0Badge = center;
+      ctx.fillStyle = th.ink; ctx.textAlign = "center"; ctx.font = `800 26px ${MONO}`; ctx.fillText(tk, CX, CY + 72);
+      ctx.fillStyle = th.muted; ctx.fillText(fitName(ctx, stName, 600, 14, 11, 2 * r - 30), CX, CY + 96); ctx.textAlign = "left";
+    } else drawFace(ctx, await photoHD(m), m, CX, CY, RI - 18, th);
+    // cards: right column for the right half of the ring, left for the rest, each in the order its slice sits
+    const CW = 252, CH = 60;
+    const right = top.filter((g) => Math.cos(g.mid) >= 0).sort((p, q) => Math.sin(p.mid) - Math.sin(q.mid));
+    const left = top.filter((g) => Math.cos(g.mid) < 0).sort((p, q) => Math.sin(p.mid) - Math.sin(q.mid));
+    for (const [col, sgn] of [[right, 1], [left, -1]]) {
+      col.forEach((g) => { g.side = sgn; g.ty = CY + (RO + 20) * Math.sin(g.mid); });
+      if (col.length > 9) {  // crowded (one buy dwarfs the rest): use the full height, with shorter cards
+        const top0 = 262, bot = CY + RO + 140 - 40, step = (bot - top0) / (col.length - 1), ch = Math.min(CH, step - 6);
+        col.forEach((g, i) => { g.ty = top0 + i * step; g.ch = ch; });
+      } else if (col.length > 6) { const y0 = CY - RO - 92, step = (2 * RO + 184) / (col.length - 1); col.forEach((g, i) => { g.ty = y0 + i * step; }); }
+      else {
+        for (let i = 1; i < col.length; i++) col[i].ty = Math.max(col[i].ty, col[i - 1].ty + CH + 16);
+        const over = col.length ? col[col.length - 1].ty - (CY + RO + 92) : 0;  // keep the column above the facts
+        if (over > 0) col.forEach((g) => { g.ty -= over; });
+      }
+    }
+    const badge = (g, x, y, z) => {
+      const b = g.brand || [g.col];
+      if (b[1] === "ms") {  // Microsoft's four squares
+        ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.roundRect(x, y, z, z, 8); ctx.fill(); ctx.strokeStyle = th.grid; ctx.lineWidth = 1; ctx.stroke();
+        const q = z * 0.2, gp = z * 0.04, x0 = x + z / 2 - q - gp / 2, y0 = y + z / 2 - q - gp / 2;
+        [["#F25022", 0, 0], ["#7FBA00", 1, 0], ["#00A4EF", 0, 1], ["#FFB900", 1, 1]].forEach(([c, i, j]) => { ctx.fillStyle = c; ctx.fillRect(x0 + i * (q + gp), y0 + j * (q + gp), q, q); });
+        return;
+      }
+      ctx.fillStyle = b[2] || b[0]; ctx.beginPath(); ctx.roundRect(x, y, z, z, 8); ctx.fill();
+      if (g.logo) {  // single-colour SVG: tint it on a scratch canvas (white on the brand colour, or the brand colour on a dark badge)
+        const n = Math.round(z * 1.2), off = document.createElement("canvas"); off.width = off.height = n;
+        const oc = off.getContext("2d"); oc.drawImage(g.logo, 0, 0, n, n); oc.globalCompositeOperation = "source-in";
+        oc.fillStyle = b[2] ? b[0] : "#ffffff"; oc.fillRect(0, 0, n, n);
+        ctx.drawImage(off, x + z * 0.2, y + z * 0.2, z * 0.6, z * 0.6); return;
+      }
+      const txt = b[3] || g.info.badge;
+      ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = `800 ${txt.length > 3 ? z * 0.3 : txt.length > 2 ? z * 0.36 : txt.length > 1 ? z * 0.42 : z * 0.56}px ${UI}`; ctx.fillText(txt, x + z / 2, y + z / 2 + 1);
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    };
+    if (byStock && g0Badge) badge(g0Badge, CX - 44, CY - 74, 88);  // the company's logo in the middle of the ring
+    for (const g of top) {
+      const ch = g.ch || CH, small = ch < 56;  // small: name on top, amount and what was sold on one line under it
+      const x0 = g.side > 0 ? W - 40 - CW : 40, y0 = g.ty - ch / 2, ax = g.side > 0 ? x0 : x0 + CW;
+      const ex = CX + (RO + 3) * Math.cos(g.mid), ey = CY + (RO + 3) * Math.sin(g.mid);
+      ctx.strokeStyle = g.soft; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ax - g.side * 16, g.ty); ctx.lineTo(ax, g.ty); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ex, ey, 3.5, 0, Math.PI * 2); ctx.fillStyle = g.soft; ctx.fill();
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x0, y0, CW, ch, 10); ctx.fill();
+      ctx.fillStyle = g.soft; ctx.beginPath(); ctx.roundRect(x0, y0, 6, ch, [10, 0, 0, 10]); ctx.fill();
+      const z = small ? ch - 14 : 40;
+      if (byStock) drawFace(ctx, g.photo, g.m, x0 + 16 + z / 2, y0 + ch / 2, z / 2 - 1, th); else badge(g, x0 + 16, y0 + (ch - z) / 2, z);
+      const tx = x0 + 26 + z;
+      ctx.fillStyle = th.ink2;
+      ctx.fillText(fitName(ctx, g.info.name, 600, 12.5, 10, CW - (tx - x0) - 10), tx, y0 + (small ? 16 : 18));
+      ctx.fillStyle = th.ink; ctx.font = `700 ${small ? 16 : 19}px ${MONO}`; ctx.fillText(money(g.b), tx, y0 + (small ? 35 : 39));
+      const more = g.s > g.b, aw = small ? ctx.measureText(money(g.b)).width + 8 : 0;
+      ctx.fillStyle = more ? th.down : th.muted; ctx.font = `${more ? 700 : 500} 11.5px ${UI}`;
+      ctx.fillText(fitText(ctx, g.s >= 500 ? `sold ${money(g.s)}${more ? (small ? " · more" : " · more than bought") : ""}` : "none sold", CW - (tx - x0) - 10 - aw), tx + aw, y0 + (small ? 35 : 53));
+    }
+    // three facts
+    const fy = CY + RO + 140, gap = 20, fw = (W - 96 - 2 * gap) / 3, fh = 176, net = eb.best - es.best;
+    const kinds = { stock: 0, fund: 0, bond: 0 }; for (const g of all) kinds[g.info.kind] += g.b;
+    const share = (v) => Math.round(v / (eb.best || 1) * 100) + "%";
+    const likely = (e) => e.exact ? money(e.best) : `${money(e.lo)}–${money(e.hi)}`;
+    const pSum = (k) => all.filter((g) => (g.m && g.m.party) === k).reduce((a, g) => a + g.b, 0);
+    const third = byStock ? [th.ink, `${share(pSum("D"))} · ${share(pSum("R"))}`, "Democrats · Republicans", `Democrats bought ${money(pSum("D"))} and Republicans ${money(pSum("R"))} of it ${inP}.`]
+      : kinds.bond / (eb.best || 1) >= 0.1 ? ["#C98F00", money(kinds.bond), "Went into bonds and notes", `Bonds and bank notes took ${share(kinds.bond)} of the buying; stocks ${share(kinds.stock)}, funds ${share(kinds.fund)}.`]
+      : kinds.fund / (eb.best || 1) >= 0.1 ? [th.up, money(kinds.fund), "Went into funds and ETFs", `Funds and ETFs took ${share(kinds.fund)} of the buying; single stocks ${share(kinds.stock)}.`]
+      : [th.up, share(total), `In these ${top.length}`, `Of all the buying ${inP}, ${share(total)} went into the ${top.length === 1 ? "holding" : `${top.length} holdings`} shown.`];
+    const facts = [
+      [th.line, money(eb.best), "Bought", `Best estimate from ${buys.length.toLocaleString()} buy${buys.length === 1 ? "" : "s"}${eb.exact ? "" : `, likely ${likely(eb)}`}. The filings' ranges alone allow ${money(eb.min)}–${money(eb.max)}.`],
+      [th.down, money(es.best), "Sold in the same period", sells.length ? `${sells.length.toLocaleString()} sale${sells.length === 1 ? "" : "s"}${es.exact ? "" : `, likely ${likely(es)}`}. Net, about ${money(Math.abs(net))} more ${net >= 0 ? "went in than came out" : "came out than went in"}.` : "No sales in this period."],
+      third,
+    ];
+    facts.forEach(([c, big, head, body], i) => {
+      const x = 48 + i * (fw + gap);
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, fy, fw, fh, 14); ctx.fill();
+      ctx.fillStyle = c; ctx.font = `700 40px ${MONO}`; ctx.fillText(big, x + 20, fy + 54);
+      ctx.fillStyle = th.ink; ctx.font = `700 17px ${UI}`; ctx.fillText(head, x + 20, fy + 84);
+      ctx.fillStyle = th.ink2; ctx.font = `500 14px ${UI}`;
+      drawWrapped(ctx, body, x + 20, fy + 112, fw - 40, 20, 3);
+    });
+    // notes and footer
+    const lastFiled = mine.reduce((mx, t) => t.fd && t.fd > mx ? t.fd : mx, "");
+    ctx.fillStyle = th.muted; ctx.font = `500 13px ${UI}`;
+    ctx.fillText(fitText(ctx, `Source: ${byStock ? "STOCK Act and OGE transaction reports" : isExec(m) ? "OGE Form 278-T transaction reports" : "STOCK Act periodic transaction reports"}${lastFiled ? `, filed through ${fmtDate(lastFiled)}` : ""} (${mine.length.toLocaleString()} trades). Options are left out.`, W - 128), 64, H - 166);
+    ctx.fillText(fitText(ctx, "Best estimates place each range where trades with known exact amounts usually sit; “likely” totals hold the real figure 7 times in 10.", W - 128), 64, H - 146);
+    footer(ctx, W, H, th);
+    return null;
+  }
+
+  // --- Public signals: stocks Congress bought, scored with contracts, lobbying and upcoming hearings ---
+  // data from signals.js (pipeline/fetch_signals.py); each column is one signal, its cell shaded by the
+  // points it earned; the score adds them up (0-100)
+  async function drawSignals(ctx, W, H, th) {
+    const sig = SIGNALS;
+    if (!sig || !sig.stocks || !sig.stocks.length) return "Public signals aren't available yet.";
+    header(ctx, W, th, `Public signals · stocks bought in the last ${sig.buy_days} days`);
+    ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`; ctx.fillText("Public signals", 64, 160);
+    ctx.fillStyle = th.ink2; ctx.font = `500 21px ${UI}`;
+    ctx.fillText(fitText(ctx, "Stocks members are net buying, scored with contracts, lobbying, hearings and more", W - 128), 64, 200);
+    const pct = (v) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.round(Math.abs(v) * 100) + "%";
+    const rows = sig.stocks.slice(0, 9), short = (v) => v >= 1e9 ? "$" + (v / 1e9).toFixed(1) + "B" : v >= 1e8 ? "$" + Math.round(v / 1e6) + "M" : v >= 1e6 ? "$" + (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? "$" + Math.round(v / 1e3) + "K" : "$" + Math.round(v);
+    // columns: label, x, width, max points, the row's points, its text, a second line
+    const cols = [
+      ["NET BUYERS", 250, 126, 40, (r) => r.points.congress + r.points.cluster, (r) => String(r.members), (r) => `${pct(r.npr_trades)}  ${pct(r.npr_dollars)}`],
+      ["COMMITTEE", 380, 94, 20, (r) => r.points.committee, (r) => r.committee ? String(r.committee) : "–", () => ""],
+      ["CONTRACTS", 480, 104, 15, (r) => r.points.contracts, (r) => r.contracts ? short(r.contracts) : "–", () => ""],
+      ["LOBBYING", 590, 104, 15, (r) => r.points.lobbying, (r) => r.lobbying ? short(r.lobbying) : "–", (r) => (r.issues || [])[0] || ""],
+      ["HEARINGS", 700, 90, 10, (r) => r.points.hearings, (r) => r.hearings_named.length + r.hearings_sector.length ? String(r.hearings_named.length + r.hearings_sector.length) : "–", (r) => r.hearings_named.length ? "names it" : r.hearings_sector.length ? "its industry" : ""],
+      ["LEADERS", 796, 74, 10, (r) => r.points.leaders || 0, (r) => (r.leaders || []).length ? String(new Set(r.leaders.map((p) => p.who)).size) : "–", (r) => (r.leaders || []).length ? r.leaders[0].who.replace(/ Jr\.$/, "").split(" ").pop() + (new Set(r.leaders.map((p) => p.who)).size > 1 ? " +" : "") : ""],
+      ["INSIDERS", 876, 86, 10, (r) => r.points.insiders || 0, (r) => r.insiders ? String(r.insiders) : "–", (r) => r.insiders ? short(r.insider_value) : ""],
+    ];
+    const top = 230, rowH = 84, X0 = 48, R0 = top + 36;  // R0: first row, below the labels and the net-buying legend
+    ctx.fillStyle = th.muted; ctx.font = `700 12px ${UI}`; ctx.letterSpacing = "1px";
+    ctx.fillText("STOCK", 64, top + 8);
+    for (const [label, x] of cols) ctx.fillText(label, x + 8, top + 8);
+    // legend for the two figures under each net-buyer count
+    const NB = cols[0][1], DX = 60;
+    ctx.letterSpacing = "0px"; ctx.font = `600 12px ${UI}`;
+    ctx.fillStyle = th.ink2; ctx.fillText("trades", NB + 8, top + 24);
+    ctx.fillText("dollars", NB + 8 + DX, top + 24);
+    ctx.fillStyle = th.muted; ctx.font = `700 12px ${UI}`; ctx.letterSpacing = "1px";
+    ctx.textAlign = "right"; ctx.fillText("SCORE", W - 64, top + 8); ctx.textAlign = "left"; ctx.letterSpacing = "0px";
+    rows.forEach((r, k) => {
+      const y = R0 + k * rowH;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(X0, y, W - 2 * X0, rowH - 10, 14); ctx.fill();
+      ctx.fillStyle = th.ink; ctx.font = `800 24px ${MONO}`; ctx.fillText(r.t, 64, y + 34);
+      ctx.fillStyle = th.ink2; let nm = cleanName(r.name); ctx.font = `500 15px ${UI}`;
+      ctx.fillText(fitName(ctx, nm, 500, 15, 11, 178), 64, y + 58);
+      for (const [, x, w, max, pts, val, sub] of cols) {
+        const f = Math.max(0, Math.min(1, pts(r) / max));
+        ctx.save(); ctx.fillStyle = th.line; ctx.globalAlpha = f ? 0.1 + 0.32 * f : 0; ctx.beginPath(); ctx.roundRect(x, y + 8, w, rowH - 26, 9); ctx.fill(); ctx.restore();
+        ctx.fillStyle = f ? th.ink : th.muted; ctx.font = `700 21px ${MONO}`; ctx.fillText(fitText(ctx, val(r), w - 16), x + 8, y + 34);
+        if (x === NB) {  // net buying by trades, then by dollars, as in the legend: green when buying wins, red when selling does
+          const sign = (v) => v > 0 ? th.up : v < 0 ? th.down : th.ink2;
+          ctx.font = `700 16px ${UI}`;
+          ctx.fillStyle = sign(r.npr_trades); ctx.fillText(pct(r.npr_trades), x + 8, y + 54);
+          ctx.fillStyle = sign(r.npr_dollars); ctx.fillText(pct(r.npr_dollars), x + 8 + DX, y + 54);
+          continue;
+        }
+        ctx.fillStyle = th.muted; fitSize(ctx, sub(r), (z) => `500 ${z}px ${UI}`, 13, w - 16, 11); ctx.fillText(fitText(ctx, sub(r), w - 16), x + 8, y + 54);
+      }
+      // the score: a bar and the number
+      const bx = 970, bw = W - 64 - bx;
+      ctx.fillStyle = th.chip || th.grid; ctx.beginPath(); ctx.roundRect(bx, y + 46, bw, 8, 4); ctx.fill();
+      ctx.fillStyle = th.line; ctx.beginPath(); ctx.roundRect(bx, y + 46, Math.max(4, bw * r.score / 100), 8, 4); ctx.fill();
+      ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `800 26px ${MONO}`; ctx.fillText(String(Math.round(r.score)), W - 64, y + 34); ctx.textAlign = "left";
+    });
+    // who is behind the top scores: the members buying, well-known figures posting about it, company insiders buying
+    const byId = new Map(members.map((m) => [m.id, m])), notes = [];
+    // SEC filings list people as "Last First Middle": show "First Last" (firms stay as they are)
+    const insiderName = (n) => { const p = n.replace(/\s*\(.*$/, "").split(" "); return p.length > 1 && !/\b(Inc|LLC|LP|L\.P\.|Ltd|Fund|Corp|Trust|Partners|Capital|Holdings)\b/i.test(n) ? `${p[1]} ${p[0]}` : p.join(" "); };
+    for (const r of rows.slice(0, 3)) {
+      const big = new Map((r.unusual || []).map(([id, x]) => [id, x]));  // net buys far above the person's usual trade
+      const tag = (m) => big.has(m.id) ? `${shortName(m)} (${big.get(m.id) >= 10 ? Math.round(big.get(m.id)) : big.get(m.id).toFixed(1)}× usual size)` : shortName(m);
+      const ms = (r.who || []).map((i) => byId.get(i)).filter((m) => m && !isBiz(m)).slice(0, 4);
+      if (ms.length) notes.push([r.t, `bought by ${ms.map(tag).join(", ")}${r.members > ms.length ? ` and ${r.members - ms.length} more` : ""}`]);
+    }
+    for (const r of rows) {
+      const ls = r.leaders || [], who = [...new Set(ls.map((p) => p.who))];
+      if (ls.length) notes.push([r.t, `${who.slice(0, 3).join(", ")} named ${cleanName(r.name)} in ${ls.length === 1 ? `a post on ${fmtDate(ls[0].date, { day: "numeric", month: "short" })}` : `${ls.length} posts in the last ${sig.leader_days} days`}`]);
+    }
+    for (const r of rows) if (r.insiders) notes.push([r.t, `${r.insider_names.map(insiderName).join(", ")}${r.insiders > r.insider_names.length ? ` and ${r.insiders - r.insider_names.length} more` : ""} (company insiders) bought ${short(r.insider_value)}`]);
+    for (const r of rows) if (r.sold >= r.bought * 0.5 && r.sold > 0) notes.push([r.t, `also sold: ${short(r.sold)} by ${r.sellers} ${r.sellers === 1 ? "person" : "people"}, against ${short(r.bought)} bought`]);
+    // the hearings behind the scores, soonest first
+    const ids = [...new Set(rows.flatMap((r) => [...r.hearings_named, ...r.hearings_sector]))];
+    const hs = ids.map((i) => sig.hearings[i]).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
+    let y = R0 + rows.length * rowH + 18;
+    if (hs.length) {
+      ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1.2px"; ctx.fillText("UPCOMING HOUSE HEARINGS", 64, y); ctx.letterSpacing = "0px";
+      hs.forEach((h, k) => {
+        const yy = y + 30 + k * 28, tks = rows.filter((r) => r.hearings_named.includes(h.id) || r.hearings_sector.includes(h.id)).map((r) => r.t).slice(0, 3).join(", ");
+        ctx.fillStyle = th.ink; ctx.font = `700 16px ${MONO}`; ctx.fillText(fmtDate(h.date, { day: "numeric", month: "short" }), 64, yy);
+        ctx.fillStyle = th.ink2; ctx.font = `500 16px ${UI}`;
+        ctx.fillText(fitText(ctx, `${h.title} · ${h.committee.replace(/^(Subcommittee on|Committee on)\s*/, "")}`, W - 128 - 90 - 150), 154, yy);
+        ctx.textAlign = "right"; ctx.fillStyle = th.line; ctx.font = `700 15px ${MONO}`; ctx.fillText(tks, W - 64, yy); ctx.textAlign = "left";
+      });
+    } else {
+      ctx.fillStyle = th.muted; ctx.font = `500 16px ${UI}`;
+      ctx.fillText(`No House hearings in the next ${sig.hearing_days} days touch these stocks (${sig.hearing_count} scheduled in all).`, 64, y + 4);
+    }
+    if (notes.length) {
+      y += hs.length ? 30 + hs.length * 28 + 30 : 46;
+      ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1.2px"; ctx.fillText("BEHIND THE SCORES", 64, y); ctx.letterSpacing = "0px";
+      const room = Math.max(0, Math.floor((H - 200 - (y + 30)) / 30) + 1);
+      notes.slice(0, Math.min(7, room)).forEach(([t, text], k) => {
+        const yy = y + 30 + k * 30;
+        ctx.fillStyle = th.line; ctx.font = `700 16px ${MONO}`; ctx.fillText(t, 64, yy);
+        ctx.fillStyle = th.ink2; ctx.font = `500 16px ${UI}`; ctx.fillText(fitText(ctx, text, W - 128 - 80), 144, yy);
+      });
+    }
+    // what the score counts
+    ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
+    ctx.fillText(fitText(ctx, "Net buyers: each person's buys minus sells, on a log scale and against their usual trade size, up to 40 (or 30 off).", W - 128), 64, H - 162);
+    ctx.fillText(fitText(ctx, "Trades and dollars: net buying by number of trades and by money, green when buying wins, red when selling does. Out of 100.", W - 128), 64, H - 140);
+    footer(ctx, W, H, th);
+    return null;
+  }
+
+  // --- Buying spikes: stocks several members suddenly bought within a month, far more than usual ---
+  async function drawSpikes(ctx, W, H, th) {
+    const since = windowStart(), seat = (t) => !isBiz(members[t.m]);
+    const by = new Map();
+    for (const t of trades) {
+      if (!t.spike || !t.st || t.time < since || !seat(t) || !PRICES.px[t.t]) continue;
+      const g = by.get(t.t) || { t: t.t, st: t.st, last: t, s: t.spike };
+      if (t.time > g.last.time) { g.last = t; g.s = t.spike; }
+      by.set(t.t, g);
+    }
+    if (!by.size) return `No buying spikes in ${periodLong()}. Pick a longer period.`;
+    for (const g of by.values()) {
+      g.buys = trades.filter((t) => t.t === g.t && t.side === "B" && seat(t) && Math.abs(t.time - g.last.time) <= SPIKE_HALF);
+      g.ms = [...new Set(g.buys.map((t) => t.m))];
+      g.est = estOf(g.buys); g.by = new Map(g.ms.map((mi) => [mi, estOf(g.buys.filter((t) => t.m === mi))]));
+      g.ms.sort((a, b) => g.by.get(b).best - g.by.get(a).best);  // biggest buyers first
+      g.since = weighted(g.buys, (t) => eff(t, t.T.r)); g.spy = weighted(g.buys, (t) => t.T.sr);
+      const pb = g.buys.filter((t) => t.amt > 0 && t.T.ep), sh = pb.reduce((a, t) => a + t.amt / t.T.ep, 0);
+      g.avg = sh > 0 ? pb.reduce((a, t) => a + t.amt, 0) / sh : null;
+    }
+    const rows = [...by.values()].sort((a, b) => b.last.time - a.last.time);
+    const fi = rows.findIndex((g) => g.t === P.ticker);  // a spike picked from the list comes first
+    if (fi > 0) rows.unshift(rows.splice(fi, 1)[0]);
+    header(ctx, W, th, `Unusual buying spikes · ${periodLong()}`);
+    ctx.fillStyle = th.ink; ctx.font = `800 58px ${UI}`; ctx.fillText("Unusual congressional buying", 64, 160);
+    ctx.fillStyle = th.ink2; ctx.font = `500 22px ${UI}`;
+
+
+    // the spike window: a shaded band on the price line, the buys as dots
+    const chart = (g, x, y, w, h, big) => {
+      const s = PRICES.px[g.t], c = idxOfDate(g.last.d), e = lastIdx(s);
+      const i0 = Math.max(0, c - (big ? 130 : 90)), i1 = Math.min(e, c + (big ? 170 : 120));
+      const RA = big ? 96 : 0, BA = big ? 28 : 0, pw = w - RA, ph = h - BA;  // room for the price scale and dates
+      const sp = sparkline(ctx, s, i0, i1, x, y, pw, ph, th.line, { width: big ? 3 : 2, fill: th.area });
+      if (!sp) return;
+      const a = sp.X(Math.max(i0, idxOfDate(new Date(g.last.time - SPIKE_HALF).toISOString().slice(0, 10)))), b = sp.X(Math.min(i1, idxOfDate(new Date(g.last.time + SPIKE_HALF).toISOString().slice(0, 10))));
+      ctx.fillStyle = th.up; ctx.globalAlpha = 0.12; ctx.fillRect(a, y, Math.max(4, b - a), ph); ctx.globalAlpha = 1;
+      const tags = [];
+      const now = s[e] ?? s[i1], avg = g.avg != null && g.avg >= sp.lo && g.avg <= sp.hi ? g.avg : null;
+      if (big) {
+        // price scale on the right: light gridlines and labels, a frame line, and month labels below
+        const raw = (sp.hi - sp.lo) / 4, p10 = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 2.5, 5, 10].map((k) => k * p10).find((v) => v >= raw);
+        const ticks = [];
+        for (let v = Math.ceil(sp.lo / step) * step; v <= sp.hi; v += step) ticks.push(v);
+        ctx.strokeStyle = th.grid; ctx.lineWidth = 1;
+        for (const v of ticks) { ctx.beginPath(); ctx.moveTo(x, sp.Y(v)); ctx.lineTo(x + pw, sp.Y(v)); ctx.stroke(); }
+        ctx.strokeStyle = th.ink2; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(x + pw, y); ctx.lineTo(x + pw, y + ph); ctx.lineTo(x, y + ph); ctx.stroke(); ctx.globalAlpha = 1;
+        const nowY = sp.Y(now), avgY = avg != null ? sp.Y(avg) : null;
+        ctx.font = `600 14px ${MONO}`; ctx.fillStyle = th.muted; ctx.textBaseline = "middle";
+        for (const v of ticks) { const ty = sp.Y(v); if (Math.abs(ty - nowY) < 16 || (avgY != null && Math.abs(ty - avgY) < 16)) continue; ctx.fillText(price(v), x + pw + 10, ty); }
+        ctx.textBaseline = "alphabetic";
+        let lastMonth = "", lastX = -1e9;
+        ctx.font = `500 14px ${UI}`; ctx.fillStyle = th.ink2; ctx.textAlign = "center";
+        for (let k = i0 + 1; k <= i1; k++) {
+          const m = PRICES.dates[k].slice(0, 7);
+          if (m === PRICES.dates[k - 1].slice(0, 7)) continue;
+          const mx = sp.X(k); if (mx - lastX < 50 || mx > x + pw - 16) continue;
+          ctx.strokeStyle = th.ink2; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(mx, y + ph); ctx.lineTo(mx, y + ph + 5); ctx.stroke(); ctx.globalAlpha = 1;
+          ctx.fillText(fmtDate(PRICES.dates[k], { month: "short" }) + (m.endsWith("-01") || lastMonth === "" ? " " + m.slice(2, 4) : ""), mx, y + ph + 21);
+          lastMonth = m; lastX = mx;
+        }
+        ctx.textAlign = "left";
+        tags.push({ y: nowY, text: price(now), fill: th.line, ink: th.card });
+        if (avgY != null) tags.push({ y: avgY, text: "Avg " + price(avg), fill: th.card, ink: th.ink, stroke: th.ink2 });
+      }
+      // the spike buyers' average buy price, dashed across the chart
+      if (avg != null) {
+        ctx.save(); ctx.strokeStyle = th.ink2; ctx.globalAlpha = 0.7; ctx.lineWidth = big ? 1.5 : 1.2; ctx.setLineDash(big ? [7, 6] : [5, 5]);
+        ctx.beginPath(); ctx.moveTo(x, sp.Y(avg)); ctx.lineTo(x + pw, sp.Y(avg)); ctx.stroke(); ctx.restore();
+      }
+      for (const t of g.buys) {
+        const k = idxOfDate(t.d); if (k < i0 || k > i1) continue;
+        ctx.beginPath(); ctx.arc(sp.X(k), sp.Y(s[k] ?? t.T.ep), big ? 7 : 5, 0, Math.PI * 2); ctx.fillStyle = th.up; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = th.card; ctx.stroke();
+      }
+      // tags on the price scale: today's close and the average buy (kept apart when they're close)
+      if (tags.length === 2 && Math.abs(tags[0].y - tags[1].y) < 28) { const up = tags[1].y < tags[0].y; tags[1].y = tags[0].y + (up ? -28 : 28); }
+      ctx.font = `700 14px ${MONO}`; ctx.textBaseline = "middle";
+      for (const t of tags) {
+        const tw = Math.max(80, ctx.measureText(t.text).width + 16);
+        ctx.fillStyle = t.fill; ctx.beginPath(); ctx.roundRect(x + pw + 4, t.y - 12, tw, 24, 5); ctx.fill();
+        if (t.stroke) { ctx.strokeStyle = t.stroke; ctx.lineWidth = 1.5; ctx.stroke(); }
+        ctx.fillStyle = t.ink; ctx.fillText(t.text, x + pw + 12, t.y + 1);
+      }
+      ctx.textBaseline = "alphabetic";
+    };
+
+    // the featured spike
+    const f = rows[0], fy = 236;
+    ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(48, fy, W - 96, 560, 20); ctx.fill();
+    ctx.fillStyle = th.ink; ctx.font = `800 40px ${MONO}`; ctx.fillText(f.t, 76, fy + 56);
+    const tw = ctx.measureText(f.t).width;
+    ctx.fillStyle = th.ink2; ctx.fillText(fitName(ctx, cleanName(f.st[0]) + (f.st[5] ? " · S&P 500" : ""), 600, 22, 16, W - 96 - 60 - tw - 200), 76 + tw + 18, fy + 54);
+    if (f.since != null) { ctx.textAlign = "right"; ctx.fillStyle = f.since >= 0 ? th.up : th.down; ctx.font = `800 34px ${MONO}`; ctx.fillText(pct(f.since), W - 76, fy + 56); ctx.textAlign = "left"; }
+    ctx.fillStyle = th.ink; ctx.font = `800 26px ${MONO}`; ctx.fillText(`Bought ${estText(f.est)}`, 76, fy + 94);
+    ctx.fillStyle = th.muted; ctx.font = `500 18px ${UI}`; ctx.fillText(fitText(ctx, `Usually ${f.s.usual < 1 ? "under 1 member" : f.s.usual.toFixed(1) + " members"} a month${f.spy != null ? ` · S&P 500 ${pct(f.spy)} over the same days` : ""}`, W - 152), 76, fy + 124);
+    chart(f, 76, fy + 132, W - 152, 290, true);
+    const fimgs = await Promise.all(f.ms.slice(0, 9).map((mi) => photoImage(members[mi])));
+    const fr = 26, fw = (W - 152) / Math.min(9, Math.max(1, f.ms.length));
+    f.ms.slice(0, 9).forEach((mi, k) => {
+      const cx = 76 + k * fw + Math.min(fw, 110) / 2;
+      drawFace(ctx, fimgs[k], members[mi], cx, fy + 460, fr, th);
+      ctx.fillStyle = th.ink2; ctx.font = `600 14px ${UI}`; ctx.textAlign = "center"; ctx.fillText(fitText(ctx, lastName(members[mi]), Math.min(fw, 110) - 4), cx, fy + 510);
+      ctx.fillStyle = th.muted; ctx.font = `600 13px ${MONO}`; ctx.fillText(fitText(ctx, estText(f.by.get(mi)), Math.min(fw, 110) - 2), cx, fy + 530); ctx.textAlign = "left";
+    });
+    if (f.ms.length > 9) { ctx.fillStyle = th.muted; ctx.font = `600 15px ${UI}`; ctx.textAlign = "right"; ctx.fillText(`+${f.ms.length - 9} more`, W - 76, fy + 548); ctx.textAlign = "left"; }
+
+    // the next spikes, as tiles
+    const rest = rows.slice(1, 5), ty = fy + 580, th2 = (H - 150 - ty - 16) / 2, tw2 = (W - 96 - 16) / 2;
+    const imgs = await Promise.all(rest.map((g) => Promise.all(g.ms.slice(0, 5).map((mi) => photoImage(members[mi])))));
+    rest.forEach((g, k) => {
+      const x = 48 + (k % 2) * (tw2 + 16), y = ty + Math.floor(k / 2) * (th2 + 16);
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, y, tw2, th2, 16); ctx.fill();
+      ctx.fillStyle = th.ink; ctx.font = `800 26px ${MONO}`; ctx.fillText(g.t, x + 20, y + 38);
+      if (g.since != null) { ctx.textAlign = "right"; ctx.fillStyle = g.since >= 0 ? th.up : th.down; ctx.font = `700 22px ${MONO}`; ctx.fillText(pct(g.since), x + tw2 - 20, y + 38); ctx.textAlign = "left"; }
+      ctx.fillStyle = th.ink; ctx.font = `700 16px ${MONO}`; ctx.textAlign = "right"; ctx.fillText(`Bought ${estText(g.est)}`, x + tw2 - 20, y + 62); ctx.textAlign = "left";
+      const aw = ctx.measureText(`Bought ${estText(g.est)}`).width;
+      ctx.fillStyle = th.ink2; ctx.fillText(fitName(ctx, cleanName(g.st[0]), 500, 15, 12, tw2 - 56 - aw), x + 20, y + 62);
+      ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`; // the average buy and today's price as two pills on the right, styled like the main chart's tags
+      const nowPx = PRICES.px[g.t][lastIdx(PRICES.px[g.t])];
+      const pills = [g.avg != null && { text: "Avg " + price(g.avg), fill: th.card, ink: th.ink, stroke: th.ink2 }, { text: "Now " + price(nowPx), fill: th.line, ink: th.card }].filter(Boolean);
+      ctx.font = `700 13px ${MONO}`;
+      let px = x + tw2 - 20;
+      for (const pl of [...pills].reverse()) {
+        const pw2 = ctx.measureText(pl.text).width + 14; px -= pw2;
+        ctx.fillStyle = pl.fill; ctx.beginPath(); ctx.roundRect(px, y + 70, pw2, 20, 5); ctx.fill();
+        if (pl.stroke) { ctx.strokeStyle = pl.stroke; ctx.lineWidth = 1.2; ctx.stroke(); }
+        ctx.fillStyle = pl.ink; ctx.textBaseline = "middle"; ctx.fillText(pl.text, px + 7, y + 80.5); ctx.textBaseline = "alphabetic";
+        px -= 6;
+      }
+      ctx.fillStyle = th.muted; ctx.font = `500 14px ${UI}`;
+      ctx.fillText(fitText(ctx, `${g.ms.length} members · ${fmtDate(g.last.d, { month: "short", year: "numeric" })}`, px - (x + 20) - 6), x + 20, y + 84);
+      chart(g, x + 20, y + 96, tw2 - 40, th2 - 96 - 58, false);
+      g.ms.slice(0, 5).forEach((mi, j) => drawFace(ctx, imgs[k][j], members[mi], x + 38 + j * 44, y + th2 - 30, 17, th));
+      if (g.ms.length > 5) { ctx.fillStyle = th.muted; ctx.font = `600 14px ${UI}`; ctx.fillText(`+${g.ms.length - 5}`, x + 38 + 5 * 44 - 10, y + th2 - 25); }
+    });
+    footer(ctx, W, H, th, ["A spike: 3+ members buying within about a month, when that many would happen by chance less than 1 time in 20.",
+      "Shaded = the spike's month; dots = their buys; dashed = their average buy price."]);
+    return null;
+  }
+
+  // --- Leaderboard: the best politicians to copy, by points ---
+  async function drawLeaders(ctx, W, H, th) {
+    const from = Math.max(windowStart(), Date.parse(D.start + "T00:00:00Z")), fromISO = new Date(from).toISOString().slice(0, 10);
+    const rows = followScores(from);
+    if (rows.length < 3) return `Not enough buys to rank anyone in ${periodLong()}: each politician needs ${FOLLOW_MIN} or more buys disclosed in the period. Pick a longer period.`;
+    const dark = th === THEMES.dark, story = H > 1500, portrait = H > 1200 && !story;
+    const N = Math.min(rows.length, story ? 12 : portrait ? 8 : 6);
+    header(ctx, W, th, "Copy-trading score · members of Congress");
+    ctx.fillStyle = th.ink; ctx.font = `800 64px ${UI}`; ctx.fillText("Who's worth copying?", 64, 168);
+    ctx.fillStyle = th.ink2; ctx.font = `500 23px ${UI}`;
+    const y = drawWrapped(ctx, `Points out of 100 for copying each member's stock buys on the day they were disclosed, ${fmtDate(fromISO, { month: "short", year: "numeric" })} to ${fmtDate(D.prices_through, { month: "short", year: "numeric" })}.`, 64, 210, W - 128, 31, 2);
+    // podium: second, first, third
+    const MEDAL = ["#c9a227", "#9aa4ae", "#b0763c"], imgs = await Promise.all(rows.slice(0, N).map((r) => photoHD(r.m)));
+    const pw = (W - 96 - 32) / 3, h1 = story ? 400 : 352, h2 = story ? 366 : 322, baseY = y + 18 + h1 + 30;
+    [1, 0, 2].forEach((rank, col) => {
+      const r = rows[rank], h = rank === 0 ? h1 : h2, x = 48 + col * (pw + 16), yTop = baseY - h, cx = x + pw / 2;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, yTop, pw, h, 20); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, yTop, 24, 0, Math.PI * 2); ctx.fillStyle = MEDAL[rank]; ctx.fill();
+      ctx.lineWidth = 4; ctx.strokeStyle = th.bg; ctx.stroke();
+      ctx.textAlign = "center"; ctx.fillStyle = "#ffffff"; ctx.font = `800 24px ${UI}`; ctx.fillText(String(rank + 1), cx, yTop + 9);
+      const fr = rank === 0 ? (story ? 70 : 62) : (story ? 60 : 52), fcy = yTop + 34 + fr;
+      drawFace(ctx, imgs[rank], r.m, cx, fcy, fr, th);
+      ctx.fillStyle = th.ink; ctx.font = `700 24px ${UI}`; ctx.fillText(fitText(ctx, plainName(r.m), pw - 28), cx, fcy + fr + 36);
+      ctx.fillStyle = th.muted; ctx.font = `500 17px ${UI}`; ctx.fillText(fitText(ctx, tagline(r.m), pw - 28), cx, fcy + fr + 62);
+      ctx.fillStyle = th.ink; ctx.font = `800 ${rank === 0 ? 58 : 50}px ${UI}`; ctx.fillText(Math.round(r.score) + "%", cx, yTop + h - 66);
+      ctx.fillStyle = th.muted; ctx.font = `700 13px ${UI}`; ctx.letterSpacing = "1.5px"; ctx.fillText("SCORE", cx, yTop + h - 44); ctx.letterSpacing = "0px";
+      ctx.fillStyle = th.ink2; ctx.font = `500 15px ${UI}`;
+      ctx.fillText(fitText(ctx, `copying ${pct(r.s.ret, 0)} vs S&P ${pct(r.s.spyRet, 0)} · ${r.s.n} buys`, pw - 24), cx, yTop + h - 18);
+      ctx.textAlign = "left";
+    });
+    // the rest of the table, with each score split into its four parts
+    const SEG = [["Edge vs S&P (40)", "edge"], ["Hit rate (25)", "hit"], ["Speed (15)", "speed"], ["Record (20)", "record"]];
+    const COL = dark ? ["#3d84ea", "#169c8f", "#b8891f", "#8f6ae0"] : ["#1f5fd6", "#0f8f84", "#a87400", "#7a4fd0"];
+    let lx = 64, ly = baseY + 38;
+    ctx.font = `500 16px ${UI}`;
+    SEG.forEach(([l], i) => {
+      ctx.fillStyle = COL[i]; ctx.beginPath(); ctx.roundRect(lx, ly - 13, 14, 14, 3); ctx.fill();
+      ctx.fillStyle = th.ink2; ctx.fillText(l, lx + 21, ly); lx += 21 + ctx.measureText(l).width + 22;
+    });
+    const top = ly + 14, bottom = H - 150, rest = rows.slice(3, N), rh = Math.min(96, (bottom - top) / Math.max(1, rest.length));
+    rest.forEach((r, i) => {
+      const y0 = top + i * rh, cy = y0 + rh / 2, rank = i + 4;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(48, y0 + 4, W - 96, rh - 8, 14); ctx.fill();
+      ctx.fillStyle = th.muted; ctx.font = `800 24px ${UI}`; ctx.textAlign = "center"; ctx.fillText(String(rank), 48 + 34, cy + 9); ctx.textAlign = "left";
+      const fr = Math.min(28, rh / 2 - 12), fx = 48 + 68 + fr;
+      drawFace(ctx, imgs[rank - 1], r.m, fx, cy, fr, th);
+      const nx = fx + fr + 18, nw = 560 - nx;
+      ctx.fillStyle = th.ink; ctx.font = `700 22px ${UI}`; ctx.fillText(fitText(ctx, plainName(r.m), nw), nx, cy - 5);
+      ctx.fillStyle = th.muted; ctx.font = `500 15px ${UI}`;
+      ctx.fillText(fitText(ctx, `${tagline(r.m)} · ${r.s.n} buys · copying ${pct(r.s.ret, 0)} vs S&P ${pct(r.s.spyRet, 0)}`, nw), nx, cy + 19);
+      const bx = 584, bw = W - 48 - 24 - 72 - bx, byy = cy - 6;
+      ctx.save(); ctx.beginPath(); ctx.roundRect(bx, byy, bw, 12, 6); ctx.clip();
+      ctx.fillStyle = th.grid; ctx.fillRect(bx, byy, bw, 12);
+      let cx = bx;
+      SEG.forEach(([, key], j) => { const w = r.parts[key] / 100 * bw; if (w >= 1) { ctx.fillStyle = COL[j]; ctx.fillRect(cx, byy, Math.max(1, w - 2), 12); } cx += w; });
+      ctx.restore();
+      ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `800 32px ${UI}`; ctx.fillText(String(Math.round(r.score)), W - 48 - 22, cy + 11); ctx.textAlign = "left";
+    });
+    footer(ctx, W, H, th, ["Copying = buy when a trade was disclosed, sell when the sale was. 5+ buys.",
+      "Edge is the gain over the S&P 500, adjusted for short track records. Past results only. Not financial advice."]);
+    return null;
+  }
+
+  // --- Committee map: trading in the industries a member's committees oversee ---
+  async function drawConflict(ctx, W, H, th) {
+    const since = windowStart(), dark = th === THEMES.dark;
+    const HOT = dark ? "#e8662e" : "#d9480f", COLD = dark ? "#5b6676" : "#b4bcc7";
+    const ok = (t) => t.st && (isSec(t) || (t.cls === "option" && S.options)) && t.side !== "O" && t.time >= since && t.amt > 0;
+    const inArea = (t) => !noSeat(members[t.m]) && !!(t.c && t.c.length);
+    const all = PE.memberKey === "all", m = all ? null : PE.member;
+    if (!all && !m) return "Pick a politician.";
+    if (!all && noSeat(m)) return "The committee overlap view is for House and Senate members, who sit on committees. Pick one of them.";
+    // House and Senate members only: officials and business leaders sit on no committees
+    const list = trades.filter((t) => ok(t) && (all ? !noSeat(members[t.m]) : t.m === m.i));
+    if (!list.length) return all ? "No stock trades in this period."
+      : P.window === "all" ? `${m.name} has no stock trades in the filings (only funds, bonds or other assets).` : `No stock trades by ${m.name} in ${periodLong()}. Pick a longer period.`;
+    const total = sumAmt(list), hot = sumAmt(list.filter(inArea));
+    header(ctx, W, th, all ? `Committee overlap · all of Congress · ${periodLong()}` : `Committee overlap · ${periodLong()}`);
+    let y = 120;
+    if (!all) {
+      const r = 40, cy = y + r, nx = 64 + 2 * r + 34;
+      drawFace(ctx, await photoHD(m), m, 64 + r + 5, cy, r, th);
+      ctx.fillStyle = th.ink; ctx.font = `700 30px ${UI}`; ctx.fillText(fitText(ctx, plainName(m), W - 64 - nx), nx, cy - 4);
+      ctx.fillStyle = th.muted; ctx.font = `500 20px ${UI}`;
+      ctx.fillText(fitText(ctx, `${tagline(m)}${isBiz(m) ? " · trades reported on SEC Form 4" : (m.committees || []).length ? "" : " · no committee seats listed"}`, W - 64 - nx), nx, cy + 26);
+      y = cy + r + 22;
+    }
+    const share = `${Math.round(hot / total * 100)}%`;
+    ctx.fillStyle = HOT; ctx.font = `800 120px ${UI}`; ctx.fillText(share, 58, y + 100);
+    const sx = 64 + ctx.measureText(share).width + 30;
+    ctx.fillStyle = th.ink; ctx.font = `700 29px ${UI}`;
+    drawWrapped(ctx, all ? "of stock trading by members of Congress was in industries their own committees oversee."
+      : `of ${plainName(m)}'s stock trading was in industries overseen by ${lastName(m)}'s own committees.`, sx, y + 40, W - 64 - sx, 37, 3);
+    y += 150;
+    ctx.fillStyle = th.muted; ctx.font = `500 21px ${UI}`;
+    const nm = new Set(list.map((t) => t.m)).size;
+    ctx.fillText(fitText(ctx, `${listSpan(list.filter(inArea))} of ${listSpan(list)} traded · ${list.length.toLocaleString()} trades${all ? ` by ${nm} members` : ""}`, W - 128), 64, y);
+    if (all) {
+      // which committees' members trade most in their own areas
+      const byC = new Map();
+      for (const t of list) if (inArea(t)) for (const c of t.c) {
+        const g = byC.get(c) || { c, amt: 0, v: 0, n: 0, ms: new Set(), tk: new Map() }; g.amt += t.amt; g.v += t.amtSd ** 2; g.n++; g.ms.add(t.m);
+        g.tk.set(t.t, (g.tk.get(t.t) || 0) + t.amt); byC.set(c, g);
+      }
+      const rows = [...byC.values()].sort((a, b) => b.amt - a.amt);
+      y += 54; capsText(ctx, "EST. DOLLARS MEMBERS TRADED IN THEIR COMMITTEE'S AREA", 64, y, 16, th.muted, 700, 1.5);
+      const top = y + 14, N = Math.min(rows.length, H > 1500 ? 12 : H > 1200 ? 9 : 6), rowH = Math.min(104, (H - 160 - top) / Math.max(1, N));
+      const max = rows.length ? rows[0].amt : 1, bx0 = 64 + 390, bx1 = W - 64 - 120;
+      rows.slice(0, N).forEach((g, i) => {
+        const cy = top + i * rowH + rowH / 2;
+        ctx.fillStyle = th.ink; ctx.font = `700 23px ${UI}`; ctx.fillText(fitText(ctx, cname(g.c), 370), 64, cy - 4);
+        ctx.fillStyle = th.muted; ctx.font = `500 17px ${UI}`;
+        const topTk = [...g.tk.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([tk]) => tk).join(", ");
+        ctx.fillText(fitText(ctx, `${plural(g.ms.size, "member")} · ${plural(g.n, "trade")} · ${topTk}`, bx0 - 64 - 20), 64, cy + 22);
+        ctx.fillStyle = HOT; ctx.beginPath(); ctx.roundRect(bx0, cy - 13, Math.max(4, (bx1 - bx0) * g.amt / max), 26, 4); ctx.fill();
+        ctx.textAlign = "right"; ctx.fillStyle = th.ink; ctx.font = `700 22px ${MONO}`; ctx.fillText(sumSpan(g.amt, g.v), W - 64, cy + 8); ctx.textAlign = "left";
+        if (i < N - 1) { ctx.fillStyle = th.grid; ctx.fillRect(64, top + (i + 1) * rowH, W - 128, 1); }
+      });
+      if (!rows.length) { ctx.fillStyle = th.muted; ctx.font = `500 24px ${UI}`; ctx.fillText("No trades matched a committee area in this period.", 64, top + 60); }
+    } else {
+      // where the money went: committees on the left, industries on the right, ribbons sized by dollars
+      y += 46;
+      let lx = 64;
+      for (const [col, label] of [[HOT, `In ${lastName(m)}'s committee areas`], [COLD, "Outside them"]]) {
+        ctx.fillStyle = col; ctx.beginPath(); ctx.roundRect(lx, y - 15, 16, 16, 3); ctx.fill();
+        ctx.fillStyle = th.ink2; ctx.font = `500 19px ${UI}`; ctx.fillText(label, lx + 24, y); lx += 24 + ctx.measureText(label).width + 30;
+      }
+      const RMAX = H > 1500 ? 9 : H > 1200 ? 7 : 6;
+      // industries when a handful of them hold most of the money, else the broader sectors
+      const tidy = (s) => s === s.toUpperCase() ? s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : s;  // "RETAIL" -> "Retail"
+      const byIndustry = (t) => tidy((t.st[2] || t.st[1] || "Other").replace(/\s*:.*$/, "")), bySector = (t) => tidy(t.st[1] || "Other");
+      const coverage = (fn) => {
+        const tot = new Map(); for (const t of list) tot.set(fn(t), (tot.get(fn(t)) || 0) + t.amt);
+        return [...tot.values()].sort((a, b) => b - a).slice(0, RMAX - 1).reduce((a, b) => a + b, 0) / total;
+      };
+      const useInd = coverage(byIndustry) >= 0.55, indOf = useInd ? byIndustry : bySector;
+      const OUT = "\u0000out", OTHER = useInd ? "Other industries" : "Other sectors", SEP = "\u0001";
+      const raw = new Map(), rawV = new Map(), rTot = new Map();
+      for (const t of list) {
+        const cs = inArea(t) ? t.c : [OUT], ind = indOf(t);
+        for (const c of cs) { raw.set(c + SEP + ind, (raw.get(c + SEP + ind) || 0) + t.amt / cs.length); rawV.set(c + SEP + ind, (rawV.get(c + SEP + ind) || 0) + (t.amtSd / cs.length) ** 2); }
+        rTot.set(ind, (rTot.get(ind) || 0) + t.amt);
+      }
+      const rSorted = [...rTot.entries()].sort((a, b) => b[1] - a[1]);
+      const keep = new Set(rSorted.slice(0, rSorted.length > RMAX ? RMAX - 1 : RMAX).map(([key]) => key)), folded = rSorted.length - keep.size;
+      const flows = new Map(), lAmt = new Map(), rAmt = new Map(), lV = new Map(), rV = new Map();
+      for (const [key, a] of raw) {
+        const [c, ind0] = key.split(SEP), ind = keep.has(ind0) ? ind0 : OTHER, k2 = c + SEP + ind, va = rawV.get(key) || 0;
+        flows.set(k2, (flows.get(k2) || 0) + a); lAmt.set(c, (lAmt.get(c) || 0) + a); rAmt.set(ind, (rAmt.get(ind) || 0) + a);
+        lV.set(c, (lV.get(c) || 0) + va); rV.set(ind, (rV.get(ind) || 0) + va);
+      }
+      const Ln = [...lAmt.entries()].sort((a, b) => (a[0] === OUT) - (b[0] === OUT) || b[1] - a[1]).map(([key, amt]) => ({ key, amt, v: lV.get(key) || 0 }));
+      const li = new Map(Ln.map((n, i) => [n.key, i]));
+      const fl = [...flows.entries()].map(([k2, a]) => { const [c, ind] = k2.split(SEP); return { c, ind, a }; });
+      // industries ordered by where their money comes from, so ribbons cross as little as possible
+      const bary = (ind) => { let s = 0, w = 0; for (const f of fl) if (f.ind === ind) { s += f.a * li.get(f.c); w += f.a; } return w ? s / w : 0; };
+      const Rn = [...rAmt.entries()].map(([key, amt]) => ({ key, amt, v: rV.get(key) || 0, b: bary(key) }))
+        .sort((a, b) => (a.key === OTHER) - (b.key === OTHER) || a.b - b.b || b.amt - a.amt);
+      const ri = new Map(Rn.map((n, i) => [n.key, i]));
+      // on taller sizes, room below for the biggest stocks they traded inside their committee areas
+      const inT = new Map();
+      for (const t of list) if (inArea(t)) { const g = inT.get(t.t) || { t: t.t, amt: 0, v: 0, c: t.c[0] }; g.amt += t.amt; g.v += t.amtSd ** 2; inT.set(t.t, g); }
+      const topIn = [...inT.values()].sort((a, b) => b.amt - a.amt);
+      const listRows = Math.min(topIn.length, H > 1500 ? 6 : H > 1200 ? 3 : 0), listH = listRows ? 70 + listRows * 44 : 0;
+      const top = y + 62, bot = H - 165 - listH, gap = 14, labelW = 262, nodeW = 14;
+      const lxN = 64 + labelW + 12, rxN = W - 64 - labelW - 12 - nodeW;
+      capsText(ctx, "COMMITTEE", 64, top - 22, 14, th.muted, 700, 1.5);
+      ctx.textAlign = "right"; capsText(ctx, useInd ? "INDUSTRY" : "SECTOR", W - 64, top - 22, 14, th.muted, 700, 1.5); ctx.textAlign = "left";
+      const scale = Math.min((bot - top - gap * (Ln.length - 1)) / total, (bot - top - gap * (Rn.length - 1)) / total);
+      const place = (nodes) => { let yy = top + (bot - top - (total * scale + gap * (nodes.length - 1))) / 2; for (const n of nodes) { n.y = yy; n.h = n.amt * scale; yy += n.h + gap; } };
+      place(Ln); place(Rn);
+      const lOff = new Map(Ln.map((n) => [n.key, n.y])), rOff = new Map(Rn.map((n) => [n.key, n.y]));
+      fl.sort((p, q) => li.get(p.c) - li.get(q.c) || ri.get(p.ind) - ri.get(q.ind));
+      for (const f of fl) { f.ly = lOff.get(f.c); lOff.set(f.c, f.ly + f.a * scale); }
+      for (const f of [...fl].sort((p, q) => ri.get(p.ind) - ri.get(q.ind) || li.get(p.c) - li.get(q.c))) { f.ry = rOff.get(f.ind); rOff.set(f.ind, f.ry + f.a * scale); }
+      const xa = lxN + nodeW, xb = rxN, xm = (xa + xb) / 2;
+      for (const f of fl) {
+        const h = f.a * scale;
+        ctx.beginPath(); ctx.moveTo(xa, f.ly); ctx.bezierCurveTo(xm, f.ly, xm, f.ry, xb, f.ry); ctx.lineTo(xb, f.ry + h);
+        ctx.bezierCurveTo(xm, f.ry + h, xm, f.ly + h, xa, f.ly + h); ctx.closePath();
+        ctx.globalAlpha = f.c === OUT ? 0.5 : 0.55; ctx.fillStyle = f.c === OUT ? COLD : HOT; ctx.fill(); ctx.globalAlpha = 1;
+      }
+      for (const n of Ln) { ctx.fillStyle = n.key === OUT ? COLD : HOT; ctx.fillRect(lxN, n.y, nodeW, Math.max(2, n.h)); }
+      for (const n of Rn) { ctx.fillStyle = th.ink2; ctx.fillRect(rxN, n.y, nodeW, Math.max(2, n.h)); }
+      // labels: name (up to two lines) and dollars, nudged apart where nodes are thin
+      const labels = (nodes, left) => {
+        for (const n of nodes) {
+          ctx.font = `700 20px ${UI}`;
+          const name = left ? (n.key === OUT ? "No committee link" : cname(n.key)) : n.key === OTHER ? `${OTHER} (${folded})` : n.key;
+          n.lines = wrapLines(ctx, name, labelW).slice(0, 2);
+          n.lh = n.lines.length * 24 + 22;
+          n.c = n.y + n.h / 2;
+        }
+        nodes[0].c = Math.max(nodes[0].c, top + nodes[0].lh / 2 - 6);  // keep clear of the column heading
+        for (let i = 1; i < nodes.length; i++) nodes[i].c = Math.max(nodes[i].c, nodes[i - 1].c + (nodes[i - 1].lh + nodes[i].lh) / 2 + 10);
+        const last = nodes[nodes.length - 1];
+        if (last.c + last.lh / 2 > bot + 40) {
+          last.c = bot + 40 - last.lh / 2;
+          for (let i = nodes.length - 2; i >= 0; i--) nodes[i].c = Math.min(nodes[i].c, nodes[i + 1].c - (nodes[i].lh + nodes[i + 1].lh) / 2 - 10);
+        }
+        for (const n of nodes) {
+          const tx = left ? lxN - 12 : rxN + nodeW + 12, y0 = n.c - n.lh / 2;
+          if (Math.abs(n.c - (n.y + n.h / 2)) > 10) {
+            ctx.strokeStyle = th.muted; ctx.lineWidth = 1.5; ctx.beginPath();
+            ctx.moveTo(left ? lxN - 3 : rxN + nodeW + 3, n.y + n.h / 2); ctx.lineTo(left ? tx + 4 : tx - 4, n.c); ctx.stroke();
+          }
+          ctx.textAlign = left ? "right" : "left";
+          ctx.fillStyle = th.ink; ctx.font = `700 20px ${UI}`;
+          n.lines.forEach((l, i) => ctx.fillText(fitText(ctx, l, labelW), tx, y0 + 19 + i * 24));
+          ctx.fillStyle = th.muted; ctx.font = `500 17px ${UI}`;
+          ctx.fillText(`${sumSpan(n.amt, n.v)} · ${Math.round(n.amt / total * 100)}%`, tx, y0 + 19 + n.lines.length * 24);
+          ctx.textAlign = "left";
+        }
+      };
+      labels(Ln, true); labels(Rn, false);
+      if (listRows) {
+        const ly = bot + 64;
+        capsText(ctx, `BIGGEST STOCKS IN ${lastName(m).toUpperCase()}'S COMMITTEE AREAS`, 64, ly, 15, th.muted, 700, 1.5);
+        topIn.slice(0, listRows).forEach((g, i) => {
+          const yy = ly + 40 + i * 44;
+          ctx.fillStyle = th.ink; ctx.font = `700 21px ${MONO}`; ctx.fillText(g.t, 64, yy);
+          ctx.fillStyle = th.ink2; ctx.font = `500 18px ${UI}`;
+          ctx.fillText(fitText(ctx, `${cleanName(stocks[g.t][0])} · ${cname(g.c)}`, W - 64 - 180 - 150), 180, yy);
+          ctx.textAlign = "right"; ctx.fillStyle = HOT; ctx.font = `700 20px ${MONO}`; ctx.fillText(sumSpan(g.amt, g.v), W - 64, yy); ctx.textAlign = "left";
+          ctx.fillStyle = th.grid; ctx.fillRect(64, yy + 15, W - 128, 1);
+        });
+      }
+    }
+    footer(ctx, W, H, th, ["Committee areas: this site's reading of each committee's jurisdiction.",
+      "A match is not evidence of wrongdoing. Not financial advice."]);
+    return null;
+  }
+
+  // --- Front page: a newspaper story about one trade ---
+  async function drawFrontPage(ctx, W, H, th) {
+    const t = selectedTrade();
+    if (!t) return "Pick a trade.";
+    const m = members[t.m], st = t.st, sold = t.side === "S", co = cleanName(st[0]);
+    const C = { paper: th.bg, ink: th.ink, ink2: th.ink2, muted: th.muted, accent: th.line, hair: th.grid, grey: th.muted };
+    const k = H > 1500 ? 1.15 : H > 1200 ? 1.05 : 1, z = (v) => Math.round(v * k);
+    const L = 56, R = W - 56, CW = R - L;
+    header(ctx, W, th, `The story behind one trade · ${fmtDate(D.prices_through, { month: "long", day: "numeric", year: "numeric" })}`);
+    const spy0 = PRICES.px.SPY, sEnd = lastIdx(spy0), yStart = PRICES.dates.findIndex((d) => d >= PRICES.dates[sEnd].slice(0, 4) + "-01-01");
+    const spyYtd = spy0[sEnd] / spy0[Math.max(0, yStart)] - 1;
+    const week = trades.filter((x) => x.st && x.side !== "O" && x.ftime && today - x.ftime < 7 * DAY).length;
+    const earW = 136;
+    const ear = (x, label, big, small) => {
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, 46.5, earW - 1, 92);
+      ctx.textAlign = "center";
+      capsText(ctx, label, x + earW / 2, 68, 12, C.ink2, 700, 1.5);
+      ctx.fillStyle = C.ink; ctx.font = `800 30px ${SERIF}`; ctx.fillText(big, x + earW / 2, 104);
+      ctx.fillStyle = C.muted; ctx.font = `italic 400 14px ${SERIF}`; ctx.fillText(small, x + earW / 2, 126);
+      ctx.textAlign = "left";
+    };
+    let y = 96 + z(46);
+    // kicker, headline, deck
+    const late = t.delay > 45, area = !!(t.c && t.c.length);
+    capsText(ctx, area ? "COMMITTEE WATCH" : late ? "LATE FILING" : "STOCK TRADES", L, y, z(17), C.accent, 700, 2.5);
+    const kind = t.cls === "option" ? `${co} ${t.opt === "P" ? "put" : t.opt === "C" ? "call" : ""} options`.replace("  ", " ") : `${co} stock`;
+    const upTo = t.exact ? `${usdExact(t.exact)} of ` : !t.lo ? "" : t.lo === t.hi ? `${usd(t.lo)} of ` : `${tradeRange(t)} of `;
+    ctx.fillStyle = C.ink; ctx.font = `800 ${z(54)}px ${UI}`;
+    y = drawWrapped(ctx, `${titleOf(m)} ${plainName(m)} ${sold ? "sold" : "bought"} ${upTo}${kind}`, L, y + z(64), CW, z(62), 3) - z(62);
+    const s = PRICES.px[t.t], spy = PRICES.px.SPY, end = s ? lastIdx(s) : PRICES.dates.length - 1, ti = idxOfDate(t.d);
+    const ep = t.T.ep, last = s ? s[end] : null, chg = last && ep ? last / ep - 1 : null;
+    const spyChg = spy && spy[ti] ? spy[end] / spy[ti] - 1 : null;
+    const deck = `The ${sold ? "sale" : "purchase"}, made ${fmtDate(t.d, { month: "long", day: "numeric" })}, was disclosed ${t.delay != null ? `${t.delay} days later` : `on ${fmtDate(t.fd, { month: "long", day: "numeric" })}`}${late ? ", past the 45-day deadline" : ""}.`
+      + (chg != null ? ` ${co} shares have ${chg >= 0 ? "risen" : "fallen"} ${pctAbs(chg)} since.` : "");
+    ctx.fillStyle = C.ink2; ctx.font = `500 ${z(25)}px ${UI}`;
+    y = drawWrapped(ctx, deck, L, y + z(46), CW, z(36), 3) - z(36);
+    y += z(34); capsText(ctx, `BY CONGRESS TRADE CHECK · FROM A REPORT FILED ${fmtDate(t.fd).toUpperCase()}`, L, y, z(14), C.muted, 600, 1.5);
+    y += z(18); ctx.fillStyle = C.hair; ctx.fillRect(L, y, CW, 1);
+    y += z(32);
+    // two columns: portrait, caption and chart on the left; the story on the right
+    const bottom = H - 104, lw = Math.round(CW * 0.37), gx = L + lw + 34, rw = R - gx, colTop = y - z(8);
+    ctx.fillStyle = C.hair; ctx.fillRect(L + lw + 16, colTop, 1, bottom - colTop);
+    const ph = Math.round(Math.min(lw, (bottom - y) * 0.55));
+    const img = await photoHD(m);
+    ctx.save(); ctx.beginPath(); ctx.roundRect(L, y, lw, ph, 16); ctx.clip();
+    ctx.fillStyle = th.chip; ctx.fillRect(L, y, lw, ph);
+    if (img) drawCover(ctx, img, L, y, lw, ph, 0.28);
+    ctx.restore();
+    let ly = y + ph + z(24);
+    ctx.fillStyle = C.ink2; ctx.font = `500 ${z(16)}px ${UI}`;
+    ly = drawWrapped(ctx, isBiz(m) ? `${plainName(m)}, ${m.role}. Photo: Wikipedia, public domain.` : `${titleOf(m)} ${plainName(m)} (${party(m)}). Official portrait.`, L, ly, lw, z(23), 2) + z(10);
+    // the rest of the same filing
+    const others = trades.filter((x) => String(x.doc) === String(t.doc) && x !== t && x.st && x.side !== "O").sort((a, b) => b.amt - a.amt);
+    const listN = Math.min(others.length, H > 1500 ? 5 : H > 1200 ? 4 : 3, Math.floor((bottom - ly - z(40)) / z(27)));
+    if (listN >= 1) {
+      ctx.fillStyle = C.ink; ctx.fillRect(L, ly, lw, 2);
+      capsText(ctx, `ALSO IN THIS FILING (${others.length})`, L, ly + z(22), z(13), C.ink, 700, 1.5);
+      others.slice(0, listN).forEach((x, i) => {
+        const yy = ly + z(48) + i * z(27);
+        ctx.fillStyle = C.ink; ctx.font = `600 ${z(15)}px ${MONO}`; ctx.fillText(x.t, L, yy);
+        ctx.fillStyle = C.ink2; ctx.font = `500 ${z(15)}px ${UI}`;
+        ctx.fillText(fitText(ctx, `${x.side === "S" ? "sold" : "bought"} ${amountShort(x)}, ${fmtDate(x.d, { month: "short", day: "numeric" })}`, lw - z(66)), L + z(66), yy);
+      });
+      ly += z(48) + listN * z(27) + (others.length > listN ? z(4) : 0);
+      if (others.length > listN) { ctx.fillStyle = C.muted; ctx.font = `500 ${z(15)}px ${UI}`; ctx.fillText(`and ${others.length - listN} more`, L, ly); ly += z(10); }
+      ly += z(18);
+    }
+    if (s && bottom - ly > 130) {
+      capsText(ctx, `${t.t} · DAILY CLOSE · GREY BEFORE THE TRADE`, L, ly, z(13), C.ink2, 700, 1.5);
+      const gh = Math.min(H > 1500 ? 360 : z(230), bottom - ly - z(56)), i0 = Math.max(0, ti - 63);
+      const g = splitLine(ctx, s, i0, end, ti, L, ly + z(18), lw, gh, C.grey, C.ink, { width: 2.5 });
+      if (g) {
+        ctx.beginPath(); ctx.arc(g.X(ti), g.Y(s[ti] ?? ep), 7, 0, Math.PI * 2); ctx.fillStyle = C.accent; ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = C.paper; ctx.stroke();
+      }
+      ctx.font = `500 ${z(15)}px ${MONO}`; ctx.fillStyle = C.ink2;
+      ctx.fillText(`${sold ? "Sold" : "Bought"} ${price(ep)}`, L, ly + z(18) + gh + z(26));
+      ctx.textAlign = "right"; ctx.fillText(`Now ${price(last)}`, L + lw, ly + z(18) + gh + z(26)); ctx.textAlign = "left";
+    }
+    const what = t.cls === "option" ? `${t.opt === "P" ? "put" : t.opt === "C" ? "call" : ""} options on ${co}`.trim() : `${co} (${t.t}) stock`;
+    const range = t.exact ? `${usdExact(t.exact)} of ` : !t.lo ? "" : t.lo === t.hi ? `${usd(t.lo)} of ` : `${tradeRange(t)} of `;
+    const ind = (st[2] || st[1] || "").replace(/\s*:.*$/, "").toLowerCase();
+    const stockCount = trades.filter((x) => x.m === m.i && x.st && x.side !== "O").length;
+    const paras = [
+      `${titleOf(m)} ${plainName(m)}${noSeat(m) ? "" : `, ${A_PARTY[m.party] || "a member"} from ${STATE_NAMES[m.state] || m.state},`} reported ${sold ? "selling" : "buying"} ${range}${what}${OWNER_PHRASE[t.own] || ""} on ${fmtDate(t.d, { month: "long", day: "numeric", year: "numeric" })}, according to a periodic transaction report filed ${fmtDate(t.fd, { month: "long", day: "numeric" })}.`,
+      chg != null ? `${co} closed at ${price(ep)} on the day of the trade. On ${fmtDate(PRICES.dates[end], { month: "long", day: "numeric" })} it closed at ${price(last)}, a ${chg >= 0 ? "gain" : "loss"} of ${pctAbs(chg)}.${spyChg != null ? ` The S&P 500 ${spyChg >= 0 ? "rose" : "fell"} ${pctAbs(spyChg)} over the same period.` : ""}` : "",
+      (m.committees || []).length ? `${lastName(m)} serves on ${m.committees.slice(0, 3).map(committeePhrase).join(" and ")}.${area ? ` By this site's reading of its official remit, ${committeePhrase(t.c[0])} oversees ${co}'s industry${ind ? `, ${ind}` : ""}.` : ""}` : "",
+      t.delay != null ? `The STOCK Act gives members of Congress 45 days to report a trade. This one was reported after ${t.delay} days${late ? `, ${t.delay - 45} days past the deadline` : ""}.` : "",
+      `${t.exact ? `Members only have to report trade sizes as ranges, but this filing also gave the number of shares, so the amount is exact: ${exactNote(t).replace(/^Exact, from shares reported: /, "")}` : "Members report trade sizes as ranges rather than exact amounts."} ${lastName(m)} has reported ${stockCount} stock trade${stockCount === 1 ? "" : "s"} since ${START_LONG}.`,
+    ].filter(Boolean);
+    ctx.fillStyle = C.ink;
+    let ry = flowParas(ctx, paras, gx, y + z(14), rw, z(31), bottom - z(6), `400 ${z(20)}px ${UI}`, "WASHINGTON — ", `700 ${z(20)}px ${UI}`);
+    // with room left in the column: the trade at a glance
+    const facts = [["Traded", fmtDate(t.d)], ["Disclosed", fmtDate(t.fd)], ["Days to report", t.delay != null ? `${t.delay}${late ? " (late)" : ""}` : "–"],
+      ["Amount", t.exact ? `${usdExact(t.exact)} exact` : !t.lo ? "–" : t.lo === t.hi ? usd(t.lo) : tradeRange(t)], ["Price that day", price(ep)], ["Latest close", price(last)],
+      [`${t.t} since`, chg != null ? pct(chg) : "–"], ["S&P 500 since", spyChg != null ? pct(spyChg) : "–"]];
+    const fh = z(36), boxH = z(56) + facts.length * fh;
+    if (bottom - ry > boxH + z(20)) {
+      ry += z(12);
+      ctx.fillStyle = C.ink; ctx.fillRect(gx, ry, rw, 3);
+      capsText(ctx, "THE TRADE AT A GLANCE", gx, ry + z(32), z(15), C.ink, 700, 2);
+      facts.forEach(([l, v], i) => {
+        const yy = ry + z(56) + i * fh + z(22);
+        ctx.fillStyle = C.ink2; ctx.font = `500 ${z(18)}px ${UI}`; ctx.fillText(l, gx, yy);
+        ctx.textAlign = "right"; ctx.fillStyle = C.ink; ctx.font = `600 ${z(18)}px ${MONO}`; ctx.fillText(v, R, yy); ctx.textAlign = "left";
+        ctx.fillStyle = C.hair; ctx.fillRect(gx, yy + z(12), rw, 1);
+      });
+    }
+    // foot of the page
+    footer(ctx, W, H, th, ["Compiled from public House, Senate and OGE trade filings. Prices are daily closes.", "Not financial advice."]);
+    return null;
+  }
+
+  // --- Trading card: a politician's stats as a collectible card ---
+  async function drawCard(ctx, W, H, th) {
+    const m = PE.member;
+    if (!m) return "Pick a politician.";
+    const all = trades.filter((t) => t.m === m.i && t.st && (isSec(t) || (t.cls === "option" && S.options)) && t.side !== "O");
+    if (!all.length) return `No stock trades by ${m.name} yet.`;
+    const acc = th[m.party] || th.I, PAL = [acc, acc, th.muted];
+    const story = H > 1500, portrait = H > 1200 && !story;
+    header(ctx, W, th, `Trading card · ${YEARS_SPAN}`);
+    // the set: every member, alphabetical, numbered like a card set
+    const setOrder = [...members].sort((a, b) => lastName(a).localeCompare(lastName(b)) || a.name.localeCompare(b.name));
+    const cardNo = setOrder.indexOf(m) + 1;
+    const fsAll = followScores(), rank = fsAll.findIndex((r) => r.m.i === m.i), fr = rank >= 0 ? fsAll[rank] : null;
+    let front, back;
+    if (story) {
+      front = { x: (W - 590) / 2, y: 150, w: 590, h: 826 };
+      back = { x: 60, y: 1024, w: 960, h: 672 };
+    } else {
+      const w = portrait ? 490 : 470, h = Math.round(w / 0.714), gap = portrait ? 26 : 30, x0 = (W - 2 * w - gap) / 2, y0 = portrait ? Math.round((H - h) / 2 + 40) : (H - h) / 2 + 26;
+      front = { x: x0, y: y0, w, h }; back = { x: x0 + w + gap, y: y0, w, h };
+    }
+    // heading above the pair
+    ctx.textAlign = "center";
+    if (!story && !portrait) capsText(ctx, `${plainName(m).toUpperCase()} · TRADING CARD · FRONT AND BACK`, W / 2, front.y - 40, 18, PAL[2], 700, 2.5);
+    else {
+      ctx.fillStyle = th.ink; ctx.font = `800 ${story ? 60 : 56}px ${UI}`; ctx.letterSpacing = "0px";
+      ctx.fillText(fitText(ctx, plainName(m).toUpperCase(), W - 120), W / 2, story ? 96 : front.y - 120); ctx.letterSpacing = "0px";
+      if (portrait) capsText(ctx, "STOCK TRADING CARD · FRONT AND BACK", W / 2, front.y - 68, 18, PAL[2], 700, 2.5);
+    }
+    ctx.textAlign = "left";
+    // ---- front: photo, name plate, set ----
+    {
+      const { x, y, w, h } = front, z = (v) => Math.round(v * w / 706);
+      ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.14)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(x, y, w, h, z(30)); ctx.fill(); ctx.restore();
+      ctx.strokeStyle = acc; ctx.lineWidth = z(5); ctx.beginPath(); ctx.roundRect(x + z(3), y + z(3), w - z(6), h - z(6), z(28)); ctx.stroke();
+      const ip = z(16), ix = x + ip, iy = y + ip, iw = w - 2 * ip, ih = h - 2 * ip;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(ix, iy, iw, ih, z(18)); ctx.fill();
+      const px = ix + z(16), py = iy + z(16), pw = iw - z(32), ph = Math.round(ih * 0.8);
+      const img = await photoHD(m);
+      ctx.save(); ctx.beginPath(); ctx.roundRect(px, py, pw, ph, z(12)); ctx.clip();
+      ctx.fillStyle = th.chip; ctx.fillRect(px, py, pw, ph);
+      ctx.imageSmoothingQuality = "high";
+      if (img) drawCover(ctx, img, px, py, pw, ph, 0.12);
+      const sheen = ctx.createLinearGradient(px, py, px + pw, py + ph);
+      sheen.addColorStop(0, "rgba(255,255,255,0)"); sheen.addColorStop(0.44, "rgba(255,255,255,0)"); sheen.addColorStop(0.5, "rgba(255,255,255,0.13)");
+      sheen.addColorStop(0.56, "rgba(255,255,255,0)"); sheen.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = sheen; ctx.fillRect(px, py, pw, ph);
+      const fade = ctx.createLinearGradient(0, py + ph * 0.62, 0, py + ph); fade.addColorStop(0, "rgba(15,19,27,0)"); fade.addColorStop(1, "rgba(15,19,27,0.95)");
+      ctx.fillStyle = fade; ctx.fillRect(px, py, pw, ph);
+      ctx.restore();
+      ctx.strokeStyle = PAL[2]; ctx.globalAlpha = 0.55; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(px, py, pw, ph, z(12)); ctx.stroke(); ctx.globalAlpha = 1;
+      pill(ctx, seatTitle(m), px + z(16), py + z(16), z(17), "rgba(10,12,17,0.72)", "#ffffff");
+      pill(ctx, isBiz(m) ? "Form 4" : party(m), px + pw - z(16), py + z(16), z(17), "#ffffff", PAL[0], true);
+      let fsN = z(76); const nm = plainName(m).toUpperCase();
+      ctx.font = `800 ${fsN}px ${UI}`;
+      while (ctx.measureText(nm).width > pw - z(40) && fsN > z(30)) { fsN -= 2; ctx.font = `800 ${fsN}px ${UI}`; }
+      ctx.fillStyle = "#ffffff"; ctx.letterSpacing = "1px"; ctx.fillText(nm, px + z(20), py + ph - z(24)); ctx.letterSpacing = "0px";
+      capsText(ctx, (isBiz(m) ? m.role : isExec(m) ? deptShort(m) : (STATE_NAMES[m.state] || m.state || "").replace(/^the /, "")).toUpperCase(), px + z(22), py + ph - z(24) - fsN * 0.86, z(17), PAL[2], 700, 2.5);
+      // committee seats sit where a card shows the player's position
+      ctx.fillStyle = th.ink2; ctx.font = `600 ${z(19)}px ${UI}`;
+      ctx.fillText(fitText(ctx, (m.committees || []).map(cname).slice(0, 3).join(" · ") || (isBiz(m) ? "Business leader · SEC Form 4 · exact amounts" : m.former ? "Former member" : "No committee seats"), pw), px, py + ph + z(42));
+      // set line and, for the best to copy, a badge
+      const sy = iy + ih - z(30);
+      capsText(ctx, `CONGRESS TRADE CHECK · ${YEARS_SPAN}`, px, sy, z(17), th.muted, 700, 2);
+      if (fr && rank < 10) pill(ctx, `TOP 10 TO COPY · #${rank + 1}`, px + pw, sy - z(28), z(16), "#c9a227", "#1b1300", true);
+      else if (fr) { ctx.textAlign = "right"; capsText(ctx, `COPY SCORE ${Math.round(fr.score)}`, px + pw, sy, z(17), PAL[2], 800, 2); ctx.textAlign = "left"; }
+    }
+    // ---- back: name bar, bio, yearly record, totals ----
+    {
+      const { x, y, w, h } = back, wide = w > h, z = (v) => Math.round(v * (wide ? h : w) / 470);
+      ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.14)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6;
+      ctx.fillStyle = PAL[0]; ctx.beginPath(); ctx.roundRect(x, y, w, h, z(22)); ctx.fill(); ctx.restore();
+      const b = z(10), ix = x + b, iy = y + b, iw = w - 2 * b, ih = h - 2 * b;
+      ctx.fillStyle = th.card; ctx.beginPath(); ctx.roundRect(ix, iy, iw, ih, z(14)); ctx.fill();
+      const pad = z(18), cx0 = ix + pad, cw = iw - 2 * pad;
+      // name bar with the card number
+      const barH = z(76);
+      ctx.fillStyle = PAL[0]; ctx.beginPath(); ctx.roundRect(ix, iy, iw, barH, [z(14), z(14), 0, 0]); ctx.fill();
+      ctx.font = `700 ${z(20)}px ${UI}`;
+      const noTxt = `No. ${cardNo}`, noW = ctx.measureText(noTxt).width + z(20);
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(ix + iw - pad - noW, iy + z(16), noW, z(34));
+      ctx.fillStyle = PAL[0]; ctx.fillText(noTxt, ix + iw - pad - noW + z(10), iy + z(41));
+      let fsN = z(34); const nm = plainName(m).toUpperCase();
+      ctx.font = `800 ${fsN}px ${UI}`;
+      while (ctx.measureText(nm).width > cw - noW - z(16) && fsN > z(18)) { fsN -= 1; ctx.font = `800 ${fsN}px ${UI}`; }
+      ctx.fillStyle = "#ffffff"; ctx.fillText(nm, cx0, iy + z(40));
+      ctx.fillStyle = "#ffffff"; ctx.font = `600 ${z(13)}px ${UI}`;
+      ctx.fillText(fitText(ctx, isBiz(m) ? seatTitle(m) : isExec(m) ? `${seatTitle(m)} · ${party(m)}` : `${seatTitle(m)} · ${(STATE_NAMES[m.state] || m.state || "").replace(/^the /, "").toUpperCase()} · ${party(m)}`, cw - noW - z(16)), cx0, iy + z(62));
+      // bio
+      const recAll = yearRecord(all), lateN = all.filter((t) => t.delay > 45).length;
+      const bigBuy = all.filter((t) => t.side === "B").sort((a, b2) => b2.amt - a.amt || a.time - b2.time)[0];
+      const bio = `${(m.committees || []).length ? `Sits on ${m.committees.slice(0, 3).map(cname).join(", ")}. ` : m.former ? "No longer in Congress. " : ""}`
+        + `Reported ${plural(recAll.n, "stock trade")} since ${START_LONG}${lateN ? `, ${lateN.toLocaleString()} of them after the 45-day limit` : ""}.`
+        + (bigBuy ? ` Biggest buy: ${bigBuy.t}, ${amountShort(bigBuy)}, ${fmtDate(bigBuy.d, { month: "short", year: "numeric" })}.` : "");
+      ctx.fillStyle = th.ink2; ctx.font = `500 ${z(14)}px ${UI}`;
+      let yy = drawWrapped(ctx, bio, cx0, iy + barH + z(28), cw, z(20), wide ? 3 : 5);
+      // the yearly record, like a card's season stats
+      yy += z(10);
+      ctx.fillStyle = th.ink; ctx.font = `800 ${z(16)}px ${UI}`; ctx.letterSpacing = "1.5px"; ctx.fillText("STOCK TRADING RECORD", cx0, yy); ctx.letterSpacing = "0px";
+      ctx.fillRect(cx0, yy + z(7), cw, 2);
+      const years = [...new Set(all.map((t) => t.d.slice(0, 4)))].sort();
+      const recRows = years.map((yr) => [yr, yearRecord(all.filter((t) => t.d.startsWith(yr)))]).concat([["TOTAL", recAll]]);
+      const colsR = [["YR", (r) => r[0]], ["TRADES", (r) => r[1].n.toLocaleString()], ["BUYS", (r) => r[1].b.toLocaleString()], ["SELLS", (r) => r[1].s.toLocaleString()],
+        ["$", (r) => sumSpan(r[1].vol, r[1].vv)], ["WIN%", (r) => r[1].win == null ? "–" : `${Math.round(r[1].win * 100)}%`],
+        ["VS S&P", (r) => r[1].diff == null ? "–" : pts(r[1].diff).replace(" pts", "")], ["DAYS", (r) => r[1].days == null ? "–" : String(r[1].days)]];
+      const weights = [1.1, 1.1, 0.95, 0.95, 1.2, 1.15, 1.15, 0.85], wsum = weights.reduce((a2, b2) => a2 + b2, 0);
+      const colX = []; let acc = cx0;
+      weights.forEach((wt) => { acc += cw * wt / wsum; colX.push(acc); });
+      const rh = z(wide ? 34 : 30), hy = yy + z(30);
+      ctx.font = `700 ${z(wide ? 13 : 11)}px ${UI}`; ctx.fillStyle = th.muted; ctx.textAlign = "right";
+      colsR.forEach(([l], i) => { if (i === 0) { ctx.textAlign = "left"; ctx.fillText(l, cx0, hy); ctx.textAlign = "right"; } else ctx.fillText(l, colX[i], hy); });
+      recRows.forEach((row, ri) => {
+        const ry = hy + z(10) + ri * rh, totalRow = ri === recRows.length - 1;
+        if (totalRow) { ctx.fillStyle = th.ink2; ctx.fillRect(cx0, ry, cw, 1.5); }
+        else if (ri % 2 === 0) { ctx.fillStyle = th.chip; ctx.fillRect(cx0, ry, cw, rh); }
+        ctx.font = `${totalRow ? 700 : 500} ${z(wide ? 16 : 13)}px ${MONO}`; ctx.fillStyle = th.ink;
+        colsR.forEach(([, val], i) => {
+          if (i === 0) { ctx.textAlign = "left"; ctx.fillText(val(row), cx0 + z(2), ry + rh * 0.68); ctx.textAlign = "right"; }
+          else ctx.fillText(val(row), colX[i] - z(2), ry + rh * 0.68);
+        });
+      });
+      ctx.textAlign = "left";
+      // highlights, as much as fits above the small print
+      const fy = iy + ih - z(16), hiTop = hy + z(10) + recRows.length * rh + z(30), hiBottom = fy - z(46);
+      const counts = new Map(); for (const t of all) counts.set(t.t, (counts.get(t.t) || 0) + 1);
+      const most = [...counts.entries()].sort((a2, b2) => b2[1] - a2[1]).slice(0, 3).map(([tk, n]) => `${tk} (${n})`).join(", ");
+      const pricedB = all.filter((t) => t.side === "B" && t.T.r != null);
+      const bestB = pricedB.reduce((a2, t) => (!a2 || eff(t, t.T.r) > eff(a2, a2.T.r) ? t : a2), null);
+      const worstB = pricedB.reduce((a2, t) => (!a2 || eff(t, t.T.r) < eff(a2, a2.T.r) ? t : a2), null);
+      const secAmt = new Map(); for (const t of all) secAmt.set(t.st[1] || "Other", (secAmt.get(t.st[1] || "Other") || 0) + t.amt);
+      const topSec = [...secAmt.entries()].sort((a2, b2) => b2[1] - a2[1])[0];
+      const lines = [["MOST TRADED", most],
+        bestB && ["BEST BUY", `${bestB.t} ${pct(eff(bestB, bestB.T.r), 0)}, bought ${fmtDate(bestB.d, { month: "short", year: "numeric" })}`],
+        worstB && worstB !== bestB && ["WORST BUY", `${worstB.t} ${pct(eff(worstB, worstB.T.r), 0)}, bought ${fmtDate(worstB.d, { month: "short", year: "numeric" })}`],
+        topSec && ["TOP SECTOR", `${topSec[0]}, ${Math.round(topSec[1] / (recAll.vol || 1) * 100)}% of dollars`],
+        ["COPY SCORE", fr ? `${Math.round(fr.score)}/100, #${rank + 1} of ${fsAll.length} members` : "needs 5 or more buys"]].filter(Boolean);
+      // two columns on a landscape back
+      const hrh = z(wide ? 24 : 27), perRow = wide ? 2 : 1, colWHi = cw / perRow;
+      const nHi = Math.min(lines.length, (Math.floor((hiBottom - hiTop - z(30)) / hrh) + 1) * perRow);
+      if (nHi >= 2) {
+        ctx.fillStyle = th.ink; ctx.font = `800 ${z(16)}px ${UI}`; ctx.letterSpacing = "1.5px"; ctx.fillText("HIGHLIGHTS", cx0, hiTop); ctx.letterSpacing = "0px";
+        ctx.fillRect(cx0, hiTop + z(7), cw, 2);
+        lines.slice(0, nHi).forEach(([l, v], i) => {
+          const lx2 = cx0 + (i % perRow) * colWHi, ly = hiTop + z(30) + Math.floor(i / perRow) * hrh;
+          ctx.fillStyle = th.muted; ctx.font = `800 ${z(12)}px ${UI}`; ctx.letterSpacing = "1px"; ctx.fillText(l, lx2, ly); ctx.letterSpacing = "0px";
+          ctx.fillStyle = th.ink; ctx.font = `500 ${z(14)}px ${UI}`; ctx.fillText(fitText(ctx, v, colWHi - z(100) - z(10)), lx2 + z(100), ly);
+        });
+      }
+      // small print
+      ctx.fillStyle = th.muted; ctx.font = `500 ${z(11)}px ${UI}`;
+      ctx.fillText(fitText(ctx, "WIN% = buys that beat the S&P 500 · VS S&P = their gap to it, in points", cw), cx0, fy - z(30));
+      ctx.fillText(fitText(ctx, `DAYS = median days to report · ${isBiz(m) ? "amounts are exact, from Form 4" : "amounts are estimates from reported ranges"}`, cw), cx0, fy - z(15));
+      ctx.fillText(fitText(ctx, `Not financial advice. No. ${cardNo} of ${setOrder.length} in the set.`, cw - z(170)), cx0, fy);
+      ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `800 ${z(13)}px ${UI}`; ctx.letterSpacing = "1px";
+      ctx.fillText("CONGRESS TRADE CHECK", ix + iw - pad, fy); ctx.letterSpacing = "0px"; ctx.textAlign = "left";
+    }
+    ctx.textAlign = "center"; ctx.fillStyle = th.muted; ctx.font = `500 ${story ? 21 : 16}px ${UI}`;
+    ctx.fillText("Estimates from public stock-trade filings. Not financial advice.", W / 2, story ? H - 70 : portrait ? H - 60 : H - 22);
+    ctx.textAlign = "left";
+    return null;
+  }
+
+  // --- Receipt: a politician's recently disclosed buys, itemised ---
+  async function drawReceipt(ctx, W, H, th) {
+    const items = selectedFiling();
+    if (!items) return "Pick a filing.";
+    items.sort((a, b) => a.time - b.time || b.amt - a.amt);
+    const m = members[items[0].m], f = items[0], senate = chamberOf(m) === "S";
+    const INK = th.ink, FADE = th.muted, UP = th.up, DOWN = th.down, PAPER = th.card;
+    header(ctx, W, th, `One filing, itemised · filed ${fmtDate(f.fd, { month: "short", day: "numeric", year: "numeric" })}`);
+    const fs = H > 1500 ? 24 : H > 1200 ? 21 : 19, lh = Math.round(fs * 1.42), pad = Math.round(fs * 1.7);
+    const pw = H > 1500 ? 800 : H > 1200 ? 720 : 680, px = Math.round((W - pw) / 2), tx = px + pad, tr = px + pw - pad;
+    const buys = items.filter((t) => t.side === "B"), sells = items.filter((t) => t.side === "S");
+    const priced = buys.filter((t) => t.T.r != null && t.T.sr != null);
+    const inv = sumAmt(priced), now = priced.reduce((a, t) => a + t.amt * (1 + eff(t, t.T.r)), 0);
+    const spyRet = inv ? priced.reduce((a, t) => a + t.amt * t.T.sr, 0) / inv : null;
+    const delays = items.filter((t) => t.delay != null && t.delay >= 0).map((t) => t.delay);
+    const dMin = delays.length ? Math.min(...delays) : null, dMax = delays.length ? Math.max(...delays) : null;
+    const owners = new Set(items.map((t) => t.own || "self")), OWN = { self: "OWN ACCOUNT", SP: "SPOUSE (SP)", DC: "DEPENDENT CHILD (DC)", JT: "JOINT (JT)" };
+    let top = 0;
+    // one pass measures, the next draws
+    const page = (draw, nItems, barcode) => {
+      let y = pad;
+      const put = (left, right, o = {}) => {
+        if (draw) {
+          const by = top + y + lh * 0.74;
+          ctx.font = `${o.w || 500} ${o.fs || fs}px ${o.mono === false ? UI : MONO}`;
+          if (o.center) { ctx.textAlign = "center"; ctx.fillStyle = o.c || INK; ctx.fillText(fitText(ctx, left, tr - tx), px + pw / 2, by); ctx.textAlign = "left"; }
+          else {
+            const rwid = right ? ctx.measureText(right).width + 20 : 0;
+            ctx.fillStyle = o.c || INK; if (left) ctx.fillText(fitText(ctx, left, tr - tx - rwid), tx, by);
+            if (right) { ctx.textAlign = "right"; ctx.fillStyle = o.rc || o.c || INK; ctx.fillText(right, tr, by); ctx.textAlign = "left"; }
+          }
+        }
+        y += o.h || lh;
+      };
+      const rule = (double) => {
+        if (draw) {
+          const ry = Math.round(top + y + lh / 2) + 0.5;
+          ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.setLineDash(double ? [] : [6, 5]);
+          ctx.beginPath(); ctx.moveTo(tx, ry); ctx.lineTo(tr, ry); if (double) { ctx.moveTo(tx, ry + 5); ctx.lineTo(tr, ry + 5); } ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        y += lh;
+      };
+      put("HarryV12 Finance", "", { center: true, w: 800, fs: fs + 5, h: lh + 6, mono: false });
+      put("PERIODIC TRANSACTION REPORT", "", { center: true, c: FADE });
+      put(isBiz(m) ? "SEC FORM 4 · VIA OPENINSIDER" : isExec(m) ? "EXECUTIVE BRANCH · OGE FORM 278-T" : senate ? "U.S. SENATE · WASHINGTON, DC 20510" : "U.S. HOUSE · WASHINGTON, DC 20515", "", { center: true, c: FADE, fs: fs - 3 });
+      rule();
+      put("FILING NO.", String(f.doc));
+      put("FILED", fmtDate(f.fd, { month: "2-digit", day: "2-digit", year: "numeric" }));
+      put("FILER", `HON. ${plainName(m).toUpperCase()}`);
+      put(noSeat(m) ? "OFFICE" : "SEAT", noSeat(m) ? m.role.toUpperCase() : `${party(m)} · ${senate ? "SENATE" : "HOUSE"}`);
+      rule();
+      put("ITEM", "AMOUNT", { w: 700, c: FADE });
+      for (const t of items.slice(0, nItems)) {
+        const r = eff(t, t.T.r), good = r == null ? null : t.side === "S" ? -r : r;
+        const code = t.side === "B" ? "P" : t.k === "SP" ? "S (PARTIAL)" : "S";
+        const kind = t.cls === "option" ? (t.opt === "P" ? " · PUT" : t.opt === "C" ? " · CALL" : " · OPTION") : "";
+        put(`${t.t}  ${cleanName(t.st[0]).toUpperCase()}`, amountShort(t), { w: 700 });
+        put(`  ${code} ${fmtDate(t.d, { month: "2-digit", day: "2-digit" })} @ ${price(t.T.ep)}${t.own ? " · " + t.own : ""}${kind}`, r == null ? "–" : pct(r) + (t.side === "B" && t.T.xd ? "*" : ""),
+          { c: FADE, rc: r == null ? FADE : r >= 0 ? UP : DOWN, h: lh + Math.round(fs * 0.4) });
+      }
+      if (items.length > nItems) put(`+ ${items.length - nItems} MORE ITEM${items.length - nItems > 1 ? "S" : ""}`, "", { c: FADE });
+      rule();
+      put("ITEMS", `${items.length} (${buys.length} BUY${buys.length === 1 ? "" : "S"} · ${sells.length} SALE${sells.length === 1 ? "" : "S"})`);
+      put("EST. BOUGHT", usd(sumAmt(buys)));
+      put("EST. SOLD", usd(sumAmt(sells)));
+      if (inv) {
+        put("BUYS NOW WORTH", usd(now));
+        put("CHANGE", `${signedUsd(now - inv)} (${pct(now / inv - 1)})`, { w: 700, rc: now >= inv ? UP : DOWN });
+        put("S&P 500, SAME DAYS", pct(spyRet));
+      }
+      put("DAYS TO REPORT", dMin == null ? "–" : `${dMin === dMax ? dMin : `${dMin}–${dMax}`} (LIMIT 45)`, { rc: dMax > 45 ? DOWN : INK });
+      put("ACCOUNT", owners.size === 1 ? OWN[[...owners][0]] || "–" : "MIXED");
+      rule(true);
+      if (barcode) {
+        if (draw) {
+          let seed = 7; for (const c of String(f.doc)) seed = (seed * 31 + c.charCodeAt(0)) >>> 0;
+          const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+          const bw = Math.round(pw * 0.62), bx = px + (pw - bw) / 2, bh = Math.round(fs * 2.3), byy = top + y + Math.round(fs * 0.3);
+          ctx.fillStyle = INK;
+          for (let x = bx; x < bx + bw;) { const w = 1 + Math.floor(rnd() * 3.2); if (rnd() > 0.42) ctx.fillRect(x, byy, w, bh); x += w + 1 + Math.floor(rnd() * 2); }
+          ctx.font = `500 ${fs - 4}px ${MONO}`; ctx.fillStyle = FADE; ctx.textAlign = "center";
+          ctx.fillText(String(f.doc).split("").join(" "), px + pw / 2, byy + bh + fs - 2); ctx.textAlign = "left";
+        }
+        y += Math.round(fs * 3.9);
+      }
+      put("THANK YOU FOR YOUR DISCLOSURE", "", { center: true, w: 700 });
+      put("AMOUNTS ARE REPORTED RANGES", "", { center: true, c: FADE, fs: fs - 3 });
+      put("% = STOCK'S MOVE SINCE · GREEN UP, RED DOWN", "", { center: true, c: FADE, fs: fs - 3 });
+      if (items.slice(0, nItems).some((t) => t.side === "B" && t.T.xd)) put("* UNTIL THE MEMBER SOLD", "", { center: true, c: FADE, fs: fs - 3 });
+      if (items.some((t) => t.cls === "option")) put("OPTIONS SHOW THE STOCK'S MOVE", "", { center: true, c: FADE, fs: fs - 3 });
+      put("NOT FINANCIAL ADVICE", "", { center: true, c: FADE, fs: fs - 3 });
+      return y + pad;
+    };
+    const maxH = H - 170;
+    const fit = (bc) => { let n = items.length; while (n > 1 && page(false, n, bc) > maxH) n--; return n; };
+    let barcode = true, n = fit(true);
+    if (n < Math.min(items.length, 4)) { const n2 = fit(false); if (n2 > n) { barcode = false; n = n2; } }
+    const ph = page(false, n, barcode);
+    top = Math.round(120 + (H - 150 - ph) / 2);
+    // the filing as a card
+    ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.12)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6;
+    ctx.fillStyle = PAPER; ctx.beginPath(); ctx.roundRect(px, top, pw, ph, 20); ctx.fill(); ctx.restore();
+    page(true, n, barcode);
+    return null;
+  }
+
+  let postBlob = null, postUrl = null, drawSeq = 0;
+  let POST_HINT = "Click the image to view it full size, or right-click to save it.";
+  // a 3:4 blank (the posters' shape) shown while a new image is being drawn
+  const BLANK_POST = (() => { const c = document.createElement("canvas"); c.width = 3; c.height = 4; return c.toDataURL("image/png"); })();
+  const DRAW = { terminal: drawTerminal, list: drawRoundup, breaking: drawBreaking, scorecard: drawScorecardPoster,
+    leaders: drawLeaders, conflict: drawConflict, frontpage: drawFrontPage, card: drawCard, receipt: drawReceipt, spikes: drawSpikes, signals: drawSignals, holdings: drawHoldings, parties: drawParties, bonds: drawBonds };
+  for (const s of MARKET) DRAW[s] = drawMarket;
+  const POSTER_FONTS = ['800 64px "Public Sans"', '700 26px "Public Sans"', '600 20px "Public Sans"', '500 19px "Public Sans"',
+    '400 20px "IBM Plex Mono"', '500 20px "IBM Plex Mono"', '600 26px "IBM Plex Mono"', '700 26px "IBM Plex Mono"',
+    '600 30px "Barlow Condensed"', '700 40px "Barlow Condensed"', '800 120px "Barlow Condensed"',
+    '400 22px "Newsreader"', 'italic 400 26px "Newsreader"', '700 22px "Newsreader"', '800 60px "Newsreader"',
+    '400 60px "Bebas Neue"', '600 20px "Cinzel"', '700 20px "Cinzel"', '800 40px "Cinzel"',
+    '900 60px "Playfair Display"', '700 20px "Playfair Display"', 'italic 400 24px "Playfair Display"',
+    '500 20px "Inter"', '600 20px "Inter"', '700 20px "Inter"', '800 40px "Inter"', '900 60px "Inter"',
+    '500 20px "Orbitron"', '700 20px "Orbitron"', '800 40px "Orbitron"', '400 24px "Architects Daughter"'];
+  const JP_TEXT = "議会の株取引買い売り主な手上昇下落政府と";
+  // the politician, committee and stock a poster shows: the picks made here, or a fallback while
+  // one is empty. Fallbacks are never saved over the picks.
+  let committeeList = null;
+  function postCommittees() {
+    if (!committeeList) {
+      committeeList = Object.keys(D.committees).map((cid) => {
+        const ms = members.filter((m) => (m.committees || []).includes(cid));
+        return { cid, name: committeeLabel(cid), ms: ms.length, n: ms.reduce((a, m) => a + (tradeCount.get(m.i) || 0), 0) };
+      }).filter((c) => c.n > 0).sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return committeeList;
+  }
+  function resolvePicks() {
+    const scoped = isMarket() || P.style === "list";
+    const traded = (v) => v !== "" && v != null && v !== "all" && !!members[+v] && !!tradeCount.get(+v);
+    const allowAll = P.style === "conflict" || P.style === "bonds";
+    const fallback = S.members.length && traded(S.members[0]) ? String(S.members[0]) : String([...tradeCount.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+    PE.memberKey = allowAll && P.member === "all" ? "all" : traded(P.member) ? String(P.member) : fallback;
+    PE.member = PE.memberKey === "all" ? null : members[+PE.memberKey];
+    if (["scorecard", "conflict", "card", "holdings", "bonds"].includes(P.style) || (scoped && P.who === "one")) fillPostMembers(allowAll);
+    const comms = postCommittees();
+    PE.committee = comms.some((c) => c.cid === P.committee) ? P.committee
+      : comms.some((c) => c.cid === S.committee) ? S.committee : [...comms].sort((a, b) => b.n - a.n)[0]?.cid || "";
+    if (scoped && P.who === "committee") fillPostCommittees();
+    if (PRICES && (isMarket() || P.style === "terminal" || P.style === "parties" || (P.style === "holdings" && P.hby === "stock"))) fillPostStocks();
+    if (P.style === "bonds" && P.bby === "issuer") fillBondIssuers();
+    if (P.style === "breaking" || P.style === "frontpage") fillTrades();
+    if (P.style === "receipt") fillFilings();
+  }
+  function syncPostControls() {
+    for (const id of ["pStyleMarket", "pStyleOther"]) $("#" + id).querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === P.style)));
+    for (const f of Object.values(postSync)) f();
+    $("#pSells").checked = !!P.sells; $("#pKept").checked = !!P.kept; $("#pNoBig").checked = !!P.noBig;
+  }
+  async function renderPost() {
+    const seq = ++drawSeq;
+    if (!DRAW[P.style]) P.style = "chart";
+    if (!["all", "one", "committee"].includes(P.who)) P.who = "all";
+    const group = isMarket() ? "market" : P.style;
+    // "view@choice": the By politician / By stock (or bond issuer) switch of Biggest buys and Bonds and debt
+    const keys = [P.style, group, group + ":" + P.who, P.style + "@" + (P.style === "holdings" ? P.hby || "member" : P.style === "bonds" ? P.bby || "member" : "")];
+    document.querySelectorAll("[data-for]").forEach((el) => { el.hidden = !el.dataset.for.split(" ").some((k) => keys.includes(k)); });
+    syncPostControls();
+    const emptyEl = $("#postEmpty"), img = $("#postImg");
+    // while the new image draws, show a blank of the same shape instead of the previous view's image,
+    // so the old picture can't be copied or downloaded by mistake
+    if (!img.hidden) { img.src = BLANK_POST; img.classList.add("drawing"); }
+    $("#postSave").disabled = true; $("#postCopy").disabled = true; postBlob = null;
+    $("#postHint").textContent = "Drawing the image…";
+    if (!PHOTOS) PHOTOS = (await loadScript("photos.js") && window.CTC_PHOTOS) || {};
+    if (!DESC) DESC = (await loadScript("descriptions.js") && window.CTC_DESC) || {};
+    if (P.style === "bonds" && !MATURITY) MATURITY = (await loadScript("bond_maturity.js") && window.CTC_MATURITY) || {};
+    if (P.style === "terminal" && !HOLD0) HOLD0 = (await loadScript("holdings_start.js") && window.CTC_HOLDINGS) || {};
+    if (P.style === "signals" && !SIGNALS) SIGNALS = (await loadScript("signals.js") && window.CTC_SIGNALS) || { stocks: [] };
+    if (!PRICES) { await loadScript("prices.js"); PRICES = window.CTC_PRICES || null; }
+    if (seq !== drawSeq) return;
+    resolvePicks();
+    try { await Promise.all([...POSTER_FONTS.map((f) => document.fonts.load(f)), document.fonts.load('900 60px "Noto Serif JP"', JP_TEXT)]); } catch (e) { /* fonts optional */ }
+    if (seq !== drawSeq) return;
+    const W = POST_W, H = POST_H;
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    const th = THEMES[P.theme] || THEMES.light;
+    let problem;
+    try { problem = !PRICES ? "Daily prices (prices.js) failed to load." : await DRAW[P.style](ctx, W, H, th); }
+    catch (e) { console.error(e); problem = "This view cannot be drawn for this selection."; }
+    if (seq !== drawSeq) return;
+    if (problem) {
+      img.hidden = true; emptyEl.hidden = false; emptyEl.textContent = problem; $("#postSave").disabled = true; postBlob = null;
+      $("#postHint").textContent = POST_HINT;
+      return;
+    }
+    try {
+      canvas.toBlob((blob) => {
+        if (seq !== drawSeq || !blob) return;
+        postBlob = blob;
+        if (postUrl) URL.revokeObjectURL(postUrl);
+        postUrl = URL.createObjectURL(blob);
+        img.src = postUrl; img.hidden = false; img.classList.remove("drawing"); emptyEl.hidden = true; $("#postSave").disabled = false; $("#postCopy").disabled = false;
+        $("#postHint").textContent = POST_HINT;
+      }, "image/png");
+    } catch (e) {
+      // opened straight from disk, the browser treats the sharp portrait files as another site's
+      // images and won't export the canvas; redraw with the built-in small portraits
+      if (!noHD) { noHD = true; renderPost(); return; }
+      img.hidden = true; emptyEl.hidden = false; emptyEl.textContent = "This browser blocked the image. Open the page from its web address instead."; postBlob = null;
+    }
+  }
+  function fillPostMembers(withAll) {
+    const sel = $("#pMemberSel");
+    if (sel.dataset.key !== String(withAll)) {
+      const list = members.filter((m) => tradeCount.get(m.i)).sort((a, b) => a.name.localeCompare(b.name));
+      sel.innerHTML = (withAll ? '<option value="all">All of Congress</option>' : "")
+        + list.map((m) => `<option value="${m.i}">${esc(m.name)} (${esc(party(m))}) · ${plural(tradeCount.get(m.i), "trade")}</option>`).join("");
+      sel.dataset.key = String(withAll);
+    }
+    sel.value = PE.memberKey;
+  }
+  function fillPostCommittees() {
+    const sel = $("#pCommitteeSel");
+    if (!sel.options.length) sel.innerHTML = postCommittees().map((c) => `<option value="${c.cid}">${esc(c.name)} · ${plural(c.ms, "member")}</option>`).join("");
+    sel.value = PE.committee;
+  }
+  // stocks to pick from, A to Z: for market charts, the ones the selection traded in the period
+  // (the chart always shows one stock: the pick, or else the one most of them bought); for the
+  // terminal, any stock members traded in the period
+  function fillPostStocks() {
+    const sel = $("#pTicker"), from = windowStart(), by = new Map();
+    let html, eff, key;
+    if (isMarket()) {
+      const sc = postScope();
+      for (const t of postPool(sc, from)) { const g = by.get(t.t) || { t: t.t, b: 0, s: 0 }; if (t.side === "B") g.b++; else g.s++; by.set(t.t, g); }
+      const list = [...by.values()].sort((a, b) => a.t.localeCompare(b.t));
+      const desc = (g) => [g.b ? plural(g.b, "buy") : "", g.s ? plural(g.s, "sell") : ""].filter(Boolean).join(", ");
+      const buyers = new Map();
+      for (const t of postPool(sc, from)) if (t.side === "B") (buyers.get(t.t) || buyers.set(t.t, new Set()).get(t.t)).add(t.m);
+      const top = [...list].sort((a, b) => ((buyers.get(b.t) || new Set()).size - (buyers.get(a.t) || new Set()).size) || (b.b - a.b) || (b.s - a.s))[0];
+      html = list.map((g) => `<option value="${esc(g.t)}">${esc(g.t)} · ${esc(cleanName(stocks[g.t][0]).slice(0, 32))} · ${desc(g)}</option>`).join("");
+      eff = by.has(P.ticker) ? P.ticker : top ? top.t : "";
+      key = "m" + sc.kind + (sc.m ? sc.m.i : sc.cid || "") + P.window + P.sells + P.kept + list.length + list.map((g) => g.t + g.b + g.s).join("");
+    } else {
+      for (const t of postTrades("any")) {
+        if (t.side === "O" || t.time < from || !PRICES.px[t.t]) continue;
+        const g = by.get(t.t) || { t: t.t, ms: new Set(), n: 0 }; g.ms.add(t.m); g.n++; by.set(t.t, g);
+      }
+      const list = [...by.values()].sort((a, b) => a.t.localeCompare(b.t));
+      const top = [...list].sort((a, b) => b.ms.size - a.ms.size || b.n - a.n)[0];
+      eff = by.has(P.ticker) ? P.ticker : top ? top.t : "";
+      html = list.map((g) => `<option value="${esc(g.t)}">${esc(g.t)} · ${esc(cleanName(stocks[g.t][0]).slice(0, 32))} · ${plural(g.ms.size, "member")}</option>`).join("");
+      key = "t" + P.window + P.kept + list.map((g) => g.t + g.n).join("");
+    }
+    if (sel.dataset.key !== key) { sel.dataset.key = key; sel.innerHTML = html; }
+    sel.value = eff; PE.ticker = eff;
+    const box = $("#pTickerSearch");
+    if (document.activeElement !== box) box.value = eff ? `${eff} · ${cleanName((stocks[eff] || [""])[0])}` : "";
+  }
+  // the Stock box: type a ticker or company name, pick from the matches (like the search at the top)
+  function bindStockSearch() {
+    const box = $("#pTickerSearch"), ul = $("#pTickerList"), sel = $("#pTicker");
+    let items = [], at = -1;
+    const parts = (o) => { const [tk, name, ...rest] = o.textContent.split(" · "); return { v: o.value, tk, name, sub: rest.join(" · ") }; };
+    const close = () => { ul.hidden = true; box.setAttribute("aria-expanded", "false"); at = -1; };
+    const show = () => {
+      const q = box.value.trim().toLowerCase(), all = [...sel.options].map(parts);
+      const score = (o) => !q ? 1 : o.tk.toLowerCase() === q ? 4 : o.tk.toLowerCase().startsWith(q) ? 3 : o.name.toLowerCase().startsWith(q) ? 2 : (o.tk + " " + o.name).toLowerCase().includes(q) ? 1 : 0;
+      items = all.map((o) => ({ ...o, sc: score(o) })).filter((o) => o.sc).sort((a, b) => b.sc - a.sc || a.tk.localeCompare(b.tk)).slice(0, q ? 60 : 1000);
+      ul.innerHTML = items.length ? items.map((o, k) => `<li role="option" id="pTk${k}" data-v="${esc(o.v)}" aria-selected="${k === at}"><span class="tkbox">${esc(o.tk)}</span><span><span class="nm">${esc(o.name)}</span><span class="sub"> ${esc(o.sub)}</span></span></li>`).join("")
+        : '<li class="head"><span class="sub">No stock matches that in this period.</span></li>';
+      ul.hidden = false; box.setAttribute("aria-expanded", "true");
+    };
+    const pick = (v) => { close(); box.blur(); if (v && v !== sel.value) { sel.value = v; sel.dispatchEvent(new Event("change")); } else fillPostStocks(); };
+    box.addEventListener("focus", () => { box.select(); box.value = ""; show(); });
+    box.addEventListener("input", () => { at = -1; show(); });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); if (ul.hidden) show();
+        at = Math.max(0, Math.min(items.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)));
+        [...ul.querySelectorAll("li[role=option]")].forEach((li, k) => li.setAttribute("aria-selected", String(k === at)));
+        ul.querySelector(`#pTk${at}`)?.scrollIntoView({ block: "nearest" }); box.setAttribute("aria-activedescendant", `pTk${at}`);
+      } else if (e.key === "Enter") { e.preventDefault(); const o = items[at >= 0 ? at : 0]; if (o) pick(o.v); }
+      else if (e.key === "Escape") { close(); box.blur(); fillPostStocks(); }
+    });
+    ul.addEventListener("mousedown", (e) => { const li = e.target.closest("li[data-v]"); if (li) { e.preventDefault(); pick(li.dataset.v); } });
+    box.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== box) { close(); fillPostStocks(); } }, 120));
+  }
+  // every dropdown becomes a search box: type to narrow its options, arrows and Enter to pick. The <select>
+  // stays (hidden) as the source of truth, so the code that fills it and listens to it is unchanged.
+  let gselN = 0;
+  function searchableSelect(sel) {
+    const n = ++gselN, wrap = document.createElement("div"), box = document.createElement("input"), ul = document.createElement("ul");
+    wrap.className = "combo pcombo gsel";
+    box.type = "text"; box.id = `gsel${n}`; box.autocomplete = "off"; box.spellcheck = false;
+    box.setAttribute("role", "combobox"); box.setAttribute("aria-expanded", "false"); box.setAttribute("aria-controls", `gselList${n}`); box.setAttribute("aria-autocomplete", "list");
+    ul.id = `gselList${n}`; ul.setAttribute("role", "listbox"); ul.hidden = true;
+    wrap.append(box, ul); sel.after(wrap); sel.hidden = true;
+    const label = document.querySelector(`label[for="${sel.id}"]`);
+    if (label) label.htmlFor = box.id; else box.setAttribute("aria-label", sel.getAttribute("aria-label") || "Search");
+    let items = [], at = -1;
+    const current = () => sel.options[sel.selectedIndex]?.textContent || "";
+    const sync = () => { if (document.activeElement !== box && box.value !== current()) box.value = current(); };
+    const close = () => { ul.hidden = true; box.setAttribute("aria-expanded", "false"); at = -1; };
+    const show = () => {
+      const words = box.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      items = [...sel.options].filter((o) => !o.disabled && words.every((w) => o.textContent.toLowerCase().includes(w))).slice(0, 300);
+      ul.innerHTML = items.length ? items.map((o, k) => {
+        const [main, ...rest] = o.textContent.split(" · ");
+        return `<li role="option" id="gsel${n}o${k}" aria-selected="${k === at}"><span class="nm">${esc(main)}${rest.length ? `<span class="sub"> · ${esc(rest.join(" · "))}</span>` : ""}</span></li>`;
+      }).join("") : '<li class="head"><span class="sub">Nothing matches.</span></li>';
+      ul.hidden = false; box.setAttribute("aria-expanded", "true");
+    };
+    const pick = (o) => { close(); box.blur(); if (o && (o.value !== sel.value || sel.id === "member")) { sel.value = o.value; sel.dispatchEvent(new Event("change", { bubbles: true })); } sync(); };
+    box.addEventListener("focus", () => { box.value = ""; show(); });
+    box.addEventListener("input", () => { at = -1; show(); });
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); if (ul.hidden) show();
+        at = Math.max(0, Math.min(items.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)));
+        [...ul.querySelectorAll("li[role=option]")].forEach((li, k) => li.setAttribute("aria-selected", String(k === at)));
+        ul.querySelector(`#gsel${n}o${at}`)?.scrollIntoView({ block: "nearest" }); box.setAttribute("aria-activedescendant", `gsel${n}o${at}`);
+      } else if (e.key === "Enter") { e.preventDefault(); pick(items[at >= 0 ? at : 0]); }
+      else if (e.key === "Escape") { close(); box.blur(); sync(); }
+    });
+    ul.addEventListener("mousedown", (e) => { const li = e.target.closest("li[role=option]"); if (li) { e.preventDefault(); pick(items[+li.id.split("o").pop()]); } });
+    box.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== box) { close(); sync(); } }, 120));
+    // the page fills and sets the <select> in many places: keep the box showing its current choice
+    new MutationObserver(sync).observe(sel, { childList: true, subtree: true, attributes: true });
+    sel.addEventListener("change", sync);
+    setInterval(sync, 400);
+    sync();
+  }
+  function fillBondIssuers() {
+    const sel = $("#pBondSel"), since = windowStart(), by = new Map();
+    for (const t of trades) {
+      if (t.time < since || !t.lo || t.side !== "B" || !isDebt(t) || isBiz(members[t.m])) continue;
+      t.debt = t.debt || debtInfo(t);
+      const g = by.get(t.debt.name) || { name: t.debt.name, ms: new Set(), amt: 0 }; g.ms.add(t.m); g.amt += t.amt; by.set(t.debt.name, g);
+    }
+    const list = [...by.values()].sort((a, b) => b.ms.size - a.ms.size || b.amt - a.amt);
+    const key = P.window + ":" + list.length;
+    if (sel.dataset.key !== key) {
+      sel.dataset.key = key;
+      sel.innerHTML = list.map((g) => `<option value="${esc(g.name)}">${esc(g.name)} · ${g.ms.size} ${g.ms.size === 1 ? "person" : "people"} · ${usdEst(g.amt)}</option>`).join("");
+    }
+    PE.bond = by.has(P.bond) ? P.bond : list[0] ? list[0].name : "";
+    sel.value = PE.bond;
+  }
+  // trades to pick from for one-trade posters: the newest disclosures (the picked member's, when one is picked above)
+  function fillTrades() {
+    const sel = $("#pTradeSel");
+    const mem = S.members.length ? new Set(S.members.map(Number)) : null;
+    const list = trades.filter((t) => t.st && t.side !== "O" && t.ftime && t.T.ep && (mem == null || mem.has(t.m)))
+      .sort((a, b) => b.ftime - a.ftime || b.amt - a.amt).slice(0, 200);
+    const cur = selectedTrade();
+    if (cur && !list.includes(cur)) list.unshift(cur);
+    const key = list.length + ":" + list.slice(0, 3).map(tradeKey).join(",");
+    if (sel.dataset.key !== key) {
+      sel.dataset.key = key;
+      sel.innerHTML = list.map((t) => `<option value="${esc(tradeKey(t))}">${fmtDate(t.fd, { month: "short", day: "numeric" })} · ${esc(shortName(members[t.m]))} · ${t.side === "S" ? "sold" : "bought"} ${esc(t.t)} · ${esc(amountShort(t))}</option>`).join("");
+    }
+    if (!cur) P.trade = list[0] ? tradeKey(list[0]) : "";
+    sel.value = P.trade;
+  }
+  // filings (one report each, often several trades) for the receipt: newest first, the picked member's when one is picked above
+  function fillFilings() {
+    const sel = $("#pFilingSel");
+    const mem = S.members.length ? new Set(S.members.map(Number)) : null;
+    const by = new Map();
+    for (const t of trades) {
+      if (!t.st || t.side === "O" || !t.ftime || !t.T.ep || (mem != null && !mem.has(t.m))) continue;
+      const g = by.get(String(t.doc)) || { doc: String(t.doc), m: t.m, ftime: t.ftime, fd: t.fd, n: 0 };
+      g.n++; by.set(g.doc, g);
+    }
+    const list = [...by.values()].sort((a, b) => b.ftime - a.ftime || b.n - a.n).slice(0, 200);
+    const cur = selectedFiling();
+    if (cur && !list.some((g) => g.doc === String(P.filing))) list.unshift({ doc: String(P.filing), m: cur[0].m, fd: cur[0].fd, n: cur.length });
+    const key = list.length + ":" + list.slice(0, 3).map((g) => g.doc).join(",");
+    if (sel.dataset.key !== key) {
+      sel.dataset.key = key;
+      sel.innerHTML = list.map((g) => `<option value="${esc(g.doc)}">${fmtDate(g.fd, { month: "short", day: "numeric" })} · ${esc(shortName(members[g.m]))} · ${plural(g.n, "stock trade")}</option>`).join("");
+    }
+    if (!cur) P.filing = list[0] ? list[0].doc : "";
+    sel.value = String(P.filing);
+  }
+  async function saveFile(name, blob) {
+    const hint = $("#postHint");
+    const downloads = window.claude?.use ? await window.claude.use("downloads").catch(() => null) : null;
+    if (downloads) {
+      try { await downloads.save({ filename: name, data: blob }); hint.textContent = "Saved."; }
+      catch (e) { hint.textContent = e && e.code === "declined" ? "Download cancelled." : "Unable to save here. Right-click the image to save it instead."; }
+      return;
+    }
+    const url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+  function postFileName() {
+    const slug = (s) => s.toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^-|-$/g, "");
+    const pm = PE.member, who = pm ? slug(pm.name) : "member", tr = selectedTrade();
+    const one = tr ? `${slug(members[tr.m].name)}-${slug(tr.t)}` : "trade";
+    const scope = P.who === "one" ? who : P.who === "committee" ? slug(committeeShort(PE.committee)) : "congress";
+    const name = isMarket() ? `${P.style === "chart" ? "chart" : P.style}-${scope}-${PE.ticker ? slug(PE.ticker) : "all-stocks"}-${D.prices_through}.png` : {
+      terminal: `terminal-${slug(PE.ticker)}`,
+      list: `${P.who === "all" ? "congress" : scope}-latest-${{ B: "buys", S: "sells", both: "trades" }[P.side]}`,
+      breaking: `breaking-${one}`,
+      scorecard: `scorecard-${who}`,
+      holdings: P.hby === "stock" ? `biggest-buyers-${slug(PE.ticker)}-${P.window}` : `biggest-buys-${who}-${P.window}`,
+      parties: `democrats-vs-republicans-${slug(PE.ticker)}-${P.window}`,
+      bonds: P.bby === "issuer" ? `bond-buyers-${slug(PE.bond)}-${P.window}` : `${PE.memberKey === "all" ? "bonds-everyone" : `bonds-${who}`}${P.debt && P.debt !== "all" ? `-${P.debt}` : ""}-${P.window}`,
+      leaders: "congress-best-to-follow",
+      conflict: PE.memberKey === "all" ? "committee-map-congress" : `committee-map-${who}`,
+      signals: "public-signals",
+      frontpage: `front-page-${one}`,
+      card: `card-${who}`,
+      receipt: (() => { const f = selectedFiling(); return f ? `receipt-${slug(members[f[0].m].name)}-${P.filing}` : "receipt"; })(),
+    }[P.style] + `-${D.prices_through}.png`;
+    return name;
+  }
+  async function savePost() { if (postBlob) await saveFile(postFileName(), postBlob); }
+  const postSync = {};  // re-highlights a post control's buttons after code changes its value
+  function bindPostControls() {
+    for (const id of ["pStyleMarket", "pStyleOther"]) $("#" + id).addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      P.style = b.dataset.v; save(); renderPost();
+    });
+    const segs = { pWindow: "window", pSide: "side", pDays: "days", pSort: "sort", pTheme: "theme", pDebt: "debt", pHBy: "hby", pBBy: "bby" };
+    for (const [id, key] of Object.entries(segs)) postSync[id] = bindSeg(id, () => P[key], (v) => { P[key] = v; save(); renderPost(); });
+    // a new "trades by" choice starts from all of that selection's stocks
+    postSync.pWho = bindSeg("pWho", () => P.who, (v) => { if (v !== P.who && isMarket()) P.ticker = ""; P.who = v; save(); renderPost(); });
+    $("#pMemberSel").addEventListener("change", (e) => { P.member = e.target.value; if (isMarket()) P.ticker = ""; save(); renderPost(); });
+    $("#pCommitteeSel").addEventListener("change", (e) => { P.committee = e.target.value; if (isMarket()) P.ticker = ""; save(); renderPost(); });
+    $('#pWindow button[data-v="all"]').textContent = `Since ${START_SHORT}`;
+    $("#pTradeSel").addEventListener("change", (e) => { P.trade = e.target.value; save(); renderPost(); });
+    $("#pFilingSel").addEventListener("change", (e) => { P.filing = e.target.value; save(); renderPost(); });
+    $("#pBondSel").addEventListener("change", (e) => { P.bond = e.target.value; save(); renderPost(); });
+    for (const [id, key] of [["pSells", "sells"], ["pKept", "kept"], ["pNoBig", "noBig"]]) $("#" + id).addEventListener("change", (e) => { P[key] = e.target.checked; save(); renderPost(); });
+    $("#pTicker").addEventListener("change", (e) => { P.ticker = e.target.value; save(); renderPost(); });
+    bindStockSearch();
+    for (const sel of document.querySelectorAll("#dvApp select:not([hidden])")) searchableSelect(sel);
+    $("#postSave").addEventListener("click", savePost);
+    // copy the finished image to the clipboard (enabled only once it's drawn)
+    $("#postCopy").addEventListener("click", async () => {
+      const hint = $("#postHint");
+      if (!postBlob) return;
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": postBlob })]);
+        hint.textContent = "Image copied. Paste it anywhere.";
+      } catch (e) {
+        hint.textContent = "This browser won't copy images here. Right-click the image and choose Copy image, or use Download.";
+      }
+      setTimeout(() => { if (hint.textContent.startsWith("Image copied") || hint.textContent.startsWith("This browser")) hint.textContent = POST_HINT; }, 4000);
+    });
+    // click (or Enter on) the image to see it full size; click anywhere, the × or Esc to close
+    const viewer = $("#imgView"), openViewer = () => {
+      if (!postUrl || $("#postImg").hidden) return;
+      if (EMBED && window.parent !== window) { window.parent.postMessage({ type: "ctc-dv-image", src: postUrl }, location.origin); return; }
+      viewer.querySelector("img").src = postUrl; viewer.hidden = false; document.body.style.overflow = "hidden";
+      viewer.querySelector("button").focus();
+    };
+    const closeViewer = () => { if (viewer.hidden) return; viewer.hidden = true; document.body.style.overflow = ""; $("#postImg").focus(); };
+    $("#postImg").addEventListener("click", openViewer);
+    $("#postImg").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openViewer(); } });
+    viewer.addEventListener("click", closeViewer);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeViewer(); });
+  }
+
+
+  // ---------- mounting on the Data Visualization page ----------
+  let bound = false;
+  window.HFDataViz = {
+    markup: "    <div class=\"post-grid\">\n      <div class=\"post-controls\">\n        <div class=\"field\">\n          <span class=\"label\">Chart</span>\n          <div class=\"styles\" id=\"pStyleMarket\" role=\"group\" aria-label=\"Chart\">\n            <button type=\"button\" data-v=\"chart\"><b>Stock price chart</b><span>One stock's price, with its largest buys and sells, their amounts and the average buy price</span></button>\n            <button type=\"button\" data-v=\"signals\"><b>Public signals</b><span>Congress buying scored with contracts, lobbying, hearings and insider buys</span></button>\n</div>\n        </div>\n        <div class=\"field\">\n          <span class=\"label\">More info</span>\n          <div class=\"styles\" id=\"pStyleOther\" role=\"group\" aria-label=\"More info\">\n            <button type=\"button\" data-v=\"terminal\"><b>Stock breakdown</b><span>One stock's price, with each member's buys, sells and average buy price</span></button>\n            <button type=\"button\" data-v=\"list\"><b>Latest disclosures</b><span>The most recent filers and their largest trades</span></button>\n            <button type=\"button\" data-v=\"parties\"><b>Democrats vs Republicans</b><span>One stock: what each party bought and sold, and how their buys did</span></button>\n            <button type=\"button\" data-v=\"bonds\"><b>Bonds and debt</b><span>Treasuries, municipal and corporate bonds a member (or everyone) bought</span></button>\n            <button type=\"button\" data-v=\"holdings\"><b>Biggest buys</b><span>One member's 15 largest buys in the period, and how much of each they also sold</span></button>\n            <button type=\"button\" data-v=\"scorecard\"><b>Member factsheet</b><span>One member's return vs the S&amp;P 500, largest buys and sector mix</span></button>\n            <button type=\"button\" data-v=\"leaders\"><b>Copy-trading leaderboard</b><span>Members ranked by copy-trading score for the period</span></button>\n            <button type=\"button\" data-v=\"conflict\"><b>Committee overlap</b><span>Share of trading in sectors their committees oversee</span></button>\n            <button type=\"button\" data-v=\"spikes\"><b>Buying spikes</b><span>Stocks several members bought within a month, with amounts</span></button>\n          </div>\n        </div>\n        <div class=\"field\" data-for=\"market list\">\n          <span class=\"label\">Trades by</span>\n          <div class=\"seg\" id=\"pWho\" role=\"group\" aria-label=\"Trades by\">\n            <button type=\"button\" data-v=\"all\">Everyone</button>\n            <button type=\"button\" data-v=\"one\">One politician</button>\n            <button type=\"button\" data-v=\"committee\">One committee</button>\n          </div>\n        </div>\n        <div class=\"field\" data-for=\"market:one list:one scorecard conflict card holdings@member bonds@member\">\n          <label for=\"pMemberSel\">Politician</label>\n          <select id=\"pMemberSel\"></select>\n        </div>\n        <div class=\"field\" data-for=\"market:committee list:committee\">\n          <label for=\"pCommitteeSel\">Committee</label>\n          <select id=\"pCommitteeSel\"></select>\n        </div>\n        <div class=\"field\" data-for=\"breaking frontpage\">\n          <label for=\"pTradeSel\">Trade</label>\n          <select id=\"pTradeSel\"></select>\n        </div>\n        <div class=\"field\" data-for=\"receipt\">\n          <label for=\"pFilingSel\">Filing</label>\n          <select id=\"pFilingSel\"></select>\n        </div>\n        <div class=\"field\" data-for=\"market terminal parties holdings@stock\">\n          <label for=\"pTickerSearch\">Stock</label>\n          <div class=\"combo pcombo\">\n            <input type=\"text\" id=\"pTickerSearch\" placeholder=\"Ticker or company\" role=\"combobox\" aria-expanded=\"false\" aria-controls=\"pTickerList\" aria-autocomplete=\"list\" autocomplete=\"off\" spellcheck=\"false\">\n            <ul id=\"pTickerList\" role=\"listbox\" aria-label=\"Stocks\" hidden></ul>\n          </div>\n          <select id=\"pTicker\" hidden></select>\n        </div>\n        <div class=\"field\" data-for=\"market terminal scorecard conflict leaders spikes holdings parties bonds\">\n          <span class=\"label\">Period</span>\n          <div class=\"seg\" id=\"pWindow\" role=\"group\" aria-label=\"Chart period\">\n            <button type=\"button\" data-v=\"90\">3 months</button>\n            <button type=\"button\" data-v=\"182\">6 months</button>\n            <button type=\"button\" data-v=\"ytd\">This year</button>\n            <button type=\"button\" data-v=\"365\">1 year</button>\n            <button type=\"button\" data-v=\"all\">Since the start</button>\n          </div>\n        </div>\n        <label class=\"check\" data-for=\"market\" for=\"pSells\"><input type=\"checkbox\" id=\"pSells\"> Mark sells too</label>\n        <div class=\"field\" data-for=\"holdings\">\n          <span class=\"label\">Show</span>\n          <div class=\"seg\" id=\"pHBy\" role=\"group\" aria-label=\"Biggest buys by\">\n            <button type=\"button\" data-v=\"member\">By politician</button>\n            <button type=\"button\" data-v=\"stock\">By stock</button>\n          </div>\n        </div>\n        <div class=\"field\" data-for=\"bonds\">\n          <span class=\"label\">Show</span>\n          <div class=\"seg\" id=\"pBBy\" role=\"group\" aria-label=\"Bonds by\">\n            <button type=\"button\" data-v=\"member\">By politician</button>\n            <button type=\"button\" data-v=\"issuer\">By bond issuer</button>\n          </div>\n        </div>\n        <div class=\"field\" data-for=\"bonds@issuer\">\n          <label for=\"pBondSel\">Bond issuer</label>\n          <select id=\"pBondSel\"></select>\n        </div>\n        <div class=\"field\" data-for=\"bonds@member\">\n          <span class=\"label\">Type of debt</span>\n          <div class=\"seg\" id=\"pDebt\" role=\"group\" aria-label=\"Type of debt\">\n            <button type=\"button\" data-v=\"all\">All</button>\n            <button type=\"button\" data-v=\"treasury\">U.S. Treasury</button>\n            <button type=\"button\" data-v=\"muni\">Municipal</button>\n            <button type=\"button\" data-v=\"corp\">Corporate</button>\n            <button type=\"button\" data-v=\"bank\">Bank notes &amp; CDs</button>\n            <button type=\"button\" data-v=\"fund\">Bond funds</button>\n          </div>\n        </div>\n        <div class=\"field\" data-for=\"list\">\n          <span class=\"label\">Show</span>\n          <div class=\"seg\" id=\"pSide\" role=\"group\" aria-label=\"Buys or sells\">\n            <button type=\"button\" data-v=\"B\">Buys</button>\n            <button type=\"button\" data-v=\"S\">Sells</button>\n            <button type=\"button\" data-v=\"both\">Both</button>\n          </div>\n        </div>\n        <div class=\"field\" data-for=\"list\">\n          <span class=\"label\">Disclosed in the last</span>\n          <div class=\"seg\" id=\"pDays\" role=\"group\" aria-label=\"Disclosure period\">\n            <button type=\"button\" data-v=\"7\">7 days</button>\n            <button type=\"button\" data-v=\"30\">30 days</button>\n            <button type=\"button\" data-v=\"60\">60 days</button>\n            <button type=\"button\" data-v=\"90\">90 days</button>\n          </div>\n        </div>\n        <div class=\"field\" data-for=\"none\">\n          <span class=\"label\">Order by</span>\n          <div class=\"seg\" id=\"pSort\" role=\"group\" aria-label=\"Order by\">\n            <button type=\"button\" data-v=\"amt\">Biggest</button>\n            <button type=\"button\" data-v=\"recent\">Newest</button>\n            <button type=\"button\" data-v=\"gain\">Best since</button>\n          </div>\n        </div>\n        <label class=\"check\" data-for=\"none\" hidden for=\"pKept\" title=\"Uses the Filter's \u201cWhich trades count\u201d settings (large caps, committee sectors, late disclosures, options)\"><input type=\"checkbox\" id=\"pKept\"> Apply the Filter</label>\n        <label class=\"check\" data-for=\"scorecard\" for=\"pNoBig\" title=\"Leaves out S&amp;P 500 companies, companies above the Filter's market-cap limit, tickers on its exclusion list, and funds and ETFs\"><input type=\"checkbox\" id=\"pNoBig\"> Exclude large caps and funds</label>\n        <div class=\"field\">\n          <span class=\"label\">Look</span>\n          <div class=\"seg\" id=\"pTheme\" role=\"group\" aria-label=\"Look\">\n            <button type=\"button\" data-v=\"light\">Light</button>\n            <button type=\"button\" data-v=\"dark\">Dark</button>\n          </div>\n        </div>\n      </div>\n      <div class=\"post-preview\">\n        <img id=\"postImg\" alt=\"Data visualization\" tabindex=\"0\" role=\"button\" title=\"Click to see it full size\">\n        <p class=\"empty\" id=\"postEmpty\" hidden></p>\n        <div class=\"post-actions\">\n          <button type=\"button\" class=\"btn primary\" id=\"postSave\">Download image</button>\n          <button type=\"button\" class=\"btn\" id=\"postCopy\">Copy image</button>\n          <span id=\"postHint\">Click the image to view it full size, or right-click to save it.</span>\n        </div>\n      </div>\n    </div>\n    <div class=\"img-view\" id=\"imgView\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Image, full size\" hidden>\n      <button type=\"button\" class=\"img-view-close\" aria-label=\"Close\">\u00d7</button>\n      <img alt=\"Data visualization, full size\">\n    </div>",
+    mount() {
+      bindPostControls();
+      if (window.matchMedia("(pointer: coarse)").matches) { POST_HINT = "You can also press and hold the image to save it."; $("#postHint").textContent = POST_HINT; }
+      renderPost();
+      bound = true;
+    },
+  };
+})();
