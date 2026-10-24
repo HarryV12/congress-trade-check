@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Public+Sans:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="style.css?v=20261025v">
+<link rel="stylesheet" href="style.css?v=20261025w">
 <script>/* light unless the viewer picked dark */ try { document.documentElement.dataset.theme = localStorage.getItem("ctc-theme") === "dark" ? "dark" : "light"; } catch (e) { document.documentElement.dataset.theme = "light"; }</script>
 </head>
 <body>
@@ -35,9 +35,17 @@
 </header>
 <div id="subbar" class="subbar" hidden><div class="wrap sub-row"></div></div>
 <main id="app" class="wrap" tabindex="-1"><p class="loading">Loading the trades…</p></main>
+<footer class="site-foot">
+  <div class="wrap sf-grid">
+    <div class="sf-brand"><a class="brand" href="#/">HarryV12 Finance</a><p>Markets, AI and Congress trades, explained with data.</p></div>
+    <nav class="sf-col" aria-label="Markets"><b>Markets</b><a href="#/">Home</a><a href="#/movers">Market movers</a><a href="#/drops">Market drops</a><a href="#/aftermath">Aftermath</a></nav>
+    <nav class="sf-col" aria-label="Industry"><b>Industry</b><a href="#/investments">Investments</a><a href="#/production">Production</a><a href="#/aibubble">AI bubble</a></nav>
+    <nav class="sf-col" aria-label="Congress"><b>Congress</b><a href="#/congress">Congress trades</a><a href="#/politicians">Politicians</a><a href="#/stocks">Stocks</a><a href="#/leaders">Leaderboard</a><a href="#/signals">Signals</a><a href="#/method">How the numbers are made</a></nav>
+  </div>
+</footer>
 <script src="../data.js"></script>
 <script src="../series.js"></script>
 <script src="../holdings_start.js"></script>
-<script src="app.js?v=20261025v"></script>
+<script src="app.js?v=20261025w"></script>
 </body>
 </html>
