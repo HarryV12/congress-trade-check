@@ -1051,7 +1051,7 @@
     if (kind === "treasury") return /BILL/.test(up) ? "U.S. Treasury bills" : /BOND/.test(up) && !/NOTE/.test(up) ? "U.S. Treasury bonds" : "U.S. Treasury notes";
     let name = String(a || "").replace(/\s+/g, " ").trim().replace(/\s+(B\/E|BE\/R|SER(IES)?\b|RFDG|DUE\b|DTD\b|FC\b|PTC\b).*$/i, "").replace(/\s*\d{1,2}(\.\d+)?\s?%.*$/, "").replace(/\s+\d{1,2}\/\d{1,2}\/\d{2,4}.*$/, "").trim();
     name = name.length > 4 && name === name.toUpperCase() ? titleCase(name) : name;
-    return ((kind === "fund" ? name : readableIssuer(name)) || a).replace(/Ishares/gi, "iShares").replace(/Spdr/g, "SPDR");
+    return ((kind === "fund" ? name : readableIssuer(name)) || a).replace(/\bIshares\b/gi, "iShares").replace(/\bSpdr\b/g, "SPDR");
   }
   // "DUE 11/15/40": the date the bond is repaid (15 Nov 2040)
   const dueDate = (a) => { const m = String(a || "").match(/\bDUE\s+(\d{1,2})\/(\d{1,2})\/(\d{2,4})/i); if (!m) return null; const y = m[3].length === 2 ? 2000 + +m[3] : +m[3]; return [`${y}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`, "filed"]; };
@@ -2193,6 +2193,29 @@
       <p class="small muted">Sources: U.S. House Clerk financial disclosures (Periodic Transaction Reports) and the Office of Government Ethics (Form 278-T). Senate trades: Quiver Quantitative's transcriptions of Senate reports. Prices: Yahoo Finance. Company size and industry: Nasdaq. Committees and official portraits: the congress-legislators and unitedstates/images projects. This is a research tool, not financial advice.</p>`;
   }
 
+  // ---------- Data Visualization: the classic site's image maker on its own page (linked from the footer only) ----------
+  // The classic page at ?view=dataviz shows just that panel; it is sized to its content here so the page scrolls as one.
+  function pageDataViz() {
+    setNav("dataviz");
+    app.innerHTML = `<h1>Data Visualization</h1>
+      <p class="lede">Charts and fact sheets built from the Congress filings: a stock's price with each trade marked, a politician's record, the latest disclosures and more. Pick a view, then download or copy it as an image.</p>
+      <iframe id="dvFrame" class="dv-frame" src="../index.html?view=dataviz&v=20261025b" title="Data Visualization" allow="clipboard-write"></iframe>`;
+    const fr = $("#dvFrame");
+    const fit = () => { try { const pm = fr.contentDocument && fr.contentDocument.getElementById("postMaker"); if (pm) fr.style.height = `${Math.ceil(pm.getBoundingClientRect().height) + 24}px`; } catch (e) { /* not loaded yet */ } };
+    fr.addEventListener("load", () => {
+      fr.classList.add("ready"); fit();
+      try { new ResizeObserver(fit).observe(fr.contentDocument.getElementById("postMaker")); } catch (e) { /* older browser: sized once */ }
+    });
+  }
+  // the image maker asks for its full-size view here, so it covers the whole page rather than just the frame
+  window.addEventListener("message", (e) => {
+    if (e.origin !== location.origin || !e.data || e.data.type !== "ctc-dv-image") return;
+    const v = $("#dvView"); $("img", v).src = e.data.src; v.hidden = false; document.body.style.overflow = "hidden"; $("button", v).focus();
+  });
+  const closeDv = () => { const v = $("#dvView"); if (v.hidden) return; v.hidden = true; document.body.style.overflow = ""; };
+  $("#dvView").addEventListener("click", closeDv);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDv(); });
+
   // ---------- routing ----------
   let lastPage = null;
   function route(keepScroll) {
@@ -2214,6 +2237,7 @@
     else if (page === "production") pageProduction();
     else if (page === "aibubble") pageAIBubble();
     else if (page === "method") pageMethod();
+    else if (page === "dataviz") pageDataViz();
     else pageMarkets();
     // the page's period and its other main choices stay in a bar under the top bar while scrolling
     pinBar();
@@ -2233,6 +2257,7 @@
   $("#theme").addEventListener("click", () => {
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t; try { localStorage.setItem("ctc-theme", t); } catch (e) { /* storage blocked */ }
+    const fr = $("#dvFrame"); try { if (fr && fr.contentDocument) fr.contentDocument.documentElement.dataset.theme = t; } catch (e) { /* not loaded */ }
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && fMoreOpen) { fMoreOpen = false; const pn = $("#subbar .fmore-panel"); if (pn) pn.hidden = true; $$("[data-fmore]").forEach((b) => b.setAttribute("aria-expanded", "false")); } });
   bindSearch();

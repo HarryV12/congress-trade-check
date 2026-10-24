@@ -643,10 +643,17 @@ footer { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; }
    Sentences: 15px. Notes inside compact rows, buttons and cards: 13px. Data numbers, labels and tables unchanged. */
 .note, .ctx, .sc2-sub, details.howto .body, .removed, .member-card .hidden-note, .member-card .notice, .post-actions { font-size: 15px; }
 .toggle span, .rank-row .meta, .tile .s, .pcard-foot, .pcard-nums span, .nm span, .styles button span { font-size: 13px; }
+/* ===== embed mode (?view=dataviz): just the Data Visualization panel ===== */
+.embed-dv body { padding: 0; background: transparent; }
+.embed-dv .wrap { max-width: none; display: block; }
+.embed-dv .wrap > *:not(#postMaker) { display: none !important; }
+.embed-dv #postMaker { margin: 0; }
+.embed-dv #postMaker > div:first-child, .embed-dv label[for="pKept"] { display: none !important; }
 </style>
-<script>/* light unless the viewer picked dark with the Light/Dark button */ var ctcTheme = "light"; try { ctcTheme = localStorage.getItem("ctc-theme") === "dark" ? "dark" : "light"; } catch (e) {} document.documentElement.dataset.theme = ctcTheme;</script>
+<script>/* light unless the viewer picked dark with the Light/Dark button */ var ctcTheme = "light"; try { ctcTheme = localStorage.getItem("ctc-theme") === "dark" ? "dark" : "light"; } catch (e) {} document.documentElement.dataset.theme = ctcTheme;
+/* ?view=dataviz: only the Data Visualization panel, for the new site's page */ if (/[?&]view=dataviz\b/.test(location.search)) document.documentElement.classList.add("embed-dv");</script>
 <script>/* visitor counts (GoatCounter: no cookies), only on the public site, not the private Claude copy */
-if (location.hostname === "harryv12.github.io") {
+if (location.hostname === "harryv12.github.io" && !/[?&]view=dataviz\b/.test(location.search)) {
   var gc = document.createElement("script");
   gc.async = true; gc.src = "https://gc.zgo.at/count.js"; gc.dataset.goatcounter = "https://congress-trade-check.goatcounter.com/count";
   document.head.appendChild(gc);
@@ -1333,8 +1340,11 @@ if (location.hostname === "harryv12.github.io") {
     lines: { kept: true, spy: true, inv: true, every: true, big: true } };
   const postDefaults = { style: "chart", who: "all", trade: "", filing: "", ticker: "", member: "", committee: "", window: "182", sells: true, side: "B", days: "30", sort: "amt", kept: false, noBig: false, debt: "all", hby: "member", bby: "member", bond: "", theme: "light", pv: 11 };
   let S = { ...defaults }, P = { ...postDefaults };
+  // embedded in the new site's Data Visualization page: the Filter isn't shown there, so it starts from the defaults,
+  // is never saved, and "Apply the Filter" stays off
+  const EMBED = document.documentElement.classList.contains("embed-dv");
   try {
-    const saved = JSON.parse(localStorage.getItem("ctc-state") || "{}");
+    const saved = EMBED ? {} : JSON.parse(localStorage.getItem("ctc-state") || "{}");
     S = { ...defaults, ...saved, lines: { ...defaults.lines, ...(saved.lines || {}) } };
     // v9: percentages became the default view, and members rank by return
     if (!(saved.v >= 9)) { S.units = "pct"; S.leaderSort = "ret"; S.v = 9; }
@@ -1363,6 +1373,7 @@ if (location.hostname === "harryv12.github.io") {
     P = { ...postDefaults, ...savedPost };
     // Receipt, Trading card, Front page and Breaking were removed
     if (["breaking", "frontpage", "card", "receipt"].includes(P.style)) P.style = "chart";
+    if (EMBED) P.kept = false;
   } catch (e) { /* storage blocked */ }
   if (!Array.isArray(S.members)) S.members = [];
   S.members = [...new Set(S.members.map(String))].filter((i) => members[+i]);
@@ -1382,7 +1393,7 @@ if (location.hostname === "harryv12.github.io") {
   if (S.committee !== "all" && !D.committees[S.committee]) S.committee = "all";
   if (S.ticker && !stocks[S.ticker]) S.ticker = "";
   applyTiming();
-  const save = () => { try { localStorage.setItem("ctc-state", JSON.stringify(S)); localStorage.setItem("ctc-post", JSON.stringify(P)); } catch (e) { /* ignore */ } };
+  const save = () => { try { if (!EMBED) localStorage.setItem("ctc-state", JSON.stringify(S)); localStorage.setItem("ctc-post", JSON.stringify(P)); } catch (e) { /* ignore */ } };
   let tradeLimit = 5, leaderLimit = 5;
 
   // ---------- formatting ----------
@@ -6707,6 +6718,7 @@ if (location.hostname === "harryv12.github.io") {
     // click (or Enter on) the image to see it full size; click anywhere, the × or Esc to close
     const viewer = $("#imgView"), openViewer = () => {
       if (!postUrl || $("#postImg").hidden) return;
+      if (EMBED && window.parent !== window) { window.parent.postMessage({ type: "ctc-dv-image", src: postUrl }, location.origin); return; }
       viewer.querySelector("img").src = postUrl; viewer.hidden = false; document.body.style.overflow = "hidden";
       viewer.querySelector("button").focus();
     };

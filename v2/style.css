@@ -699,3 +699,13 @@ details.mth[open] > summary::after { content: "−"; }
 @media (max-width: 860px) { .sf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; } .sf-brand { grid-column: 1 / -1; } }
 .sf-note { border-top: 1px solid var(--line); padding-top: 14px; padding-bottom: 20px; font-size: 13px; color: var(--muted); }
 .sf-grid { padding-bottom: 28px; }
+
+/* ===== Data Visualization page (the classic image maker, embedded) ===== */
+.dv-frame { display: block; width: 100%; height: 1100px; border: 0; background: transparent; opacity: 0; transition: opacity .2s; }
+.dv-frame.ready { opacity: 1; }
+.sf-dv { display: inline-block; margin-top: 12px; font-size: 14px; font-weight: 600; color: var(--accent); text-decoration: none; }
+.sf-dv:hover { text-decoration: underline; }
+.dv-view { position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / .82); display: grid; place-items: center; padding: 24px; cursor: zoom-out; }
+.dv-view img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 10px 40px rgb(0 0 0 / .4); }
+.dv-view button { position: absolute; top: 14px; right: 18px; font-size: 30px; line-height: 1; color: #fff; background: none; border: 0; cursor: pointer; }
+.dv-view[hidden] { display: none; }
