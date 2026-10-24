@@ -765,11 +765,11 @@
       <div class="section card"><h2>Hypothetical portfolio of their buys <span class="muted">return on the money put in, from the ${f.timing === "public" ? "disclosure" : "trade"} date</span></h2>
         <div class="lines" id="lines"></div><div id="portfolio"></div>
         <p class="small muted">Each buy enters at its best-estimate amount and leaves when they report a full sale of the stock; otherwise it is valued at the latest close. "S&amp;P 500" puts the same dollars in an S&amp;P 500 fund on the same days.</p></div>
+      <div class="section">${card(`${esc(m.name)}'s biggest buys`, `the 15 largest ${periodWords()}, what they sold and what they still hold`, `<div id="ring" class="ring2"></div>`)}</div>
       <div class="grid cols-2 section">
         ${card("Scorecard", "their buys against the S&amp;P 500", `<div id="score"></div>`)}
         ${card("Factsheet", "", `<div id="facts"></div>`)}
       </div>
-      <div class="section">${card(`${esc(m.name)}'s biggest buys`, `the 15 largest ${periodWords()}, what they sold and what they still hold`, `<div id="ring" class="ring2"></div>`)}</div>
       <div class="grid cols-3 section">
         ${card("How fast they report", "days from trade to disclosure", `<div id="delays"></div>`)}
         ${card("Committee overlap", periodWords(), `<div id="overlap"></div>`)}
@@ -2071,6 +2071,128 @@
         <p class="small muted">Facts last checked ${fmtDate(D.updated)}; prices to ${fmtDate(P.dates[L])}. Reported values of private companies are not official. Not investment advice.</p></div>`;
   }
 
+  // ---------- How the numbers are made (the classic site's method notes, for the Congress pages) ----------
+  async function pageMethod() {
+    setNav("method");
+    app.innerHTML = `<h1>How the numbers are made</h1><p class="loading">Loading…</p>`;
+    await Promise.all([window.CTC_ESTTEST ? 1 : loadScript("../estimate_test.js"), window.CTC_PHOTO_CREDITS ? 1 : loadScript("../photo_credits.js")]);
+    if (location.hash !== "#/method") return;
+    const startShort = fmtDate(D.start, { month: "short", year: "numeric" });
+    const docs = Object.values(D.docs || {}), house = docs.filter((d) => !/oge\.gov/.test(d[0])), oge = docs.filter((d) => /oge\.gov/.test(d[0]));
+    const nE = house.filter((d) => d[2]).length, nP = house.length - nE;
+    const execs = members.filter((m) => m.chamber === "E"), pres = execs.find((m) => m.role === "President");
+    const presTrades = pres ? trades.filter((t) => t.m === pres.i).length : 0;
+    const paper = D.paper || [], readRows = paper.reduce((a, p) => a + (p.rows || 0), 0);
+    const flagged = D.trades.filter((r) => r[F.fl] && r[F.fl].length && !(stocks[r[F.t]] && stocks[r[F.t]][1] === "Crypto")).length;  // crypto is left off, as everywhere
+    const traded = new Set(trades.map((t) => t.m));
+    const small = D.trades.filter((r) => r[F.ex] && r[F.lo] === 1001 && r[F.hi] === 15000).map((r) => r[F.ex][0]).sort((a, b) => a - b);
+    const typical = small.length ? small[Math.floor(small.length / 2)] : null;
+    const sec = (title, body, open = false) => `<details class="card mth"${open ? " open" : ""}><summary>${title}</summary><div class="mth-body">${body}</div></details>`;
+
+    const sources = `<p>Every Periodic Transaction Report filed with the House Clerk for ${D.start.slice(0, 4)}–${D.generated.slice(0, 4)}: ${nE.toLocaleString()} filed electronically and ${nP} filed on paper. Trades dated before ${fmtDate(D.start)} are left out.</p>
+      <p>Senate trades (${trades.filter((t) => t.src === "s").length.toLocaleString()} since ${startShort}) come, for now, from Quiver Quantitative's public politician pages, which transcribe the Senate's official reports: the Senate's own site refuses requests from where this site is built. They will be swapped for the official reports later. Senators who were in the House earlier also show the trades they reported as House members.</p>
+      <p>The President and ${execs.length - (pres ? 1 : 0)} Cabinet-level officials (department heads and their deputies, the Federal Reserve's governors and others paid at Levels 1 and 2 of the Executive Schedule) report their trades to the Office of Government Ethics on Form 278-T. All ${oge.length} such reports OGE has published since ${startShort} are included. Most are filed electronically; the President's are printed, signed and scanned, so they are read automatically like the House's paper forms (${presTrades.toLocaleString()} trades).</p>
+      <p>Business leaders (${members.filter((m) => isBiz(m) && traded.has(m.i)).length}, such as Elon Musk, Mark Zuckerberg, Jensen Huang and Warren Buffett's Berkshire Hathaway) are shown separately. Their open-market buys and sells come from the SEC's Form 4, which company officers, directors and owners of more than 10% must file within two business days, read from OpenInsider's public pages (${trades.filter((t) => t.src === "i").length.toLocaleString()} trades). Form 4 gives share counts and prices, so these amounts are exact. Stock awards, option grants and gifts are left out.</p>
+      <p>Officials' yearly financial disclosures (OGE Form 278e) list what they own, with value ranges, on one day a year. They are used for "still holds" figures, kept apart from the trades, so they never change any total, return or chart.</p>
+      <p>Each trade links to the original filing on the House Clerk's or OGE's site, Quiver or OpenInsider, so any number here can be checked against the source.</p>`;
+
+    const estimate = `<p>Members report each trade as a dollar range (for example $15,001–$50,000), not an exact amount. The STOCK Act only asks for these value bands, so most filings never give the exact dollars. Most trackers count each trade at the middle of its range. Actual amounts are rarely centred in their ranges, so this site uses a calibrated best estimate instead.</p>
+      <p><b>Best estimate.</b> In the ${POS.length} trades where a filing also gave the share count, so the exact amount is known, most amounts sit near the bottom of their range${typical ? ` (a $1,001–$15,000 trade was typically $${(typical / 1000).toFixed(1)}K, not the $8,000 middle)` : ""}. So each trade is counted at the average amount of known trades placed the same way in that range. A total also gets a <b>likely range</b>, where the real total should fall 7 times in 10, because small misses on single trades partly cancel out. The full range the filings allow, with every trade at the bottom or every trade at the top, is far wider and almost never the real total. "How accurate the best estimates are" shows the test.</p>
+      <p><b>Exact amounts.</b> A few members also write the number of shares in the trade's description ("Purchased 10,000 shares", "sold 75 shares at $72.22"). For those trades the amount is calculated exactly: the total the filing states, or the shares times the price it states, or else the shares times the stock's closing price on the trade date. The result is used only if it falls inside the reported range. Exercised options count at the strike price paid. Scanned paper forms have no description field, so their trades always use ranges.</p>
+      <p>Returns are measured two ways. "Trade date" measures the member's own timing. "Disclosure date" measures what an investor could have achieved by acting on the filing: buy at the closing price on the day the report was filed, and sell on the day their sale was filed. Members can wait up to 45 days to report, so the disclosure-date figure is the realistic measure for anyone following their trades. Each Congress page lets you pick one under "More filters".</p>
+      <p>A buy is held until the same member reports a full sale of that stock; partial sales don't close it. If no full sale is reported, it is valued at the latest closing price. Its result is compared with SPY, an S&amp;P 500 fund, bought and sold on the same days. The buy price is the stock's closing price on the trade date, since filings don't give the exact price.</p>
+      <p>For a sale, "since trade" shows how the stock moved after they sold. A decline after a sale indicates a well-timed sale.</p>
+      <p>Options (calls and puts) are valued by how the underlying stock moved: a call gains when the stock rises, a put when it falls. Real options are leveraged, so their actual gains and losses were larger than shown. Turn off "Include options" under "More filters" to leave them out.</p>
+      <p>Company size is today's market value, not the value on the trade date. Funds, ETFs and foreign shares are priced from their market prices and count like stocks; funds and ETFs are left out with large caps when "No large caps" is on. Bonds, private holdings, and companies bought out or delisted since the trade have no public price here, so they are left out of return calculations.</p>`;
+
+    const AT = window.CTC_ESTTEST;
+    let accuracy = "<p>The accuracy test has not yet been run on this data.</p>";
+    if (AT) {
+      const T = AT.tests, p0 = (x) => Math.round(x * 100) + "%", sg = (x) => (x > 0 ? "+" : x < 0 ? "−" : "") + Math.round(Math.abs(x) * 100) + "%";
+      const cut = (s) => Math.round((1 - s.est_median_err / s.mid_median_err) * 100);
+      const g40 = T.groups["40"], g10 = T.groups["10"], one = T.single_loo, ms = T.members_score;
+      const nm = T.members.filter((x) => x.n >= 2), closerM = nm.filter((x) => Math.abs(x.est - x.real) < Math.abs(x.mid - x.real)).length;
+      const heldM = nm.filter((x) => x.real >= x.lo && x.real <= x.hi).length;
+      const worse = Object.entries(T.single_by_range).filter(([, s]) => s.est_median_err > s.mid_median_err)
+        .map(([k, s]) => { const [lo, hi] = k.split("-").map(Number); return `${usd(lo)}–${usd(hi)} trades (${s.n}: ${p0(s.mid_median_err)} for the middle, ${p0(s.est_median_err)} for the best estimate)`; });
+      const tests = [
+        ["Single trades, each estimated from the other known trades", one],
+        ["Single trades of $1,001–$15,000, the most common range", T.single_by_range["1001-15000"]],
+        ["Single trades, using only other members' trades", T.single_lmo],
+        ["Random groups of 10 trades (5,000 draws)", g10],
+        ["Random groups of 40 trades (5,000 draws)", g40],
+        ["Each member's total, using only other members' trades", ms],
+        [`Learned from trades before ${fmtDate(T.time_split.cut)}, tested on later ones`, T.time_split.early_to_late],
+        ["Learned from later trades, tested on earlier ones", T.time_split.late_to_early],
+        T.insiders_single && [`Outside check: ${T.insiders_n.toLocaleString()} business leaders' Form 4 trades, put into the same ranges`, T.insiders_single],
+        T.insiders_groups10 && ["Outside check: groups of 10 Form 4 trades", T.insiders_groups10]].filter((x) => x && x[1]);
+      accuracy = `<p>The best estimate was tested against the ${AT.known} congressional trades whose real amount is known (the filing gave the share count), from ${AT.members} members. A trade's own real amount is never used to estimate it: each test learns from the other known trades only, then compares both methods with the real amounts.</p>
+        <div class="mth-kpis"><div><span class="lbl">Single trades: typical miss</span><b>${p0(one.est_median_err)}</b><span class="muted small">vs ${p0(one.mid_median_err)} for the middle of the range</span></div>
+          <div><span class="lbl">Groups of 40: typical miss</span><b>${p0(g40.est_median_err)}</b><span class="muted small">vs ${p0(g40.mid_median_err)} for the middle</span></div>
+          <div><span class="lbl">Members' totals: closer</span><b>${closerM} of ${nm.length}</b><span class="muted small">members, best estimate vs middle</span></div></div>
+        <p><b>Single trades.</b> The middle of the range missed the real amount by a typical ${p0(one.mid_median_err)}; the best estimate by ${p0(one.est_median_err)}, and it was the closer of the two for ${p0(one.est_closer)} of trades. The middle is too high on average (${sg(one.mid_bias)}), because ${p0(T.bottom_third_dollars)} of real trades sit in the bottom third of their range; the best estimate runs high too, but much less (${sg(one.est_bias)}).</p>
+        <p><b>Totals.</b> This is where the gap grows. The middle of the range is too high almost every time, so its misses add up instead of cancelling out. For random groups of 40 trades it missed by a typical ${p0(g40.mid_median_err)}, the best estimate by ${p0(g40.est_median_err)}, and the best estimate was closer in ${p0(g40.est_closer)} of 5,000 draws. For each member's own total, the best estimate was closer for ${closerM} of ${nm.length} members.</p>
+        <p><b>How much more accurate.</b> Typical misses are ${cut(one)}% smaller for single trades, ${cut(g10)}% smaller for groups of 10, ${cut(g40)}% smaller for groups of 40 and ${cut(ms)}% smaller for members' totals. The <b>likely range</b> held the real amount for ${p0(one.coverage)} of single trades, ${p0(g10.coverage)} of groups of 10 and ${heldM} of ${nm.length} members' totals. It aims for 7 in 10, so it is about right for single trades and members' totals and a little narrow for big groups of trades.</p>
+        <div class="tscroll"><table class="mth-table"><thead><tr><th>Test</th><th class="r">Cases</th><th class="r">Middle of range misses by</th><th class="r">Best estimate misses by</th><th class="r">Best estimate closer</th><th class="r">Likely range held</th></tr></thead><tbody>
+        ${tests.map(([name, s]) => `<tr><td>${esc(name)}</td><td class="r mono">${s.n.toLocaleString()}</td><td class="r mono">${p0(s.mid_median_err)}</td><td class="r mono"><b>${p0(s.est_median_err)}</b></td><td class="r mono">${p0(s.est_closer)}</td><td class="r mono">${p0(s.coverage)}</td></tr>`).join("")}
+        </tbody></table></div>
+        <p>Each member's known trades added up, estimated only from other members' trades:</p>
+        <div class="tscroll"><table class="mth-table"><thead><tr><th>Member</th><th class="r">Trades</th><th class="r">Full range</th><th class="r">Real total</th><th class="r">Middle of ranges</th><th class="r">Best estimate</th><th class="r">Likely range</th></tr></thead><tbody>
+        ${nm.map((x) => `<tr><td>${esc(x.name)}</td><td class="r mono">${x.n}</td><td class="r mono">${usd(x.min)}–${usd(x.max)}</td><td class="r mono"><b>${usd(x.real)}</b></td><td class="r mono">${usd(x.mid)} (${sg(x.mid / x.real - 1)})</td><td class="r mono">${usd(x.est)} (${sg(x.est / x.real - 1)})</td><td class="r mono">${usd(x.lo)}–${usd(x.hi)} ${x.real >= x.lo && x.real <= x.hi ? "✓" : "✗"}</td></tr>`).join("")}
+        </tbody></table></div>
+        <p><b>Limits.</b> The known trades come from a handful of members, mostly ${nm.slice(0, 2).map((x) => esc(x.name)).join(", ")} and ${nm[2] ? esc(nm[2].name) : "others"}. Someone who always trades the same size could differ.${worse.length ? ` In one range the middle did slightly better: ${worse.join("; ")}.` : ""} The likely range comes out a little narrow for large groups (${p0(g40.coverage)} held for groups of 40). On single business-leader trades the two methods miss by about the same (${T.insiders_single ? p0(T.insiders_single.mid_median_err) + " and " + p0(T.insiders_single.est_median_err) : "–"}), though the best estimate is much less biased; on groups of their trades it is clearly better. All amounts here stay estimates: only filings that give share counts are exact.</p>
+        <p class="small muted">Test run on ${fmtDate(AT.generated)} data.</p>`;
+    }
+
+    const signals = `<p>Public signals (Congress ▸ Signals) ranks stocks that members of Congress and officials bought in the last 120 days. Each stock gets a score out of 100% that combines their buying with other public information about the company. Business leaders are left out, since they aren't public officials.</p>
+      <p><b>Net buyers (up to 40%).</b> Buying and selling are weighed together, so a stock that is mostly being sold doesn't score well just because a few people bought some. Each person gets one vote: what they bought minus what they sold, using the middle of each reported range (a trade with no stated amount counts at that person's usual size). Three steps keep the vote fair:</p>
+      <ul><li><b>Log scale.</b> Every 10 times more money adds the same amount to a vote, so one very large trader can't outweigh everyone else. An $8,000 net buy is worth about 1, $375,000 about 2.6 and $5 million about 3.7.</li>
+        <li><b>Their usual trade size.</b> Each person's usual size is the middle of all the trades they have reported since 2023. A trade far larger than usual counts up to twice as much; one far smaller counts as little as half.</li>
+        <li><b>Adding up.</b> Buyers' votes count as positive and sellers' as negative. A positive total earns up to 30%; a negative total takes up to 30% off. Three or more different people buying within a month adds 10%, because several people buying close together is a stronger sign than one large trade.</li></ul>
+      <p>Net buying is also shown <b>by number of trades</b> and <b>by dollars</b>: (buys − sells) ÷ (buys + sells), from −100% (all selling) to +100% (all buying). This measure, the net purchase ratio, is widely used in research on company insiders' trading. The two can disagree: many small sales against a few large buys gives a negative trades figure and a positive dollars figure.</p>
+      <p><b>Committee (up to 20%).</b> 10% for each net buyer whose committee covers the company's industry (see "Which industries each committee oversees").</p>
+      <p><b>Contracts (up to 15%).</b> Federal contract money awarded to the company in the last 90 days, from USAspending.gov.</p>
+      <p><b>Lobbying (up to 15%).</b> What the company reported spending on lobbying in the latest House lobbying disclosures, with its most frequent lobbying topic.</p>
+      <p><b>Hearings (up to 10%).</b> House committee hearings and markups in the next 28 days that name the company (10%) or cover its industry (2%), from the House committee calendar.</p>
+      <p><b>Leaders (up to 10%).</b> Posts in the last 30 days by well-known political figures that name the company or its ticker: 4% for each person, plus 1 for each further post. A mention counts whether it praises or criticises the company, since either can move a stock. Company names that are also everyday words, such as Apple or Target, count only when the ticker is used. Only personal accounts are read, and a post doesn't count when the person runs, owns or works for the company.</p>
+      <p><b>Insiders (up to 10%).</b> The company's own executives, directors and large shareholders buying its stock on the open market in the last 90 days (SEC Form 4 filings). Only people whose purchases add up to at least $25,000 count.</p>
+      <p>The parts are added and the total is capped at 100%. The score shows where several public signals point the same way. It is not a prediction or investment advice.</p>`;
+
+    const words = `<p><b>Filters</b>: each Congress page's own choices, in the bar under the top of the page (whose trades, committee, large caps, committee-linked, and more under "More filters"). Totals, rankings and tables on that page use the trades that pass them.</p>
+      <p><b>Large caps</b>: S&amp;P 500 companies, companies above the selected market cap, and any tickers on the "always leave out" list. Most funds and pension plans hold them, so buying them reveals little about inside knowledge. The same option leaves out <b>funds and ETFs</b>, which hold many companies at once.</p>
+      <p><b>Buying spike</b>: at least 3 different members buying the same stock within about a month, when that many would happen by chance less than 1 time in 20 at the stock's usual rate (a Poisson test). Large caps bought during a spike still count while "except during buying spikes" is on.</p>
+      <p><b>Likely range</b>: the narrower span inside a filing's dollar range where the real amount sits 7 times in 10, learned from trades whose exact amount is known. Totals get their own likely range, narrower again because small misses partly cancel out. Charts and rankings use the best estimate in the middle of it.</p>
+      <p><b>Return</b>: gain or loss as a percentage of the money put in. <b>Vs S&amp;P 500</b>: the gap between two returns. A buy up 30% while the S&amp;P 500 rose 10% over the same days is +20% ahead.</p>
+      <p><b>Trade date / disclosure date</b>: whether gains are measured from the trade date (their own timing) or from the filing date (what someone copying the filing could have made).</p>`;
+
+    const whose = `<p>The STOCK Act makes members report trades in their own accounts, their spouse's, their dependent children's, and accounts they hold jointly. Each trade shows which of these it came from, and the "Account" filter separates them.</p>
+      <p>Trades by anyone else (other relatives, staff, donors or business partners) are not linked to a member here. Doing so fairly would require verified evidence of coordination, which public filings do not contain.</p>`;
+
+    const committees = `<p>A trade counts as being in a member's committee area when the company's industry, or the company itself, is on that committee's list. These lists are an editorial judgement based on each committee's official jurisdiction. Committees that touch every industry, such as Appropriations or Budget, never match. Committee seats are today's assignments, so an older trade is checked against the committees the member sits on now. Members who have left Congress have no seats listed, so their trades never count as committee matches.</p>
+      <div class="mth-comm">${Object.values(D.committees).filter((c) => c.name).sort((a, b) => a.name.localeCompare(b.name)).map((c) => `<div><b>${esc(c.name)}</b><span>${esc(c.oversees || "")}${c.matches ? "" : " · never matches"}</span></div>`).join("")}</div>`;
+
+    const paperTxt = `<p>Some members, including several of the most active traders, file on paper. The Clerk publishes those reports as images of the signed forms, so they are read automatically here: ${readRows.toLocaleString()} trades from ${paper.length} paper filings. Company names written on the forms are matched to stock tickers by name.</p>
+      <p>${flagged.toLocaleString()} of those trades are marked "check scan" where a date, amount or trade type should be confirmed against the original form, which every trade links to. Amounts that need checking count as $0 in the totals rather than a guess.</p>
+      <p>Where the amount mark on a scan can't be read, the amount comes from Quiver Quantitative's hand transcription of the same filing, when it lists exactly one matching trade (same member, stock, buy or sell, and date). Readable amounts are never changed.</p>`;
+
+    const pc = window.CTC_PHOTO_CREDITS || [];
+    const photos = `<p>Portraits of members of Congress are their official, public-domain photos. Officials and business leaders without one use the main photo from their Wikipedia article, under a free licence. Those that ask for credit:</p>`
+      + (pc.length ? `<ul class="mth-credits">${pc.map((c) => `<li><b>${esc(c.name)}</b>: ${esc(c.author || "unknown author")}, ${c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.license)}</a>` : esc(c.license)}</li>`).join("")}</ul>` : "<p>None.</p>");
+
+    app.innerHTML = `<h1>How the numbers are made</h1>
+      <p class="lede">Where the Congress trades come from, how amounts and returns are estimated, how accurate those estimates are, and what the words on the Congress pages mean.</p>
+      ${sec("Where the trades come from", sources, true)}
+      ${sec("How gains and losses are estimated", estimate)}
+      ${sec("How accurate the best estimates are", accuracy)}
+      ${sec("How Public signals are scored", signals)}
+      ${sec("Words used on these pages", words)}
+      ${sec("Whose trades are included", whose)}
+      ${sec("Which industries each committee oversees", committees)}
+      ${sec("Scanned paper filings", paperTxt)}
+      ${sec("Photo credits", photos)}
+      <p class="small muted">Sources: U.S. House Clerk financial disclosures (Periodic Transaction Reports) and the Office of Government Ethics (Form 278-T). Senate trades: Quiver Quantitative's transcriptions of Senate reports. Prices: Yahoo Finance. Company size and industry: Nasdaq. Committees and official portraits: the congress-legislators and unitedstates/images projects. This is a research tool, not financial advice.</p>`;
+  }
+
   // ---------- routing ----------
   let lastPage = null;
   function route(keepScroll) {
@@ -2091,6 +2213,7 @@
     else if (page === "investments") pageInvest();
     else if (page === "production") pageProduction();
     else if (page === "aibubble") pageAIBubble();
+    else if (page === "method") pageMethod();
     else pageMarkets();
     // the page's period and its other main choices stay in a bar under the top bar while scrolling
     pinBar();

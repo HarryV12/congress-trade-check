@@ -662,3 +662,27 @@ h2 .muted, .card h2 .muted, h5 .muted, .stat .sub, .spike .small, .banner, .why,
 .fmore-panel select { font: inherit; font-size: 14px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
 @media (min-width: 861px) { .sub-row .toolbar:has(.fchip) { flex-wrap: wrap; row-gap: 6px; } }
 @media (max-width: 860px) { .fmore-panel { max-height: 55vh; overflow-y: auto; } }
+
+/* ===== How the numbers are made ===== */
+details.mth { margin-top: 12px; padding: 0; }
+details.mth > summary { cursor: pointer; padding: 16px 20px; font-size: 17px; font-weight: 700; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+details.mth > summary::-webkit-details-marker { display: none; }
+details.mth > summary::after { content: "+"; font-size: 20px; color: var(--muted); }
+details.mth[open] > summary::after { content: "−"; }
+.mth-body { padding: 0 20px 18px; font-size: 15px; line-height: 1.6; color: var(--ink-2); max-width: 900px; }
+.mth-body p { margin: 0 0 10px; } .mth-body ul { margin: 0 0 10px; padding-left: 20px; display: grid; gap: 6px; }
+.mth-body b { color: var(--ink); }
+.mth-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 12px 0 16px; }
+.mth-kpis > div { background: var(--bg); border-radius: 10px; padding: 12px 14px; display: grid; gap: 2px; }
+.mth-kpis .lbl { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.mth-kpis b { font: 800 28px/1.2 var(--font-mono); color: var(--ink); }
+.tscroll { overflow-x: auto; margin: 8px 0 14px; }
+.mth-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.mth-table th { text-align: left; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.mth-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); color: var(--ink); }
+.mth-table .r { text-align: right; white-space: nowrap; }
+.mth-comm { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 10px; }
+.mth-comm > div { background: var(--bg); border-radius: 10px; padding: 10px 12px; display: grid; gap: 4px; font-size: 14px; }
+.mth-credits { font-size: 14px; }
+.mth-table td:first-child { min-width: 240px; }
+.mth-table th.r { white-space: normal; min-width: 90px; }
