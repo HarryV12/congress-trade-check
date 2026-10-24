@@ -1692,7 +1692,7 @@
   let AFTER = null, INVEST = null, PROD = null;
   const loadAfter = () => AFTER ? Promise.resolve(AFTER) : loadScript(`../aftermath.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (AFTER = window.CTC_AFTERMATH || null));
   const loadInvest = () => INVEST ? Promise.resolve(INVEST) : loadScript(`../investments.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (INVEST = window.CTC_INVEST || null));
-  const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("../production.js?v=2").then(() => (PROD = window.CTC_PROD || null));
+  const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("../production.js?v=3").then(() => (PROD = window.CTC_PROD || null));
   const SPANS = { day: [1, "Today"], week: [5, "This week"], month: [21, "This month"] };
   let moverList = "sp", moverSpan = "day";
   const lastIdx = (x) => { if (!x) return -1; for (let i = x.length - 1; i >= 0; i--) if (x[i] != null) return i; return -1; };
