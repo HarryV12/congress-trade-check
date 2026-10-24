@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Congress Trade Check</title>
+<title>HarryV12 Finance</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="Stock trades by members of Congress, the President and Cabinet-level officials, with ordinary big-company stocks filtered out, matched against the industries they oversee, and scored against the S&P 500.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -654,13 +654,13 @@ if (location.hostname === "harryv12.github.io") {
 
 <div class="wrap">
   <div class="appbar" id="appbar">
-    <span class="brand">Congress Trade Check</span>
+    <span class="brand">HarryV12 Finance</span>
     <button type="button" class="btn" id="openFilters" aria-controls="filters" aria-expanded="false">Filter <span class="badge" id="filterCount" hidden></span></button>
   </div>
 
   <header class="masthead">
     <div class="top">
-      <h1><span class="logo" aria-hidden="true"></span>Congress Trade Check</h1>
+      <h1><span class="logo" aria-hidden="true"></span>HarryV12 Finance</h1>
       <span class="stamp pill" id="stamp" hidden></span>
     </div>
     <p class="lede">Stock trades disclosed by Congress, the President, Cabinet officials and corporate insiders, benchmarked against the S&amp;P 500.</p>
@@ -2613,7 +2613,7 @@ if (location.hostname === "harryv12.github.io") {
   function footer(ctx, W, H, th) {
     ctx.strokeStyle = th.grid; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(64, H - 118); ctx.lineTo(W - 64, H - 118); ctx.stroke();
     ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `800 21px ${UI}`;
-    ctx.fillText("Congress Trade Check", W - 64, H - 72);
+    ctx.fillText("HarryV12 Finance", W - 64, H - 72);
     ctx.textAlign = "left";
     drawSiteLink(ctx, 64, H - 72, `600 21px ${UI}`, th.line || th.ink2);
   }
@@ -3122,8 +3122,8 @@ if (location.hostname === "harryv12.github.io") {
   }
   function mkFooter(ctx, W, H, L, y0 = H - 70) {
     ctx.textAlign = "left"; ctx.font = L.footFont || `500 17px ${UI}`; ctx.fillStyle = L.footInk || L.muted;
-    ctx.font = L.footBrandFont || `800 19px ${UI}`; const bw = ctx.measureText("Congress Trade Check").width;
-    ctx.textAlign = "right"; ctx.fillStyle = L.footBrand || L.ink2 || L.ink; ctx.fillText("Congress Trade Check", W - (L.footX ?? 64), y0);
+    ctx.font = L.footBrandFont || `800 19px ${UI}`; const bw = ctx.measureText("HarryV12 Finance").width;
+    ctx.textAlign = "right"; ctx.fillStyle = L.footBrand || L.ink2 || L.ink; ctx.fillText("HarryV12 Finance", W - (L.footX ?? 64), y0);
     ctx.textAlign = "left"; ctx.font = L.footFont || `500 17px ${UI}`; ctx.fillStyle = L.footInk || L.muted;
     drawSiteLink(ctx, L.footX ?? 64, y0, `600 ${(L.footFont || "").match(/(\d+)px/)?.[1] || 17}px ${UI}`, L.footLink || (typeof L.line === "string" ? L.line : null) || L.ink2 || L.ink);
   }
@@ -3787,7 +3787,7 @@ if (location.hostname === "harryv12.github.io") {
     sig(380, 260, "Periodic Transaction Reports", "SOURCE"); sig(680, 250, `Closing prices to ${shortDate(D.prices_through)}`, "PRICES");
     ctx.textAlign = "center"; ctx.font = `500 15px ${UI}`; ctx.fillStyle = L.muted;
     ctx.fillText("Marks sit at the closing price on the trade date · members can file up to 45 days after trading", W / 2, 1310);
-    ctx.fillText("Not financial advice · Congress Trade Check", W / 2, 1330); ctx.textAlign = "left";
+    ctx.fillText("Not financial advice · HarryV12 Finance", W / 2, 1330); ctx.textAlign = "left";
   }
 
   // ---------- 6. Swiss grid: one giant number, lower-case title, strict columns ----------
@@ -4060,7 +4060,7 @@ if (location.hostname === "harryv12.github.io") {
     ctx.font = `600 12px ${MONO}`; ctx.fillText(`${M.mode === "single" ? M.tk : "CONGRESS"} · ${D.prices_through}`, bx + 12, by + 76);
     ctx.font = `500 14px ${UI}`; ctx.fillStyle = "#333"; ctx.textAlign = "center";
     ctx.fillText(MK_SOURCE[0], W / 2, H - 66); ctx.fillText(MK_SOURCE[1], W / 2, H - 46);
-    ctx.font = `700 14px ${UI}`; ctx.fillText("Congress Trade Check · The Ledger is not a real magazine", W / 2, H - 24); ctx.textAlign = "left";
+    ctx.font = `700 14px ${UI}`; ctx.fillText("HarryV12 Finance · The Ledger is not a real magazine", W / 2, H - 24); ctx.textAlign = "left";
   }
 
   const LOOKS = { chart: lookClassic, movie: lookMovie, japan: lookJapan, infographic: lookInfographic, certificate: lookCertificate,
@@ -4571,7 +4571,7 @@ if (location.hostname === "harryv12.github.io") {
       ctx.fillStyle = th.card; ctx.font = `700 15px ${M}`; ctx.fillText(price(last), 40 + gw + 10, ty + 5);
     }
     drawSiteLink(ctx, 28, H - 22, `600 18px ${UI}`, th.line || th.ink2);
-    ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `800 19px ${UI}`; ctx.fillText("Congress Trade Check", W - 28, H - 22); ctx.textAlign = "left";
+    ctx.textAlign = "right"; ctx.fillStyle = th.ink2; ctx.font = `800 19px ${UI}`; ctx.fillText("HarryV12 Finance", W - 28, H - 22); ctx.textAlign = "left";
     return null;
   }
 
@@ -6292,7 +6292,7 @@ if (location.hostname === "harryv12.github.io") {
         }
         y += lh;
       };
-      put("Congress Trade Check", "", { center: true, w: 800, fs: fs + 5, h: lh + 6, mono: false });
+      put("HarryV12 Finance", "", { center: true, w: 800, fs: fs + 5, h: lh + 6, mono: false });
       put("PERIODIC TRANSACTION REPORT", "", { center: true, c: FADE });
       put(isBiz(m) ? "SEC FORM 4 · VIA OPENINSIDER" : isExec(m) ? "EXECUTIVE BRANCH · OGE FORM 278-T" : senate ? "U.S. SENATE · WASHINGTON, DC 20510" : "U.S. HOUSE · WASHINGTON, DC 20515", "", { center: true, c: FADE, fs: fs - 3 });
       rule();
