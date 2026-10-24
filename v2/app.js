@@ -560,7 +560,7 @@
   }
 
   const app = $("#app");
-  const setNav = (k) => $$(".nav a[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === k));
+  const setNav = (k) => $$(".nav a[data-nav]").forEach((a) => a.classList.toggle("on", a.dataset.nav === k || (a.dataset.group || "").split(",").includes(k)));
   const card = (title, sub, body, extra = "") => `<div class="card ${extra}"><h2>${title}${sub ? ` <span class="muted">${sub}</span>` : ""}</h2>${body}</div>`;
   const statCard = (lbl, big, sub, c = "") => `<div class="card stat"><div class="lbl">${lbl}</div><div class="big ${c}">${big}</div><div class="sub">${sub}</div></div>`;
 
@@ -611,8 +611,8 @@
   }
 
   // =============================== pages ===============================
-  function pageHome() {
-    setNav("home");
+  function pageHome() {  // the Congress page (it was the home page before the finance pages)
+    setNav("congress");
     const s0 = since(), win = trades.filter((t) => t.time >= s0 && t.side !== "O" && pass(t));
     const buys = win.filter((t) => t.side === "B" && securities(t)), sells = win.filter((t) => t.side === "S" && securities(t));
     const lastFiled = trades.reduce((mx, t) => t.fd && t.fd > mx ? t.fd : mx, "");
@@ -1319,7 +1319,8 @@
     return { date, open: false, text: `Market closed at 4:00pm ET (now ${time})` };
   }
   // "what happened", in words, from the numbers: how far, over how long, what moved most
-  const coName = (tk) => stocks[tk] ? cleanName(stocks[tk][0]).replace(/\s+(Sponsored|Corporation|Oyj|AG|SE)\b.*$/i, "") : tk;
+  const XNAMES = { GFS: "GlobalFoundries", LAC: "Lithium Americas", TMQ: "Trilogy Metals", TSM: "TSMC", ASML: "ASML" };  // listed names missing from the stock list
+  const coName = (tk) => stocks[tk] ? cleanName(stocks[tk][0]).replace(/\s+(Sponsored|Corporation|Oyj|AG|SE)\b.*$/i, "") : XNAMES[tk] || tk;
   const spanTxt = (a, b) => a === b ? `on ${fmtDate(a, { day: "numeric", month: "short" })}` : `from ${fmtDate(a, { day: "numeric", month: "short" })} to ${fmtDate(b, { day: "numeric", month: "short" })}`;
   const pctAbs = (r, d = 1) => `${Math.abs(r * 100).toFixed(d)}%`;
   const dropWhat = (e) => {
@@ -1676,6 +1677,303 @@
     pinBar();
   }
 
+  // =============================== finance pages ===============================
+  // Home (the markets today), Market movers, Aftermath, Investments and Production. They read the daily closes
+  // (../prices.js plus ../extra_prices.js for stocks members haven't traded) and their own data files.
+  const DOW30 = "AAPL AMGN AMZN AXP BA CAT CRM CSCO CVX DIS GS HD HON IBM JNJ JPM KO MCD MMM MRK MSFT NKE NVDA PG SHW TRV UNH V VZ WMT".split(" ");
+  const NDX100 = ("AAPL ABNB ADBE ADI ADP ADSK AEP AMAT AMD AMGN AMZN APP ARM ASML AVGO AXON AZN BIIB BKNG BKR CCEP CDNS CDW CEG CHTR CMCSA COST "
+    + "CPRT CRWD CSCO CSGP CSX CTAS CTSH DASH DDOG DXCM EXC FANG FAST FTNT GEHC GFS GILD GOOG GOOGL HON IDXX INTC INTU ISRG KDP KHC "
+    + "KLAC LIN LRCX LULU MAR MCHP MDLZ MELI META MNST MRVL MSFT MSTR MU NFLX NVDA NXPI ODFL ON ORLY PANW PAYX PCAR PDD PEP PLTR PYPL "
+    + "QCOM REGN ROP ROST SBUX SHOP SNPS TEAM TMUS TRI TSLA TTD TTWO TXN VRSK VRTX WDAY XEL ZS").split(" ");
+  const AI_STOCKS = "NVDA AVGO AMD TSM MU ARM SMCI PLTR MRVL LRCX AMAT KLAC ORCL MSFT GOOGL META AMZN CRWV ANET VRT DELL HPE SNOW NOW CRM IBM INTC QCOM ASML VST CEG".split(" ");
+  const INDEXES = [["SPY", "S&P 500"], ["QQQ", "Nasdaq 100"], ["DIA", "Dow"], ["IWM", "Small companies"], ["TLT", "Long-term bonds"], ["GLD", "Gold"], ["XLE", "Energy stocks"]];
+  let XPX = false;
+  const loadAllPrices = () => loadPrices().then((P) => XPX ? P : loadScript("../extra_prices.js").then(() => { if (P && window.CTC_XPX) for (const [t, v] of Object.entries(window.CTC_XPX.px)) if (!P.px[t]) P.px[t] = v; XPX = true; return P; }));
+  let AFTER = null, INVEST = null, PROD = null;
+  const loadAfter = () => AFTER ? Promise.resolve(AFTER) : loadScript(`../aftermath.js?h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (AFTER = window.CTC_AFTERMATH || null));
+  const loadInvest = () => INVEST ? Promise.resolve(INVEST) : loadScript(`../investments.js?h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (INVEST = window.CTC_INVEST || null));
+  const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("../production.js?v=1").then(() => (PROD = window.CTC_PROD || null));
+  const SPANS = { day: [1, "Today"], week: [5, "This week"], month: [21, "This month"] };
+  let moverList = "sp", moverSpan = "day";
+  const lastIdx = (x) => { if (!x) return -1; for (let i = x.length - 1; i >= 0; i--) if (x[i] != null) return i; return -1; };
+  const moveOf = (P, tk, k) => { const x = P.px[tk]; if (!x) return null; const L = P.dates.length - 1; return x[L] && x[L - k] ? x[L] / x[L - k] - 1 : null; };
+  const mcapOf = (tk) => (stocks[tk] && stocks[tk][4]) || 0;
+  const sectorOf = (tk) => (stocks[tk] && stocks[tk][1]) || "Other";
+  const spark = (x, from, w = 120, h = 34, col = null) => {
+    const pts = []; for (let i = from; i < x.length; i++) if (x[i] != null) pts.push([i, x[i]]);
+    if (pts.length < 2) return "";
+    const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])), X = (i) => (i - from) / Math.max(1, x.length - 1 - from) * w, Y = (v) => h - 3 - (v - lo) / Math.max(1e-9, hi - lo) * (h - 6);
+    const c = col || (pts[pts.length - 1][1] >= pts[0][1] ? "var(--good)" : "var(--bad)");
+    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><path d="${pts.map((p, k) => `${k ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("")}" fill="none" stroke="${c}" stroke-width="1.8" vector-effect="non-scaling-stroke"/></svg>`;
+  };
+  // colour for a move: red to grey to green, stronger the bigger the move (cap: the move that counts as large)
+  const heat = (r, cap) => {
+    if (r == null) return "var(--chip)";
+    const t = Math.max(-1, Math.min(1, r / cap)), a = Math.abs(t);
+    const [R, G, B] = t >= 0 ? [22, 163, 74] : [220, 38, 38];
+    return `rgb(${Math.round(84 + (R - 84) * a)},${Math.round(90 + (G - 90) * a)},${Math.round(100 + (B - 100) * a)})`;
+  };
+  // squarified treemap: lays out items (value > 0) in a rectangle, as square as possible
+  function squarify(items, x, y, w, h) {
+    const out = [], total = items.reduce((a, it) => a + it.v, 0); if (!total || w <= 0 || h <= 0) return out;
+    let rest = items.slice().sort((a, b) => b.v - a.v).map((it) => ({ ...it, a: it.v / total * w * h }));
+    while (rest.length) {
+      const side = Math.min(w, h), row = [rest[0]]; let i = 1;
+      const worst = (r) => { const s = r.reduce((a, it) => a + it.a, 0), mx = Math.max(...r.map((it) => it.a)), mn = Math.min(...r.map((it) => it.a)); return Math.max(side * side * mx / (s * s), s * s / (side * side * mn)); };
+      while (i < rest.length && worst([...row, rest[i]]) <= worst(row)) row.push(rest[i++]);
+      const s = row.reduce((a, it) => a + it.a, 0), thick = s / side; let off = 0;
+      for (const it of row) { const len = it.a / thick; out.push(w >= h ? { ...it, x, y: y + off, w: thick, h: len } : { ...it, x: x + off, y, w: len, h: thick }); off += len; }
+      if (w >= h) { x += thick; w -= thick; } else { y += thick; h -= thick; }
+      rest = rest.slice(i);
+    }
+    return out;
+  }
+  // a heatmap of stocks: sectors as blocks, each stock sized by company value and coloured by its move
+  function heatmapHtml(P, tks, k, { W = 1000, H = 520, cap = 0.03, link = true } = {}) {
+    const rows = tks.map((tk) => ({ tk, r: moveOf(P, tk, k), v: Math.max(mcapOf(tk), 5e9), s: sectorOf(tk) })).filter((x) => x.r != null);
+    const bySec = new Map(); for (const r of rows) { if (!bySec.has(r.s)) bySec.set(r.s, []); bySec.get(r.s).push(r); }
+    const secs = squarify([...bySec].map(([s, l]) => ({ s, l, v: l.reduce((a, x) => a + x.v, 0) })), 0, 0, W, H);
+    let html = "";
+    for (const sb of secs) {
+      html += `<div class="hm-sec" style="left:${sb.x / W * 100}%;top:${sb.y / H * 100}%;width:${sb.w / W * 100}%;height:${sb.h / H * 100}%"><span class="hm-sname">${esc(sb.s)}</span></div>`;
+      for (const t of squarify(sb.l, sb.x + 1, sb.y + 16, sb.w - 2, sb.h - 17)) {
+        const big = t.w > 54 && t.h > 30, mid = t.w > 32 && t.h > 18;
+        html += `<${link ? `a href="#/stock/${encodeURIComponent(t.tk)}"` : "div"} class="hm-tile" style="left:${t.x / W * 100}%;top:${t.y / H * 100}%;width:${t.w / W * 100}%;height:${t.h / H * 100}%;background:${heat(t.r, cap)}" title="${esc(coName(t.tk))} (${esc(t.tk)}): ${pct(t.r)}">
+          ${mid ? `<b style="font-size:${Math.max(10, Math.min(20, t.w / 5))}px">${esc(t.tk)}</b>` : ""}${big ? `<span>${pct(t.r)}</span>` : ""}</${link ? "a" : "div"}>`;
+      }
+    }
+    return `<div class="heatmap" style="aspect-ratio:${W}/${H}">${html}</div>`;
+  }
+  const moverRow = (P, tk, r, mx) => {
+    const L = P.dates.length - 1, x = P.px[tk];
+    return `<a class="mv-row" href="#/stock/${encodeURIComponent(tk)}">${BRAND[tk] && BRAND[tk][1] ? logoBox(tk, "var(--chart)", 26) : `<span class="tk">${esc(tk)}</span>`}
+      <span class="mv-name"><b>${esc(tk)}</b> <span class="muted">${esc(coName(tk))}</span></span><span class="mv-px mono">${x && x[L] ? price(x[L]) : ""}</span>
+      <span class="mv-bar"><i class="${r >= 0 ? "pos" : "neg"}" style="width:${Math.min(100, Math.abs(r) / mx * 100).toFixed(1)}%"></i></span><b class="mono ${cls(r)}">${pct(r, 2)}</b></a>`;
+  };
+  // a company's second share class (GOOG beside GOOGL) would count it twice
+  const listTks = (P, which) => (which === "sp" ? Object.keys(P.px).filter((t) => stocks[t] && stocks[t][5] && !["GOOG", "FOX", "NWS"].includes(t)) : which === "ndx" ? NDX100 : which === "dow" ? DOW30 : AI_STOCKS).filter((t) => P.px[t]);
+  const LIST_NAMES = { sp: "S&P 500", ndx: "Nasdaq-100", dow: "Dow 30", ai: "AI stocks" };
+  const marketPill = () => { const mk = usMarket(); return `<span class="mkt ${mk.open ? "open" : ""}">${esc(mk.text)}</span>`; };
+
+  // ---------- Home: the markets today, with a focus on AI ----------
+  async function pageMarkets() {
+    setNav("home");
+    app.innerHTML = `<h1>Markets today</h1><p class="loading">Loading prices…</p>`;
+    const [P, M, A, I] = await Promise.all([loadAllPrices(), loadMoves(), loadAfter(), loadInvest()]);
+    if (!(location.hash === "" || location.hash === "#/" || location.hash === "#")) return;
+    const L = P.dates.length - 1, from = Math.max(0, L - 21), mt = M && M.market && M.market.today;
+    const sp = listTks(P, "sp").map((t) => [t, moveOf(P, t, 1)]).filter((x) => x[1] != null).sort((a, b) => b[1] - a[1]);
+    const up = sp.filter((x) => x[1] > 0).length, mx = Math.max(...sp.slice(0, 5).concat(sp.slice(-5)).map((x) => Math.abs(x[1])));
+    const ai = AI_STOCKS.filter((t) => P.px[t]);
+    const aiAvg = ai.map((t) => moveOf(P, t, 1)).filter((r) => r != null), aiDay = aiAvg.reduce((a, r) => a + r, 0) / (aiAvg.length || 1);
+    app.innerHTML = `<div class="mk-head"><h1>Markets today</h1><div class="muted">Closing prices for ${fmtDate(P.dates[L], { weekday: "long", day: "numeric", month: "long", year: "numeric" })} ${marketPill()}</div></div>
+      <div class="idx-row">${INDEXES.map(([tk, nm]) => { const x = P.px[tk], d = moveOf(P, tk, 1), w = moveOf(P, tk, 5);
+        return x ? `<div class="idx"><span class="idx-n">${esc(nm)}</span><b class="mono ${cls(d)}">${pct(d, 2)}</b><span class="muted small">week ${pct(w)}</span>${spark(x, from)}</div>` : ""; }).join("")}</div>
+      ${mt && mt.summary ? `<a class="today-why card" href="#/drops"><span class="tw-l">Why markets moved</span><span>${esc(mt.summary)}</span><span class="tw-more">Full story →</span></a>` : ""}
+      <div class="grid home-grid section">
+        <div class="card"><h2>AI stocks today <span class="muted">average ${pct(aiDay)} · tap one for its page</span></h2>
+          <div class="ai-grid">${ai.slice(0, 20).map((t) => { const d = moveOf(P, t, 1); return `<a class="ai-tile" href="#/stock/${encodeURIComponent(t)}" style="--h:${heat(d, 0.04)}">
+            <span class="ai-top">${BRAND[t] && BRAND[t][1] ? logoBox(t, "var(--chart)", 22) : ""}<b>${esc(t)}</b><span class="mono ${cls(d)}">${pct(d)}</span></span>${spark(P.px[t], from, 120, 26)}</a>`; }).join("")}</div></div>
+        <div class="card"><h2>S&amp;P 500 today <span class="muted">${up} up · ${sp.length - up} down</span></h2>
+          <div class="breadth"><i style="width:${(up / (sp.length || 1) * 100).toFixed(1)}%"></i></div>
+          <h4 class="th-sub">Biggest gainers</h4>${sp.slice(0, 5).map(([t, r]) => moverRow(P, t, r, mx)).join("")}
+          <h4 class="th-sub">Biggest decliners</h4>${sp.slice(-5).reverse().map(([t, r]) => moverRow(P, t, r, mx)).join("")}
+          <a class="more-link" href="#/movers">All market movers →</a></div>
+      </div>
+      <div class="card section"><h2>The S&amp;P 500 at a glance <span class="muted">each square a company, sized by value, coloured by today's move</span></h2>${heatmapHtml(P, sp.map((x) => x[0]), 1, { H: 440 })}<a class="more-link" href="#/movers">Open the full heatmap →</a></div>
+      ${M && M.themes ? `<div class="card section"><h2>Industries this week</h2><div class="inds">${Object.entries(M.themes).map(([k, t]) => `<a class="ind" href="#/drops"><b>${esc(t.name)}</b>
+        <span class="ind-row"><span>Today</span><b class="${cls(t.today && t.today.move)}">${pct(t.today && t.today.move)}</b></span><span class="ind-row"><span>This week</span><b class="${cls(t.now && t.now.move)}">${pct(t.now && t.now.move)}</b></span>
+        <span class="ind-row"><span>Past month</span><b class="${cls(t.now && t.now.month)}">${pct(t.now && t.now.month)}</b></span></a>`).join("")}</div></div>` : ""}
+      <div class="grid cols-2 section">
+        ${I && I.deals[0] ? `<a class="card teaser" href="#/investments"><h2>Latest big investment</h2><b class="t-title">${esc(I.deals[0].title)}</b><p class="small muted">${esc(I.deals[0].summary.slice(0, 220))}…</p><span class="more-link">See who put money in →</span></a>` : ""}
+        ${A && A.stocks.length ? `<a class="card teaser" href="#/aftermath"><h2>Aftermath <span class="muted">steady stocks that kept falling</span></h2>${A.stocks.slice(0, 4).map((s) => `<div class="mini-row"><b>${esc(s.name.split(" ")[0])}</b><span class="ell small muted">${esc(s.cause || "")}</span><b class="mono down">${pct(s.drop, 0)}</b></div>`).join("")}<span class="more-link">Why they fell →</span></a>` : ""}
+      </div>
+      <a class="card section congress-link" href="#/congress"><h2>Congress trades</h2><p class="small muted">What members of Congress and senior officials are buying and selling, from their disclosure reports.</p><span class="more-link">Open Congress →</span></a>`;
+  }
+
+  // ---------- Market movers: the day's (or week's, month's) biggest moves, as pictures ----------
+  async function pageMovers() {
+    setNav("movers");
+    app.innerHTML = `<h1>Market movers</h1><p class="loading">Loading prices…</p>`;
+    const P = await loadAllPrices(); if (location.hash !== "#/movers") return;
+    const L = P.dates.length - 1, [k, spanName] = SPANS[moverSpan], cap = { day: 0.03, week: 0.07, month: 0.15 }[moverSpan];
+    const tks = listTks(P, moverList), rows = tks.map((t) => [t, moveOf(P, t, k)]).filter((x) => x[1] != null).sort((a, b) => b[1] - a[1]);
+    const up = rows.filter((x) => x[1] > 0).length, top = rows.slice(0, 12), bot = rows.slice(-12).reverse(), mx = Math.max(...top.concat(bot).map((x) => Math.abs(x[1])), 0.001);
+    const idxTk = { sp: "SPY", ndx: "QQQ", dow: "DIA", ai: null }[moverList], idxMove = idxTk ? moveOf(P, idxTk, k) : rows.reduce((a, x) => a + x[1], 0) / (rows.length || 1);
+    const dollar = rows.map(([t, r]) => [t, r, mcapOf(t) * r / (1 + r)]).filter((x) => x[2]).sort((a, b) => Math.abs(b[2]) - Math.abs(a[2])).slice(0, 8), dmx = Math.max(...dollar.map((x) => Math.abs(x[2])), 1);
+    const secs = new Map(); for (const [t, r] of rows) { const s = sectorOf(t); if (!secs.has(s)) secs.set(s, []); secs.get(s).push(r); }
+    const secRows = [...secs].map(([s, l]) => [s, l.reduce((a, r) => a + r, 0) / l.length, l.length]).sort((a, b) => b[1] - a[1]), smx = Math.max(...secRows.map((x) => Math.abs(x[1])), 0.001);
+    app.innerHTML = `<h1>Market movers</h1>
+      <p class="lede">${esc(LIST_NAMES[moverList])} · ${spanName.toLowerCase()} to the close on ${fmtDate(P.dates[L], { weekday: "short", day: "numeric", month: "short" })}. ${marketPill()}</p>
+      <div class="toolbar pin-top"><div class="seg" role="group" aria-label="Which stocks">${Object.entries(LIST_NAMES).map(([v, l]) => `<button type="button" data-ml="${v}" aria-pressed="${v === moverList}">${l}</button>`).join("")}</div>
+        <div class="seg" role="group" aria-label="Period">${Object.entries(SPANS).map(([v, [, l]]) => `<button type="button" data-ms="${v}" aria-pressed="${v === moverSpan}">${l}</button>`).join("")}</div></div>
+      <div class="grid cols-3">
+        ${statCard(idxTk ? `${esc(LIST_NAMES[moverList])}` : "AI stocks (average)", pct(idxMove, 2), spanName.toLowerCase(), cls(idxMove))}
+        <div class="card stat"><div class="lbl">Up vs down</div><div class="big"><span class="up">${up}</span> <span class="muted small">/</span> <span class="down">${rows.length - up}</span></div><div class="breadth"><i style="width:${(up / (rows.length || 1) * 100).toFixed(1)}%"></i></div></div>
+        ${dollar[0] ? statCard("Biggest $ move", `${dollar[0][2] >= 0 ? "+" : "−"}${usd(Math.abs(dollar[0][2]))}`, `${esc(coName(dollar[0][0]))} ${pct(dollar[0][1])}`, cls(dollar[0][2])) : ""}
+      </div>
+      <div class="card section"><h2>Heatmap <span class="muted">each square a company, sized by value, coloured by its move (deepest colour at ±${Math.round(cap * 100)}%)</span></h2>${heatmapHtml(P, rows.map((x) => x[0]), k, { cap, H: moverList === "dow" ? 420 : 560 })}
+        <div class="hm-legend"><span>−${Math.round(cap * 100)}%</span><i style="background:linear-gradient(90deg, ${heat(-cap, cap)}, ${heat(0, cap)}, ${heat(cap, cap)})"></i><span>+${Math.round(cap * 100)}%</span></div></div>
+      <div class="grid cols-2 section">
+        <div class="card"><h2 class="up">▲ Top gainers</h2>${top.map(([t, r]) => moverRow(P, t, r, mx)).join("")}</div>
+        <div class="card"><h2 class="down">▼ Top decliners</h2>${bot.map(([t, r]) => moverRow(P, t, r, mx)).join("")}</div>
+      </div>
+      <div class="grid cols-2 section">
+        <div class="card"><h2>Sectors <span class="muted">average move</span></h2>${secRows.map(([s, r, n]) => `<div class="dbar div"><span class="dl">${esc(s)} <span class="muted small">${n}</span></span><span class="dt"><i class="${r < 0 ? "neg" : "pos"}" style="width:${(Math.abs(r) / smx * 50).toFixed(1)}%"></i></span><b class="${cls(r)}">${pct(r, 1)}</b></div>`).join("")}</div>
+        <div class="card"><h2>Biggest moves in dollars <span class="muted">change in company value</span></h2>${dollar.map(([t, r, d]) => `<a class="mv-row" href="#/stock/${encodeURIComponent(t)}">${BRAND[t] && BRAND[t][1] ? logoBox(t, "var(--chart)", 26) : `<span class="tk">${esc(t)}</span>`}<span class="mv-name"><b>${esc(t)}</b> <span class="muted">${esc(coName(t))}</span></span><span class="mv-px mono ${cls(r)}">${pct(r)}</span><span class="mv-bar"><i class="${d >= 0 ? "pos" : "neg"}" style="width:${(Math.abs(d) / dmx * 100).toFixed(1)}%"></i></span><b class="mono ${cls(d)}">${d >= 0 ? "+" : "−"}${usd(Math.abs(d))}</b></a>`).join("")}</div>
+      </div>
+      <p class="small muted">Closing prices from Yahoo Finance. Company values are from the latest stock list, so the dollar moves are estimates. Index lists: S&amp;P 500 members as flagged in our stock list; Nasdaq-100 and Dow members as of 2025.</p>`;
+    pinBar();  // the page drew after the router ran: pin its choices now
+    $$("[data-ml]").forEach((b) => b.addEventListener("click", () => { moverList = b.dataset.ml; route(true); }));
+    $$("[data-ms]").forEach((b) => b.addEventListener("click", () => { moverSpan = b.dataset.ms; route(true); }));
+  }
+
+  // ---------- Aftermath: steady stocks that kept falling, and what led to it ----------
+  async function pageAftermath() {
+    setNav("aftermath");
+    app.innerHTML = `<h1>Aftermath</h1><p class="loading">Loading…</p>`;
+    const [A, P] = await Promise.all([loadAfter(), loadAllPrices()]); if (location.hash !== "#/aftermath") return;
+    const S = (A && A.stocks) || [], mx = Math.max(...S.map((s) => Math.abs(s.drop)), 0.01);
+    const KIND = { peak: ["◆", "var(--accent)"], bad: ["▼", "var(--bad)"], good: ["▲", "var(--good)"] };
+    const chart = (s) => {
+      const ser = s.series, n = ser.length, W = 1000, H = 260, vals = ser.map((x) => x[1]), lo = Math.min(...vals) * 0.97, hi = Math.max(...vals) * 1.03;
+      const X = (i) => 10 + i / (n - 1) * (W - 70), Y = (v) => 14 + (hi - v) / (hi - lo) * (H - 44), at = (d) => { const i = ser.findIndex((x) => x[0] >= d); return i < 0 ? n - 1 : i; };
+      const pk = at(s.peak), line = ser.map((x, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(x[1]).toFixed(1)}`).join("");
+      const months = []; for (let i = 1; i < n; i++) if (ser[i][0].slice(0, 7) !== ser[i - 1][0].slice(0, 7)) months.push(i);
+      const ev = (s.events || []).map((e, j) => ({ ...e, j: j + 1, i: at(e.date) }));
+      return svgBox(W, H, `<rect x="${X(pk).toFixed(1)}" y="10" width="${(X(n - 1) - X(pk)).toFixed(1)}" height="${H - 36}" fill="var(--bad)" fill-opacity=".08"/>
+        ${[lo, (lo + hi) / 2, hi].map((v) => `<line x1="10" x2="${W - 60}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)"/><text x="${W - 54}" y="${(Y(v) + 4).toFixed(1)}" font-size="12" fill="var(--muted)" font-family="var(--font-mono)">${v.toFixed(v < 100 ? 2 : 0)}</text>`).join("")}
+        ${months.map((i) => `<text x="${X(i).toFixed(1)}" y="${H - 8}" font-size="11" fill="var(--muted)" text-anchor="middle">${fmtDate(ser[i][0], { month: "short" })}</text>`).join("")}
+        <path d="${line}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>
+        ${ev.map((e) => { const [g, c] = KIND[e.kind] || KIND.bad, x = X(e.i), y = Y(ser[e.i][1]); return `<g><line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${(y - 26).toFixed(1)}" y2="${y.toFixed(1)}" stroke="${c}" stroke-dasharray="2 2"/><circle cx="${x.toFixed(1)}" cy="${(y - 34).toFixed(1)}" r="11" fill="${c}"/><text x="${x.toFixed(1)}" y="${(y - 30).toFixed(1)}" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">${e.j}</text><title>${esc(fmtDate(e.date))}: ${esc(e.text)}</title></g>`; }).join("")}`, `${s.name} price`);
+    };
+    app.innerHTML = `<h1>Aftermath</h1>
+      <p class="lede">Normally steady, large companies whose shares have fallen 15% or more and stayed down for two months or longer, and what led to each fall.</p>
+      <div class="crit"><span>Steady before: yearly swings under ${Math.round(((A && A.steady_cut) || 0.28) * 100)}%</span><span>Fell 15%+ from a high at least 2 months ago</span><span>Still near the low</span><span>Worth $20B+</span></div>
+      <div class="card section"><h2>How far each one fell <span class="muted">from its peak · click one</span></h2>
+        ${S.map((s, k) => `<a class="af-bar" data-goto="af-${k}" href="#/aftermath"><span class="af-n"><b>${esc(s.name.replace(/ Common Stock$| Corporation.*$| Inc\..*$/, ""))}</b> <span class="muted small">${esc(s.cause || s.industry || "")}</span></span>
+          <span class="af-track"><i style="width:${(Math.abs(s.drop) / mx * 100).toFixed(1)}%"></i></span><b class="mono down">${pct(s.drop, 1)}</b><span class="muted small">${s.days}d</span></a>`).join("")}</div>
+      <div class="af-mult section">${S.map((s, k) => { const ser = s.series.map((x) => x[1]), pk = s.series.findIndex((x) => x[0] >= s.peak);
+        return `<a class="af-sm card" data-goto="af-${k}" href="#/aftermath"><b class="ell">${esc(s.name.split(" ").slice(0, 2).join(" "))}</b><span class="mono down">${pct(s.drop, 0)}</span>${spark(ser, Math.max(0, pk - 40), 160, 44, "var(--bad)")}</a>`; }).join("")}</div>
+      ${S.map((s, k) => `<div class="card af-card section" id="af-${k}">
+        <div class="af-head">${BRAND[s.tk] && BRAND[s.tk][1] ? logoBox(s.tk, "var(--chart)", 44) : `<span class="logo" style="width:44px;height:44px;background:var(--chart)"><b style="font-size:13px">${esc(s.tk.split(".")[0].slice(0, 4))}</b></span>`}
+          <div><h2>${esc(s.name.replace(/ Common Stock$/, ""))} <span class="muted small">${esc(s.tk)} · ${esc(s.industry || s.sector)}</span></h2><div class="af-cause">${esc(s.cause || "")}${s.clear === false ? ` <span class="pill-soft">no single cause</span>` : ""}</div></div></div>
+        <div class="af-stats">
+          <div><span class="lbl">Fell</span><b class="down">${pct(s.drop, 1)}</b><span class="muted small">since ${fmtDate(s.peak, { day: "numeric", month: "short" })}</span></div>
+          <div><span class="lbl">How long</span><b>${s.days} days</b><span class="muted small">trading days from the peak</span></div>
+          <div><span class="lbl">Price</span><b class="mono">${s.peak_px} → ${s.now_px}</b><span class="muted small">${s.tk.includes(".") ? "home-market currency" : "US dollars"}</span></div>
+          <div><span class="lbl">Same days</span><span class="cmp"><span>Stock</span><i class="neg" style="width:${Math.min(100, Math.abs(s.drop) / 0.35 * 100)}%"></i><b class="down">${pct(s.drop, 0)}</b></span>
+            ${s.sector_move != null ? `<span class="cmp"><span>Sector</span><i class="${s.sector_move < 0 ? "neg" : "pos"}" style="width:${Math.min(100, Math.abs(s.sector_move) / 0.35 * 100)}%"></i><b class="${cls(s.sector_move)}">${pct(s.sector_move, 0)}</b></span>` : ""}
+            <span class="cmp"><span>S&amp;P 500</span><i class="${s.spy < 0 ? "neg" : "pos"}" style="width:${Math.min(100, Math.abs(s.spy) / 0.35 * 100)}%"></i><b class="${cls(s.spy)}">${pct(s.spy, 0)}</b></span></div>
+          <div><span class="lbl">Steadiness</span><b>${Math.round(s.vol_before * 100)}% → ${s.vol_during != null ? Math.round(s.vol_during * 100) : "–"}%</b><span class="muted small">yearly swings before → during</span></div>
+        </div>
+        <div class="chart">${chart(s)}</div>
+        <div class="af-tl">${(s.events || []).map((e, j) => { const [g, c] = KIND[e.kind] || KIND.bad; return `<div class="af-ev"><span class="af-num" style="background:${c}">${j + 1}</span><span class="muted small">${fmtDate(e.date, { day: "numeric", month: "short" })}</span><span>${esc(e.text)}</span></div>`; }).join("")}</div>
+        ${s.summary ? `<p class="af-sum"><b>What led to it:</b> ${esc(s.summary)}</p>` : ""}
+        ${s.news && s.news.length ? `<details class="srcs"><summary>Sources: ${s.news.length} news articles</summary><ul>${s.news.map((it) => `<li><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a> <span class="muted small">${esc(it.source)} · ${fmtDate(it.date, { day: "numeric", month: "short" })}</span></li>`).join("")}</ul></details>` : ""}
+      </div>`).join("")}
+      <p class="small muted">Prices are daily closes (Rolls-Royce in pence, Novo Nordisk in Danish kroner). "Steady" compares each stock's daily swings in the year before its peak with the rest of the S&amp;P 500. The timelines are written from news reports; where no single report explains a fall, the card says so.</p>`;
+  }
+
+  // ---------- Investments: who put money in, and the listed companies linked to it ----------
+  async function pageInvest() {
+    setNav("investments");
+    app.innerHTML = `<h1>Investments</h1><p class="loading">Loading…</p>`;
+    const [I, P] = await Promise.all([loadInvest(), loadAllPrices()]); if (location.hash !== "#/investments") return;
+    const L = P.dates.length - 1, last = (tk) => { const x = P.px[tk]; const i = lastIdx(x); return i >= 0 ? x[i] : null; };
+    const at = (tk, d) => { const x = P.px[tk]; if (!x) return null; let i = P.dates.findIndex((z) => z >= d); if (i < 0) return null; for (; i < P.dates.length; i++) if (x[i] != null) return x[i]; return null; };
+    const trumpM = members.find((m) => m.id === "EX_TRUMP_DONALD_J");
+    const held = (tk) => trumpM ? leftOf(trumpM.i, tk) : null;
+    const KC = { gov: "gov", person: "person", company: "company" };
+    const diagram = (d, k) => {
+      const tiles = [];
+      for (const f of d.inflows) if (f.stake && last(f.stake.tk)) { const now = last(f.stake.tk), r = now / f.stake.price - 1; tiles.push([`${f.name} stake`, usd(f.stake.shares * now), `${pct(r)} since ${fmtDate(f.stake.date, { day: "numeric", month: "short", year: "numeric" })} (bought at $${f.stake.price})`, cls(r)]); }
+      const tv = d.trump.map((tk) => held(tk)).filter((h) => h && h.value >= 1000).reduce((a, h) => a + h.value, 0);
+      if (tv) tiles.push(["Trump holds in linked stocks", `≈${usd(tv)}`, `${d.trump.filter((tk) => { const h = held(tk); return h && h.value >= 1000; }).join(", ")} · from his disclosure reports`, ""]);
+      for (const x of d.tiles || []) if (x.stake && last(x.stake.tk)) { const now = last(x.stake.tk), r = now / x.stake.price - 1; tiles.push([x.label, usd(x.stake.shares * now), `${pct(r)} since ${fmtDate(x.stake.date, { day: "numeric", month: "short" })} buy`, cls(r)]); }
+      if (d.center.value) tiles.push([`${d.center.name} value`, d.center.value.split(" (")[0], d.center.value.includes("(") ? d.center.value.split("(")[1].replace(")", "") : "", ""]);
+      return `<div class="card inv section" id="inv-${k}">
+        <div class="inv-top"><span class="muted small">${fmtDate(d.date)} · <span class="pill-soft">${esc(d.status)}</span></span><h2>${esc(d.title)}</h2></div>
+        ${tiles.length ? `<div class="inv-tiles">${tiles.map(([l, b, s2, c]) => `<div><span class="lbl">${esc(l)}</span><b class="${c}">${b}</b><span class="muted small">${esc(s2)}</span></div>`).join("")}</div>` : ""}
+        <div class="flow" data-flow="${k}">
+          <div class="fcol fin"><h4>Money in</h4>${d.inflows.map((f, j) => `<div class="fbox ${KC[f.kind] || "company"}" data-in="${j}"><b>${esc(f.name)}</b><span>${esc(f.amount)}</span><small>${esc(f.note)}</small></div>`).join("")}</div>
+          <div class="fcol fmid"><div class="fhub" data-hub><b>${esc(d.center.name)}</b><span>${esc(d.center.sub)}</span></div></div>
+          <div class="fcol fout"><h4>Listed companies linked</h4>${d.links.map((l, j) => { const now = last(l.tk), then = at(l.tk, d.date), r = now && then ? now / then - 1 : null, h = d.trump.includes(l.tk) ? held(l.tk) : null;
+            return `<a class="fbox link ${r == null ? "" : r >= 0 ? "pos" : "neg"}" data-out="${j}" href="#/stock/${encodeURIComponent(l.tk)}"><span class="fl-top">${BRAND[l.tk] && BRAND[l.tk][1] ? logoBox(l.tk, "var(--chart)", 22) : ""}<b>${esc(coName(l.tk))} (${esc(l.tk)})</b></span>
+              ${r != null ? `<span class="fl-r ${cls(r)}">${pct(r)} since ${fmtDate(d.date, { day: "numeric", month: "short" })}</span>` : `<span class="muted small">no price</span>`}
+              ${h && h.value >= 1000 ? `<span class="small">Trump holds ≈${usd(h.value)}</span>` : ""}<small>${esc(l.note)}</small><span class="frole">${esc(l.role)}</span></a>`; }).join("")}</div>
+          <svg class="flines"></svg>
+        </div>
+        <p class="inv-sum">${esc(d.summary)}</p>
+        <details class="srcs"><summary>Sources: ${d.sources.length}</summary><ul>${d.sources.map((s2) => `<li><a href="${esc(s2.url)}" target="_blank" rel="noopener">${esc(s2.name)}</a></li>`).join("")}</ul></details></div>`;
+    };
+    const deals = (I && I.deals) || [];
+    const stakes = deals.flatMap((d) => d.inflows.filter((f) => f.stake && f.kind === "gov" && last(f.stake.tk)).map((f) => ({ d, f, cost: f.stake.shares * f.stake.price, now: f.stake.shares * last(f.stake.tk) })));
+    const smx = Math.max(...stakes.flatMap((s) => [s.cost, s.now]), 1);
+    app.innerHTML = `<h1>Investments</h1>
+      <p class="lede">Big deals where governments, companies and well-known investors put money in, who else is involved, and how the linked listed stocks have moved since.</p>
+      ${stakes.length ? `<div class="card"><h2>The government's stakes <span class="muted">what it paid vs what it's worth now</span></h2>${stakes.map((s) => `<div class="stk"><span class="stk-n"><b>${esc(s.d.center.name)}</b> <span class="muted small">${esc(s.f.name)}</span></span>
+        <span class="stk-bars"><span class="stk-b cost" style="width:${(s.cost / smx * 100).toFixed(1)}%">${usd(s.cost)} paid</span><span class="stk-b now ${s.now >= s.cost ? "pos" : "neg"}" style="width:${(s.now / smx * 100).toFixed(1)}%">${usd(s.now)} now</span></span><b class="mono ${cls(s.now / s.cost - 1)}">${pct(s.now / s.cost - 1, 0)}</b></div>`).join("")}</div>` : ""}
+      <div class="inv-index section">${deals.map((d, k) => `<a class="pill-link" data-goto="inv-${k}" href="#/investments">${esc(d.center.name)}</a>`).join("")}</div>
+      ${deals.map(diagram).join("")}
+      <div class="card section"><h2>Where does this information come from?</h2><div class="srcgrid">
+        <div><b>Government notices</b><span>Commerce/NIST and Energy Department announcements of CHIPS Act and loan deals, including letters of intent like Helion's.</span></div>
+        <div><b>Company filings (SEC)</b><span>8-K and 10-Q filings and share-issue agreements show exact share counts and prices, like the 9.9M GlobalFoundries shares at $37.85.</span></div>
+        <div><b>Officials' disclosures</b><span>The President's and officials' trade reports (OGE Form 278-T), which this site already reads, show who owns the linked stocks.</span></div>
+        <div><b>Company announcements</b><span>Press releases and funding rounds (Helion's Series G, Nvidia's and SoftBank's Intel stakes).</span></div>
+        <div><b>News and aggregators</b><span>Reporters and accounts like r/TrumpsTrades combine these sources; we check each claim against an official source where one exists.</span></div>
+      </div></div>`;
+    // connector lines from each box to the hub, labelled by the link's role
+    const drawLines = () => $$(".flow").forEach((fl) => {
+      const svg = $(".flines", fl), hub = $("[data-hub]", fl), r0 = fl.getBoundingClientRect(); if (!hub || getComputedStyle(fl).display === "block") { svg.innerHTML = ""; return; }
+      const hb = hub.getBoundingClientRect(), hx = hb.left - r0.left + hb.width / 2, hy = hb.top - r0.top + hb.height / 2;
+      svg.setAttribute("viewBox", `0 0 ${r0.width} ${r0.height}`); svg.setAttribute("width", r0.width); svg.setAttribute("height", r0.height);
+      let s2 = "";
+      $$("[data-in]", fl).forEach((b) => { const r = b.getBoundingClientRect(), x = r.right - r0.left, y = r.top - r0.top + r.height / 2; s2 += `<path d="M${x},${y} C${(x + hx) / 2},${y} ${(x + hx) / 2},${hy} ${hx - hb.width / 2},${hy}" fill="none" stroke="var(--line-strong)" stroke-width="1.6"/>`; });
+      $$("[data-out]", fl).forEach((b) => { const r = b.getBoundingClientRect(), x = r.left - r0.left, y = r.top - r0.top + r.height / 2; s2 += `<path d="M${hx + hb.width / 2},${hy} C${(x + hx) / 2},${hy} ${(x + hx) / 2},${y} ${x},${y}" fill="none" stroke="var(--line-strong)" stroke-width="1.6"/>`; });
+      svg.innerHTML = s2;
+    });
+    drawLines(); window.addEventListener("resize", () => { if (location.hash === "#/investments") drawLines(); }, { passive: true });
+  }
+
+  // ---------- Production: where the world's key goods are made ----------
+  let prodItem = "chips", WORLD = null;
+  const loadWorld = () => WORLD ? Promise.resolve(WORLD) : Promise.all([loadScript("https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"), loadScript("https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js")])
+    .then(() => fetch("https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json")).then((r) => r.json()).then((topo) => (WORLD = window.topojson.feature(topo, topo.objects.countries))).catch(() => null);
+  async function pageProduction() {
+    setNav("production");
+    app.innerHTML = `<h1>Production</h1><p class="loading">Loading…</p>`;
+    const [D2, W] = await Promise.all([loadProd(), loadWorld()]); if (location.hash !== "#/production") return;
+    if (!D2) { app.innerHTML = `<h1>Production</h1><p class="muted">No data.</p>`; return; }
+    const it = D2.items[prodItem] || D2.items.chips;
+    const total = it.rows.reduce((a, r) => a + r[2], 0), isPct = /^%/.test(it.unit);
+    const share = (v) => isPct ? v / 100 : null;
+    app.innerHTML = `<h1>Production</h1>
+      <p class="lede">Where the things markets care about are made, and how much depends on a single country.</p>
+      <div class="card"><h2>The AI chip chain <span class="muted">each step, and the one place it depends on</span></h2><div class="chain">${D2.chain.map((c, k) => `<div class="ch-step"><span class="ch-n">${k + 1}</span><b>${esc(c.step)}</b><span class="ch-where">${esc(c.where)}</span><span class="small muted">${esc(c.who)}</span><span class="ch-share">${esc(c.share)}</span></div>`).join('<span class="ch-arrow">→</span>')}</div></div>
+      <div class="toolbar pr-tools">${D2.groups.map((g) => `<div class="seg" role="group" aria-label="${esc(g.name)}">${g.items.map((k) => `<button type="button" data-pi="${k}" aria-pressed="${k === prodItem}">${esc(D2.items[k].name)}</button>`).join("")}</div>`).join("")}</div>
+      <div class="card section"><div class="pr-head"><h2>${esc(it.name)}</h2><span class="muted small">${esc(it.unit)} · ${esc(it.year)} · world: ${esc(it.world)}</span></div><p class="small">${esc(it.why)}</p>
+        <div class="pr-grid"><div class="pr-map" id="prMap">${W ? "" : `<p class="muted small">The world map couldn't load; the list shows the same figures.</p>`}</div>
+          <div class="pr-list">${it.rows.map(([n, , v], k) => `<div class="pr-row"><span class="pr-rank">${k + 1}</span><b>${esc(n)}</b><span class="pr-bar"><i style="width:${(v / it.rows[0][2] * 100).toFixed(1)}%;opacity:${(1 - k * 0.07).toFixed(2)}"></i></span><span class="mono">${isPct ? `${v}%` : v.toLocaleString()}</span></div>`).join("")}
+            ${!isPct ? `<p class="small muted">Top ${it.rows.length} shown; world total ${esc(it.world)}.</p>` : ""}</div></div>
+        <p class="small muted">Source: ${esc(it.source)} (${esc(it.year)}). Figures rounded.</p></div>
+      <div class="card section"><h2>Who leads each one</h2><div class="pr-cards">${Object.entries(D2.items).map(([k, x]) => { const top = x.rows[0], tot = x.rows.reduce((a, r) => a + r[2], 0), sh = /^%/.test(x.unit) ? top[2] : null;
+        return `<button type="button" class="pr-card${k === prodItem ? " on" : ""}" data-pi="${k}"><span class="muted small">${esc(x.name)}</span><b>${esc(top[0])}</b><span class="mono">${sh != null ? `${sh}%` : `${top[2].toLocaleString()}`}</span><span class="pr-mini"><i style="width:${sh != null ? sh : Math.round(top[2] / tot * 100)}%"></i></span></button>`; }).join("")}</div></div>`;
+    $$("[data-pi]").forEach((b) => b.addEventListener("click", () => { prodItem = b.dataset.pi; route(true); }));
+    if (W && window.d3) {
+      const el = $("#prMap"), w = 760, h = 400, d3 = window.d3, proj = d3.geoNaturalEarth1().fitSize([w, h], { type: "Sphere" }), path = d3.geoPath(proj);
+      const val = new Map(); for (const [, n, v] of it.rows) val.set(String(n).padStart(3, "0"), (val.get(String(n).padStart(3, "0")) || 0) + v);
+      const mx = Math.max(...val.values());
+      const col = (v) => `color-mix(in srgb, var(--chart) ${Math.round(25 + 75 * v / mx)}%, var(--surface))`;
+      const feats = W.features.filter((f) => f.id !== "010");
+      el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" class="worldmap"><path d="${path({ type: "Sphere" })}" fill="var(--bg)"/>${feats.map((f) => { const v = val.get(f.id); return `<path d="${path(f)}" fill="${v ? col(v) : "var(--chip)"}" stroke="var(--surface)" stroke-width=".5">${v ? `<title>${esc(f.properties.name)}: ${isPct ? `${v}%` : v.toLocaleString()}</title>` : ""}</path>`; }).join("")}
+        ${it.rows.slice(0, 5).map(([n, id, v]) => { const f = feats.find((g) => g.id === String(id).padStart(3, "0")); if (!f) return ""; const [cx, cy] = path.centroid(f); const r = 6 + 16 * Math.sqrt(v / mx);
+          return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="var(--hot)" fill-opacity=".85" stroke="#fff" stroke-width="1.5"/><text x="${cx.toFixed(1)}" y="${(cy - r - 4).toFixed(1)}" font-size="12" font-weight="700" text-anchor="middle" fill="var(--ink)" paint-order="stroke" stroke="var(--surface)" stroke-width="3">${esc(n.split(" (")[0])} ${isPct ? `${v}%` : ""}</text>`; }).join("")}</svg>`;
+    }
+  }
+  // in-page jumps (the address keeps the page; #af-3 would be read as a page of its own)
+  document.addEventListener("click", (e) => { const a = e.target.closest && e.target.closest("[data-goto]"); if (!a) return; e.preventDefault(); const el = document.getElementById(a.dataset.goto); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); });
+
   // ---------- routing ----------
   function route(keepScroll) {
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, "")), [page, arg] = h.split("/");
@@ -1688,11 +1986,16 @@
     else if (page === "leaders") pageLeaders();
     else if (page === "signals") pageSignals();
     else if (page === "drops") pageDrops();
-    else pageHome();
+    else if (page === "congress") pageHome();
+    else if (page === "movers") pageMovers();
+    else if (page === "aftermath") pageAftermath();
+    else if (page === "investments") pageInvest();
+    else if (page === "production") pageProduction();
+    else pageMarkets();
     // the page's period and its other main choices stay in a bar under the top bar while scrolling
     pinBar();
     const h1 = $("h1", app);
-    if (h1 && !["signals", "drops"].includes(page)) {
+    if (h1 && !["signals", "drops", "", "movers", "aftermath", "investments", "production"].includes(page)) {
       const strip = document.createElement("div"); strip.innerHTML = filterStrip();
       const anchorEl = h1.closest(".profile, .price-head") || h1;
       (anchorEl.nextElementSibling && anchorEl.nextElementSibling.classList.contains("lede") ? anchorEl.nextElementSibling : anchorEl).after(strip.firstElementChild);

@@ -1,0 +1,72 @@
+/* Where the world's key goods are produced: the biggest producing countries and their share of world output.
+   Figures are rounded, from the latest full year each source publishes (named on each item). "n" is the
+   country's ISO number, used to colour the world map. */
+window.CTC_PROD = {
+  groups: [
+    { name: "AI and chips", items: ["chips", "hbm", "euv", "gallium", "dc_power"] },
+    { name: "Energy", items: ["oil", "refining", "gas", "lng", "uranium"] },
+    { name: "Metals and minerals", items: ["rare_earths", "lithium", "cobalt", "nickel", "copper", "steel", "gold"] }
+  ],
+  items: {
+    chips: { name: "Leading-edge chips", unit: "% of world capacity below 10nm", year: "2023", source: "SIA / BCG, Emerging Resilience in the Semiconductor Supply Chain",
+      why: "The most advanced chips (Nvidia's AI chips, iPhone chips) are almost all made in Taiwan, mostly by TSMC.",
+      rows: [["Taiwan", 158, 92], ["South Korea", 410, 8]], world: "100%" },
+    hbm: { name: "AI memory (HBM)", unit: "% of world supply", year: "2024", source: "TrendForce",
+      why: "High-bandwidth memory sits next to every AI chip. Two Korean companies make most of it.",
+      rows: [["South Korea (SK Hynix)", 410, 53], ["South Korea (Samsung)", 410, 38], ["United States (Micron)", 840, 9]], world: "100%", byCompany: true },
+    euv: { name: "Chipmaking machines (EUV)", unit: "% of world supply", year: "2024", source: "ASML annual report",
+      why: "Every leading-edge chip needs extreme-ultraviolet machines. Only one company in the world makes them: ASML in the Netherlands.",
+      rows: [["Netherlands (ASML)", 528, 100]], world: "about 40–50 machines a year" },
+    gallium: { name: "Gallium", unit: "% of world output", year: "2024", source: "USGS Mineral Commodity Summaries",
+      why: "Used in power chips, radar and LEDs. China makes nearly all of it and has restricted exports.",
+      rows: [["China", 156, 98], ["Russia", 643, 1], ["Japan", 392, 1]], world: "about 760 tonnes" },
+    dc_power: { name: "Data-centre electricity", unit: "% of world use", year: "2024", source: "IEA, Energy and AI",
+      why: "AI runs in data centres; the US uses the most power for them, then China.",
+      rows: [["United States", 840, 45], ["China", 156, 25], ["Germany (Europe)", 276, 15]], world: "about 415 TWh" },
+    oil: { name: "Oil", unit: "million barrels a day (all liquids)", year: "2023", source: "US EIA",
+      why: "The US is the biggest oil producer; Saudi Arabia and Russia lead OPEC+.",
+      rows: [["United States", 840, 21.9], ["Saudi Arabia", 682, 11.1], ["Russia", 643, 10.8], ["Canada", 124, 5.8], ["China", 156, 5.3], ["Iraq", 368, 4.4], ["Iran", 364, 4.3], ["UAE", 784, 4.2], ["Brazil", 76, 4.2], ["Kuwait", 414, 2.9]], world: "about 102 million barrels a day" },
+    refining: { name: "Diesel and petrol (refining)", unit: "million barrels a day of refinery capacity", year: "2023", source: "Energy Institute, Statistical Review of World Energy",
+      why: "Diesel and petrol are made in refineries. China and the US have by far the most capacity.",
+      rows: [["China", 156, 18.4], ["United States", 840, 18.0], ["Russia", 643, 6.7], ["India", 356, 5.2], ["South Korea", 410, 3.6], ["Japan", 392, 3.3], ["Saudi Arabia", 682, 3.3], ["Brazil", 76, 2.3]], world: "about 103 million barrels a day" },
+    gas: { name: "Natural gas", unit: "billion cubic metres a year", year: "2023", source: "Energy Institute, Statistical Review of World Energy",
+      why: "Gas makes much of the world's electricity, including for data centres.",
+      rows: [["United States", 840, 1035], ["Russia", 643, 586], ["Iran", 364, 252], ["China", 156, 234], ["Canada", 124, 190], ["Qatar", 634, 181], ["Australia", 36, 153], ["Norway", 578, 116]], world: "about 4,050 bcm" },
+    lng: { name: "LNG exports", unit: "million tonnes a year", year: "2024", source: "IGU World LNG Report",
+      why: "Liquefied gas shipped by sea. The US became the biggest exporter in 2023.",
+      rows: [["United States", 840, 88], ["Australia", 36, 80], ["Qatar", 634, 77], ["Russia", 643, 33], ["Malaysia", 458, 27]], world: "about 410 million tonnes" },
+    uranium: { name: "Uranium", unit: "tonnes a year", year: "2022", source: "World Nuclear Association",
+      why: "Fuel for nuclear power, which tech companies are buying to run AI data centres.",
+      rows: [["Kazakhstan", 398, 21227], ["Canada", 124, 7351], ["Namibia", 516, 5613], ["Australia", 36, 4553], ["Uzbekistan", 860, 3300], ["Russia", 643, 2508], ["Niger", 562, 2020], ["China", 156, 1700]], world: "about 49,000 tonnes" },
+    rare_earths: { name: "Rare earths", unit: "tonnes a year (mined)", year: "2024", source: "USGS Mineral Commodity Summaries",
+      why: "Needed for magnets in motors, drones and missiles. China mines most and processes about 90%.",
+      rows: [["China", 156, 270000], ["United States", 840, 45000], ["Myanmar", 104, 31000], ["Australia", 36, 13000], ["Nigeria", 566, 13000], ["Thailand", 764, 13000]], world: "about 390,000 tonnes" },
+    lithium: { name: "Lithium", unit: "tonnes a year", year: "2024", source: "USGS Mineral Commodity Summaries",
+      why: "For batteries in electric cars and grid storage.",
+      rows: [["Australia", 36, 88000], ["Chile", 152, 49000], ["China", 156, 41000], ["Zimbabwe", 716, 22000], ["Argentina", 32, 18000], ["Brazil", 76, 10000]], world: "about 240,000 tonnes" },
+    cobalt: { name: "Cobalt", unit: "tonnes a year", year: "2024", source: "USGS Mineral Commodity Summaries",
+      why: "For batteries; three-quarters comes from the Democratic Republic of the Congo.",
+      rows: [["DR Congo", 180, 220000], ["Indonesia", 360, 28000], ["Russia", 643, 8700], ["Philippines", 608, 3800], ["Australia", 36, 3600], ["Cuba", 192, 3500]], world: "about 290,000 tonnes" },
+    nickel: { name: "Nickel", unit: "tonnes a year", year: "2024", source: "USGS Mineral Commodity Summaries",
+      why: "For stainless steel and batteries; Indonesia now makes more than half.",
+      rows: [["Indonesia", 360, 2200000], ["Philippines", 608, 330000], ["Russia", 643, 210000], ["Canada", 124, 190000], ["China", 156, 120000], ["Australia", 36, 110000]], world: "about 3.7 million tonnes" },
+    copper: { name: "Copper", unit: "thousand tonnes a year (mined)", year: "2024", source: "USGS Mineral Commodity Summaries",
+      why: "For power grids, data centres and electric cars.",
+      rows: [["Chile", 152, 5300], ["DR Congo", 180, 3300], ["Peru", 604, 2600], ["China", 156, 1800], ["Indonesia", 360, 1100], ["United States", 840, 1100], ["Russia", 643, 930], ["Australia", 36, 800]], world: "about 23 million tonnes" },
+    steel: { name: "Steel", unit: "million tonnes a year", year: "2023", source: "worldsteel",
+      why: "China makes more steel than the rest of the world combined.",
+      rows: [["China", 156, 1019], ["India", 356, 141], ["Japan", 392, 87], ["United States", 840, 81], ["Russia", 643, 76], ["South Korea", 410, 67], ["Germany", 276, 35], ["Turkey", 792, 34], ["Brazil", 76, 32]], world: "about 1,890 million tonnes" },
+    gold: { name: "Gold", unit: "tonnes a year (mined)", year: "2024", source: "USGS Mineral Commodity Summaries",
+      why: "A safe haven investors buy when markets are nervous.",
+      rows: [["China", 156, 380], ["Russia", 643, 310], ["Australia", 36, 290], ["Canada", 124, 200], ["United States", 840, 160], ["Ghana", 288, 140], ["Mexico", 484, 140], ["Kazakhstan", 398, 130]], world: "about 3,300 tonnes" }
+  },
+  // the chain an AI chip goes through, and the one place each step depends on
+  chain: [
+    { step: "Design", where: "United States", who: "Nvidia, AMD, Broadcom, Apple, Google", share: "Most AI chip designs" },
+    { step: "Chipmaking machines", where: "Netherlands", who: "ASML", share: "100% of EUV machines" },
+    { step: "Chip factories", where: "Taiwan", who: "TSMC", share: "~92% of leading-edge capacity" },
+    { step: "AI memory", where: "South Korea", who: "SK Hynix, Samsung", share: "~90% of HBM" },
+    { step: "Raw materials", where: "China", who: "Gallium, rare earths", share: "~98% of gallium, ~90% of rare-earth processing" },
+    { step: "Power", where: "United States", who: "Data centres", share: "~45% of data-centre electricity" }
+  ]
+};
