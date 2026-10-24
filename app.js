@@ -85,7 +85,7 @@
   };
   const isExec = (m) => m.chamber === "E", isBiz = (m) => m.chamber === "C";
   const seat = (m) => isBiz(m) ? m.role || "Business leader" : isExec(m) ? [m.role, (m.agency || "").replace(/\/Office of The Secretary$/, "")].filter(Boolean).join(" · ")
-    : `${m.chamber === "S" ? "Senator" : "Representative"} · ${m.state}${m.chamber === "H" && m.district ? "-" + String(m.district).padStart(2, "0") : ""}`;
+    : `${m.former ? "Former " : ""}${m.chamber === "S" ? "Senator" : "Representative"} · ${m.state}${m.chamber === "H" && m.district ? "-" + String(m.district).padStart(2, "0") : ""}`;
   const partyTag = (m) => m.party ? `<span class="party ${esc(m.party)}">${esc(m.party)}</span>` : "";
   const cname = (c) => (D.committees[c] || {}).name || c;
   // faces: the large portrait file where there is one, otherwise the small photo from photos.js (loaded in the background)
@@ -753,7 +753,7 @@
     const comm = (m.committees || []).map((c) => D.committees[c] && D.committees[c].name).filter(Boolean);
     app.innerHTML = `<div class="crumbs"><a href="#/politicians">Politicians</a></div>
       <div class="profile ${esc(m.party || "I")}">${photo(m)}
-        <div><h1>${esc(m.name)}</h1><div class="muted">${partyTag(m)} ${esc(seat(m))}${m.former ? " · former" : ""}</div>
+        <div><h1>${esc(m.name)}</h1><div class="muted">${partyTag(m)} ${esc(seat(m))}</div>
         <div class="tags">${comm.slice(0, 6).map((c) => `<span class="tag">${esc(c)}</span>`).join("")}</div></div></div>
       <div class="toolbar pin-top">${periodSeg()}${PF_.bar}</div>${PF_.panel}
       <div class="grid cols-4">
@@ -2199,6 +2199,7 @@
     setNav("dataviz");
     app.innerHTML = `<h1>Data Visualization</h1>
       <p class="lede">Charts and fact sheets built from the Congress filings: a stock's price with each trade marked, a politician's record, the latest disclosures and more. Pick a view, then download or copy it as an image.</p>
+      <p class="small muted dv-note">The images count every trade in the period you pick. The filters on the Congress pages (large caps, committee-linked and the rest) don't apply here, so a Congress page with its filters on can show smaller totals.</p>
       <iframe id="dvFrame" class="dv-frame" src="classic.html?view=dataviz&v=20261026a" title="Data Visualization" allow="clipboard-write"></iframe>`;
     const fr = $("#dvFrame");
     const fit = () => { try { const pm = fr.contentDocument && fr.contentDocument.getElementById("postMaker"); if (pm) fr.style.height = `${Math.ceil(pm.getBoundingClientRect().height) + 24}px`; } catch (e) { /* not loaded yet */ } };
