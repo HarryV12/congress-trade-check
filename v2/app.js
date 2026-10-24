@@ -2095,7 +2095,7 @@
     // the page's period and its other main choices stay in a bar under the top bar while scrolling
     pinBar();
     bindFilters();
-    setTimeout(() => { const t = $("h1", app); document.title = t && page ? `${t.textContent} · Congress Trade Check` : "Congress Trade Check"; }, 0);
+    setTimeout(() => { const t = $("h1", app); document.title = t && page ? `${t.textContent} · HarryV12 Finance` : "HarryV12 Finance"; }, 0);
   }
   function pinBar() {
     const sb = $("#subbar"), row = $(".sub-row", sb), tb = $(".toolbar.pin-top", app), h1t = $("h1", app);
