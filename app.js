@@ -1,6 +1,6 @@
 /* Congress Trade Check, website design (v2).
    Pages with their own links, global search, sortable tables and interactive charts, built from the same data files
-   as the classic site (../data.js, ../series.js, ../prices.js ...). What the classic site's Data Visualization drew as
+   as the classic site (data.js, series.js, prices.js ...). What the classic site's Data Visualization drew as
    images is part of the pages here: a politician's factsheet, portfolio, biggest buys, bonds and committee overlap on
    their page; Democrats vs Republicans and who still holds it on a stock's page; buying spikes on the home page. */
 (() => {
@@ -88,11 +88,11 @@
     : `${m.chamber === "S" ? "Senator" : "Representative"} · ${m.state}${m.chamber === "H" && m.district ? "-" + String(m.district).padStart(2, "0") : ""}`;
   const partyTag = (m) => m.party ? `<span class="party ${esc(m.party)}">${esc(m.party)}</span>` : "";
   const cname = (c) => (D.committees[c] || {}).name || c;
-  // faces: the large portrait file where there is one, otherwise the small photo from ../photos.js (loaded in the background)
-  const photoSrc = (m) => m.hd ? `../portraits/${encodeURIComponent(m.id)}.jpg` : (window.CTC_PHOTOS && window.CTC_PHOTOS[m.id]) || "";
+  // faces: the large portrait file where there is one, otherwise the small photo from photos.js (loaded in the background)
+  const photoSrc = (m) => m.hd ? `portraits/${encodeURIComponent(m.id)}.jpg` : (window.CTC_PHOTOS && window.CTC_PHOTOS[m.id]) || "";
   const photo = (m) => { const src = photoSrc(m); return `<img ${src ? `src="${src}"` : ""} data-pid="${esc(m.id)}" alt="" loading="lazy" onerror="window.__ctcPhotoFail&&window.__ctcPhotoFail(this)">`; };
   window.__ctcPhotoFail = (img) => { const u = window.CTC_PHOTOS && window.CTC_PHOTOS[img.dataset.pid]; if (u && img.src !== u) img.src = u; else img.removeAttribute("src"); };
-  loadScript("../photos.js").then(() => $$("img[data-pid]").forEach((img) => { if (!img.getAttribute("src") || img.naturalWidth === 0) { const u = (window.CTC_PHOTOS || {})[img.dataset.pid]; if (u) img.src = u; } }));
+  loadScript("photos.js").then(() => $$("img[data-pid]").forEach((img) => { if (!img.getAttribute("src") || img.naturalWidth === 0) { const u = (window.CTC_PHOTOS || {})[img.dataset.pid]; if (u) img.src = u; } }));
   const who = (m, sub = true) => `<a class="who ${esc(m.party || "I")}" href="#/member/${encodeURIComponent(m.id)}">${photo(m)}<span style="min-width:0"><span class="nm">${esc(m.name)}</span>${sub ? `<br><span class="meta">${partyTag(m)} ${esc(seat(m))}</span>` : ""}</span></a>`;
   const tkLink = (tk) => tk && stocks[tk] ? `<a class="tk" href="#/stock/${encodeURIComponent(tk)}">${esc(tk)}</a>` : `<span class="tk">${esc(tk || "–")}</span>`;
   const stockName = (t) => t.t && stocks[t.t] ? cleanName(stocks[t.t][0]) : t.a;
@@ -1034,7 +1034,7 @@
 
   // ---------- bonds and debt ----------
   let MATURITY = null;
-  const loadMaturity = () => MATURITY ? Promise.resolve(MATURITY) : loadScript("../bond_maturity.js").then(() => (MATURITY = window.CTC_MATURITY || {}));
+  const loadMaturity = () => MATURITY ? Promise.resolve(MATURITY) : loadScript("bond_maturity.js").then(() => (MATURITY = window.CTC_MATURITY || {}));
   const DEBT_RE = /\bDUE\b|\d%|\bREV\b|\bBDS?\b|\bNOTES?\b|\bNTS\b|\bBONDS?\b|\bMUNI|TREAS|T-BILL|\bBILLS?\b|\bCDS?\b|CERTIFICATE OF DEPOSIT|\bGO\b|DEBENTURE|\bLINKED\b|\bPERP\b/i;
   const isDebt = (t) => t.cls !== "option" && t.side !== "O" && (stocks[t.t] ? /\b(BOND|TREASURY|MUNI)/i.test(stocks[t.t][0]) : DEBT_RE.test(t.a || ""));
   const DEBT_KINDS = { treasury: ["U.S. Treasury", "#2a78d6"], muni: ["Municipal", "#1baf7a"], corp: ["Corporate", "#eb6834"], bank: ["Bank notes & CDs", "#6f4cc3"], fund: ["Bond funds", "#8e96a3"] };
@@ -1077,7 +1077,7 @@
 
   // ---------- a stock's page ----------
   let PRICES = null, pricesPromise = null;
-  const loadPrices = () => PRICES ? Promise.resolve(PRICES) : (pricesPromise ||= loadScript("../prices.js").then(() => (PRICES = window.CTC_PRICES || null)));
+  const loadPrices = () => PRICES ? Promise.resolve(PRICES) : (pricesPromise ||= loadScript("prices.js").then(() => (PRICES = window.CTC_PRICES || null)));
   async function pageStock(tk) {
     setNav("stocks");
     const st = stocks[tk];
@@ -1243,7 +1243,7 @@
 
   // ---------- Public signals ----------
   let SIGNALS = null;
-  const loadSignals = () => SIGNALS ? Promise.resolve(SIGNALS) : loadScript("../signals.js").then(() => (SIGNALS = window.CTC_SIGNALS || { stocks: [] }));
+  const loadSignals = () => SIGNALS ? Promise.resolve(SIGNALS) : loadScript("signals.js").then(() => (SIGNALS = window.CTC_SIGNALS || { stocks: [] }));
   async function pageSignals() {
     setNav("signals");
     app.innerHTML = `<h1>Public signals</h1><p class="loading">Loading…</p>`;
@@ -1296,7 +1296,7 @@
 
   // ---------- Market drops: why did the market fall? ----------
   let MOVES = null;
-  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=6&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
+  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`market_moves.js?v=6&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
   let dropInd = "all", dropRange = "all", thRange = "1y";
   // the US stock market's clock (New York time): regular trading 9:30am to 4:00pm ET, Monday to Friday
   // (exchange holidays aren't known here, so a holiday shows as a normal weekday)
@@ -1671,7 +1671,7 @@
 
   // =============================== finance pages ===============================
   // Home (the markets today), Market movers, Aftermath, Investments and Production. They read the daily closes
-  // (../prices.js plus ../extra_prices.js for stocks members haven't traded) and their own data files.
+  // (prices.js plus extra_prices.js for stocks members haven't traded) and their own data files.
   const DOW30 = "AAPL AMGN AMZN AXP BA CAT CRM CSCO CVX DIS GS HD HON IBM JNJ JPM KO MCD MMM MRK MSFT NKE NVDA PG SHW TRV UNH V VZ WMT".split(" ");
   const NDX100 = ("AAPL ABNB ADBE ADI ADP ADSK AEP AMAT AMD AMGN AMZN APP ARM ASML AVGO AXON AZN BIIB BKNG BKR CCEP CDNS CDW CEG CHTR CMCSA COST "
     + "CPRT CRWD CSCO CSGP CSX CTAS CTSH DASH DDOG DXCM EXC FANG FAST FTNT GEHC GFS GILD GOOG GOOGL HON IDXX INTC INTU ISRG KDP KHC "
@@ -1680,11 +1680,11 @@
   const AI_STOCKS = "NVDA AVGO AMD TSM MU ARM SMCI PLTR MRVL LRCX AMAT KLAC ORCL MSFT GOOGL META AMZN CRWV ANET VRT DELL HPE SNOW NOW CRM IBM INTC QCOM ASML VST CEG".split(" ");
   const INDEXES = [["SPY", "S&P 500"], ["QQQ", "Nasdaq 100"], ["DIA", "Dow"], ["IWM", "Small companies"], ["TLT", "Long-term bonds"], ["GLD", "Gold"], ["XLE", "Energy stocks"]];
   let XPX = false;
-  const loadAllPrices = () => loadPrices().then((P) => XPX ? P : loadScript("../extra_prices.js").then(() => { if (P && window.CTC_XPX) for (const [t, v] of Object.entries(window.CTC_XPX.px)) if (!P.px[t]) P.px[t] = v; XPX = true; return P; }));
+  const loadAllPrices = () => loadPrices().then((P) => XPX ? P : loadScript("extra_prices.js").then(() => { if (P && window.CTC_XPX) for (const [t, v] of Object.entries(window.CTC_XPX.px)) if (!P.px[t]) P.px[t] = v; XPX = true; return P; }));
   let AFTER = null, INVEST = null, PROD = null;
-  const loadAfter = () => AFTER ? Promise.resolve(AFTER) : loadScript(`../aftermath.js?v=3&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (AFTER = window.CTC_AFTERMATH || null));
-  const loadInvest = () => INVEST ? Promise.resolve(INVEST) : loadScript(`../investments.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (INVEST = window.CTC_INVEST || null));
-  const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("../production.js?v=4").then(() => (PROD = window.CTC_PROD || null));
+  const loadAfter = () => AFTER ? Promise.resolve(AFTER) : loadScript(`aftermath.js?v=3&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (AFTER = window.CTC_AFTERMATH || null));
+  const loadInvest = () => INVEST ? Promise.resolve(INVEST) : loadScript(`investments.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (INVEST = window.CTC_INVEST || null));
+  const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("production.js?v=4").then(() => (PROD = window.CTC_PROD || null));
   const SPANS = { day: [1, "Today"], week: [5, "This week"], month: [21, "This month"] };
   let moverList = "sp", moverSpan = "day";
   const lastIdx = (x) => { if (!x) return -1; for (let i = x.length - 1; i >= 0; i--) if (x[i] != null) return i; return -1; };
@@ -1976,7 +1976,7 @@
   // Hand-kept facts (each dated and sourced) come from ai_bubble.js, which is updated as news happens; one-year
   // share moves and company values are worked out live from the site's prices.
   let AIB = null;
-  const loadAIB = () => AIB ? Promise.resolve(AIB) : loadScript(`../ai_bubble.js?v=1&h=${new Date().toISOString().slice(0, 13)}`).then(() => (AIB = window.CTC_AIB || null));
+  const loadAIB = () => AIB ? Promise.resolve(AIB) : loadScript(`ai_bubble.js?v=1&h=${new Date().toISOString().slice(0, 13)}`).then(() => (AIB = window.CTC_AIB || null));
   async function pageAIBubble() {
     setNav("aibubble");
     app.innerHTML = `<h1>Where is the AI bubble?</h1><p class="loading">Loading…</p>`;
@@ -2075,7 +2075,7 @@
   async function pageMethod() {
     setNav("method");
     app.innerHTML = `<h1>How the numbers are made</h1><p class="loading">Loading…</p>`;
-    await Promise.all([window.CTC_ESTTEST ? 1 : loadScript("../estimate_test.js"), window.CTC_PHOTO_CREDITS ? 1 : loadScript("../photo_credits.js")]);
+    await Promise.all([window.CTC_ESTTEST ? 1 : loadScript("estimate_test.js"), window.CTC_PHOTO_CREDITS ? 1 : loadScript("photo_credits.js")]);
     if (location.hash !== "#/method") return;
     const startShort = fmtDate(D.start, { month: "short", year: "numeric" });
     const docs = Object.values(D.docs || {}), house = docs.filter((d) => !/oge\.gov/.test(d[0])), oge = docs.filter((d) => /oge\.gov/.test(d[0]));
@@ -2199,7 +2199,7 @@
     setNav("dataviz");
     app.innerHTML = `<h1>Data Visualization</h1>
       <p class="lede">Charts and fact sheets built from the Congress filings: a stock's price with each trade marked, a politician's record, the latest disclosures and more. Pick a view, then download or copy it as an image.</p>
-      <iframe id="dvFrame" class="dv-frame" src="../index.html?view=dataviz&v=20261025b" title="Data Visualization" allow="clipboard-write"></iframe>`;
+      <iframe id="dvFrame" class="dv-frame" src="classic.html?view=dataviz&v=20261026a" title="Data Visualization" allow="clipboard-write"></iframe>`;
     const fr = $("#dvFrame");
     const fit = () => { try { const pm = fr.contentDocument && fr.contentDocument.getElementById("postMaker"); if (pm) fr.style.height = `${Math.ceil(pm.getBoundingClientRect().height) + 24}px`; } catch (e) { /* not loaded yet */ } };
     fr.addEventListener("load", () => {

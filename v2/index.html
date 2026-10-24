@@ -2,52 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>HarryV12 Finance</title>
-<meta name="description" content="Stock and bond trades by members of Congress and senior officials, from their public disclosures.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Public+Sans:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="style.css?v=20261025za">
-<script>/* light unless the viewer picked dark */ try { document.documentElement.dataset.theme = localStorage.getItem("ctc-theme") === "dark" ? "dark" : "light"; } catch (e) { document.documentElement.dataset.theme = "light"; }</script>
+<!-- the new design moved to the site's main page; old /v2/ links (and their #/page) land there -->
+<link rel="canonical" href="../">
+<script>location.replace("../" + location.hash);</script>
+<meta http-equiv="refresh" content="1; url=../">
 </head>
 <body>
-<header class="top">
-  <div class="wrap top-row">
-    <a class="brand" href="#/">HarryV12 Finance</a>
-    <nav class="nav" aria-label="Main">
-      <a href="#/" data-nav="home">Home</a>
-      <a href="#/movers" data-nav="movers">Market movers</a>
-      <a href="#/aftermath" data-nav="aftermath">Aftermath</a>
-      <a href="#/investments" data-nav="investments">Investments</a>
-      <a href="#/production" data-nav="production">Production</a>
-      <a href="#/drops" data-nav="drops">Market drops</a>
-      <a href="#/aibubble" data-nav="aibubble">AI bubble</a>
-      <div class="navdrop"><a href="#/congress" data-nav="congress" data-group="politicians,stocks,leaders,signals,method" aria-haspopup="true">Congress ▾</a>
-        <div class="navmenu"><a href="#/congress">Congress trades</a><a href="#/politicians" data-nav="politicians">Politicians</a><a href="#/stocks" data-nav="stocks">Stocks</a><a href="#/leaders" data-nav="leaders">Leaderboard</a><a href="#/signals" data-nav="signals">Signals</a><a href="#/method" data-nav="method">How the numbers are made</a></div></div>
-    </nav>
-    <div class="search" role="search">
-      <input id="q" type="search" placeholder="Search a politician or stock" autocomplete="off" spellcheck="false" aria-label="Search a politician or stock" aria-controls="qList" aria-expanded="false" role="combobox">
-      <ul id="qList" role="listbox" hidden></ul>
-    </div>
-    <button id="theme" class="icon-btn" type="button" aria-label="Light or dark">◐</button>
-  </div>
-</header>
-<div id="subbar" class="subbar" hidden><div class="wrap sub-row"></div></div>
-<main id="app" class="wrap" tabindex="-1"><p class="loading">Loading the trades…</p></main>
-<div class="dv-view" id="dvView" role="dialog" aria-modal="true" aria-label="Image, full size" hidden><button type="button" aria-label="Close">×</button><img alt="Data visualization, full size"></div>
-<footer class="site-foot">
-  <div class="wrap sf-grid">
-    <div class="sf-brand"><a class="brand" href="#/">HarryV12 Finance</a><p>Markets, AI and Congress trades, explained with data.</p><a class="sf-dv" href="#/dataviz">Data Visualization →</a></div>
-    <nav class="sf-col" aria-label="Markets"><b>Markets</b><a href="#/">Home</a><a href="#/movers">Market movers</a><a href="#/drops">Market drops</a><a href="#/aftermath">Aftermath</a></nav>
-    <nav class="sf-col" aria-label="Industry"><b>Industry</b><a href="#/investments">Investments</a><a href="#/production">Production</a><a href="#/aibubble">AI bubble</a></nav>
-    <nav class="sf-col" aria-label="Congress"><b>Congress</b><a href="#/congress">Congress trades</a><a href="#/politicians">Politicians</a><a href="#/stocks">Stocks</a><a href="#/leaders">Leaderboard</a><a href="#/signals">Signals</a><a href="#/method">How the numbers are made</a></nav>
-  </div>
-  <div class="wrap sf-note">Not investment or financial advice.</div>
-</footer>
-<script src="../data.js"></script>
-<script src="../series.js"></script>
-<script src="../holdings_start.js"></script>
-<script src="app.js?v=20261025za"></script>
+<p>HarryV12 Finance has moved. <a href="../">Go to the site</a>.</p>
 </body>
 </html>
