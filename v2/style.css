@@ -628,3 +628,16 @@ details.srcs > summary:hover { color: var(--accent); } details.srcs .news2 { mar
 @media (min-width: 861px) { .sub-row .pr-tools { flex-wrap: wrap; row-gap: 6px; } }
 .af-card, .inv, .card:has(> .chain) { scroll-margin-top: calc(var(--toph, 60px) + 80px); }
 .sub-row .pr-tools .seg { flex-wrap: nowrap; }
+
+/* ===== Readable text (sizes matched to Yahoo Finance and Bloomberg, measured 24 Oct 2026) =====
+   Sentences (descriptions, notes, What's new, causes, timelines, source lists): 15px.
+   Investments' box notes: 13px. Source tags and chart month labels: 11px.
+   Data numbers, dates, short labels and heatmap tiles keep their sizes. */
+p.small, ul.small, ol.small, .small > li,
+h2 .muted, h5 .muted, .stat .sub,
+.ab-news li, .ab-stat .small, .ab-donut .small, .nx-step .small, .sq ul, .srcgrid > div,
+.af-ev, .af-ev > span:nth-child(3), .af-stats > div > .muted.small:last-child, .af-n .muted.small, .af-sum,
+.mini-row .ell.small, .ch-step .small, details.srcs > ul, .inv-tiles .muted.small, .inv-sum { font-size: 15px; }
+.af-ev > span:nth-child(2) { font-size: 13px; }
+.fbox small { font-size: 13px; }
+.ab-src { font-size: 11px; line-height: 17px; }

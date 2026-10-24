@@ -1437,12 +1437,12 @@
       let axis = "";
       if (span <= 30) {
         const every = span <= 6 ? 1 : 3;
-        for (let i = i0, k = 0; i <= i1; i++, k++) { const x = Xc(i).toFixed(1); axis += `<line x1="${x}" x2="${x}" y1="${B0}" y2="${B0 + 4}" stroke="var(--line-strong)"/>${k % every === 0 || i === i1 ? `<text x="${x}" y="${B0 + 18}" font-size="10" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], span <= 6 ? { weekday: "short", day: "numeric" } : { day: "numeric", month: "short" })}</text>` : ""}`; }
+        for (let i = i0, k = 0; i <= i1; i++, k++) { const x = Xc(i).toFixed(1); axis += `<line x1="${x}" x2="${x}" y1="${B0}" y2="${B0 + 4}" stroke="var(--line-strong)"/>${k % every === 0 || i === i1 ? `<text x="${x}" y="${B0 + 18}" font-size="11" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], span <= 6 ? { weekday: "short", day: "numeric" } : { day: "numeric", month: "short" })}</text>` : ""}`; }
       } else {
         for (let i = i0 + 1; i <= i1; i++) {
           if (dates[i].slice(0, 7) === dates[i - 1].slice(0, 7)) continue;
           const jan = dates[i].slice(5, 7) === "01", x = Xc(i).toFixed(1), label = span <= 260 || +dates[i].slice(5, 7) % 2 === 1;
-          axis += `<line x1="${x}" x2="${x}" y1="${B0}" y2="${B0 + (jan ? 8 : 4)}" stroke="var(--line-strong)"/>${label ? `<text x="${x}" y="${B0 + 18}" font-size="10" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], { month: "short" })}</text>` : ""}${jan ? `<text x="${x}" y="${B0 + 34}" font-size="12" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${dates[i].slice(0, 4)}</text>` : ""}`;
+          axis += `<line x1="${x}" x2="${x}" y1="${B0}" y2="${B0 + (jan ? 8 : 4)}" stroke="var(--line-strong)"/>${label ? `<text x="${x}" y="${B0 + 18}" font-size="11" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], { month: "short" })}</text>` : ""}${jan ? `<text x="${x}" y="${B0 + 34}" font-size="12" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${dates[i].slice(0, 4)}</text>` : ""}`;
         }
       }
       const move = spy[i1] / spy[i0] - 1;
@@ -1608,7 +1608,7 @@
       for (let i = i0 + 1; i <= Ld; i++) {
         if (dates[i].slice(0, 7) === dates[i - 1].slice(0, 7)) continue;
         const jan = dates[i].slice(5, 7) === "01", xx = Xt(i - i0).toFixed(1), label = n <= 260 || +dates[i].slice(5, 7) % 2 === 1;
-        axis += `<line x1="${xx}" x2="${xx}" y1="${Ht - 36}" y2="${Ht - 32}" stroke="var(--line-strong)"/>${label ? `<text x="${xx}" y="${Ht - 20}" font-size="10" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], { month: "short" })}</text>` : ""}${jan ? `<text x="${xx}" y="${Ht - 4}" font-size="12" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${dates[i].slice(0, 4)}</text>` : ""}`;
+        axis += `<line x1="${xx}" x2="${xx}" y1="${Ht - 36}" y2="${Ht - 32}" stroke="var(--line-strong)"/>${label ? `<text x="${xx}" y="${Ht - 20}" font-size="11" fill="var(--muted)" text-anchor="middle">${fmtDate(dates[i], { month: "short" })}</text>` : ""}${jan ? `<text x="${xx}" y="${Ht - 4}" font-size="12" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${dates[i].slice(0, 4)}</text>` : ""}`;
       }
       const ev = t.events.filter((e) => e.end >= dates[i0]);
       $("#thBody").innerHTML = `<div class="toolbar"><div class="seg" role="group" aria-label="Industry period">${TH_SPANS.map(([v, l]) => `<button type="button" data-tr="${v}" aria-pressed="${v === thRange}">${l}</button>`).join("")}</div>
