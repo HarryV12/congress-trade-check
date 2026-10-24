@@ -12,19 +12,21 @@ window.CTC_INVEST = {
       summary: "The Commerce Department signed a letter of intent to put up to $175M of CHIPS research money into Helion over three years, in return for a non-voting equity stake, for power-electronics chips used in fusion machines. Helion adds $50M of its own. The stake only starts once a final agreement is signed.",
       inflows: [
         { name: "Dept. of Commerce", amount: "up to $175M", note: "CHIPS R&D funding, paid as equity", kind: "gov" },
-        { name: "Sam Altman", amount: "~⅓ owner", note: "OpenAI CEO; long-time chairman", kind: "person" },
-        { name: "Peter Thiel", amount: "investor", note: "via Mithril Capital", kind: "person" },
+        { name: "Sam Altman", amount: "~⅓ owner", note: "OpenAI CEO; said in court he owns about a third; left Helion's board in March 2026", kind: "person" },
+        { name: "Peter Thiel", amount: "investor", note: "via Mithril Capital, an existing investor in the 2021 round", kind: "person" },
         { name: "SoftBank and others", amount: "$425M + $465M", note: "2025 Series F and June 2026 Series G rounds", kind: "company" }
       ],
       links: [
         { tk: "MSFT", role: "Buys 50 MW", note: "Agreed in 2023 to buy power from Helion's first plant (target 2028)" },
         { tk: "CEG", role: "Sells the power", note: "Constellation agreed to market and deliver Helion's power to Microsoft" },
-        { tk: "GFS", role: "Chip R&D", note: "Reported partner on the fusion chip work; the government also owns GFS shares" }
+        { tk: "GFS", role: "Chip R&D (unconfirmed)", note: "Named as a chip R&D partner in the r/TrumpsTrades post; not confirmed by Helion or GlobalFoundries. The government owns GFS shares" }
       ],
       trump: ["MSFT", "CEG", "GFS"],
       sources: [
         { name: "GeekWire: Helion lines up potential $175M CHIPS award", url: "https://www.geekwire.com/2026/fusion-startup-helion-lines-up-potential-175m-chips-award-to-develop-advanced-semiconductors/" },
         { name: "Pulse 2.0: Helion signs LOI for up to $175M", url: "https://pulse2.com/helion-signs-loi-for-up-to-175-million-in-chips-act-funding-supporting-225-million-semiconductor-investment/" },
+        { name: "GeekWire: Altman's Helion stake (about a third)", url: "https://www.geekwire.com/2026/openai-ceo-sam-altmans-stake-in-helion-energy-draws-scrutiny-in-musk-trial-and-on-capitol-hill/" },
+        { name: "Goodwin: Helion's 2021 $500M Series E (Mithril an existing investor)", url: "https://www.goodwinlaw.com/en/news-and-events/news/2021/11/11_08-helion-completes-500m-series-e-financing" },
         { name: "r/TrumpsTrades post", url: "https://www.reddit.com/r/TrumpsTrades/comments/1xdnm39/trump_administration_plans_175m_investment_in/" }
       ]
     },
@@ -34,7 +36,7 @@ window.CTC_INVEST = {
       center: { name: "GlobalFoundries", sub: "US chipmaker · GFS", tk: "GFS" },
       summary: "As the equity part of a CHIPS research award of up to $375M for a secure US quantum-chip foundry, Commerce received 9.9M GlobalFoundries shares at $37.85 (about 1%). In October it agreed to take about 4% more, alongside Japan's plan to put up to $21B into two New York chip plants run by GlobalFoundries.",
       inflows: [
-        { name: "Dept. of Commerce", amount: "9.9M shares at $37.85", note: "≈$375M, about 1% (3 Sep 2026)", kind: "gov", stake: { tk: "GFS", shares: 9907399, price: 37.85, date: "2026-09-03" } },
+        { name: "Dept. of Commerce", amount: "9.9M shares at $37.85", note: "≈$375M, about 1% (3 Sep 2026). Commerce has moved to register these shares for resale; the earliest sale is about early 2027", kind: "gov", stake: { tk: "GFS", shares: 9907399, price: 37.85, date: "2026-09-03" } },
         { name: "Dept. of Commerce", amount: "+≈4% stake", note: "Agreed 14 Oct 2026; terms not disclosed", kind: "gov" },
         { name: "Japan", amount: "up to $21B", note: "Two New York fabs, co-owned with the US government", kind: "gov" }
       ],
@@ -43,6 +45,7 @@ window.CTC_INVEST = {
       ],
       trump: ["GFS"],
       sources: [
+        { name: "Crypto Briefing: Commerce files to sell its 9.91M GFS shares", url: "https://cryptobriefing.com/commerce-department-globalfoundries-shares-sale/" },
         { name: "Cleary Gottlieb: GlobalFoundries share issuance to Commerce", url: "https://www.clearygottlieb.com/news-and-insights/news-listing/globalfoundries-in-issuance-of-ordinary-shares-to-us-department-of-commerce" },
         { name: "Korea Times: Japan to invest up to $21B in GlobalFoundries-run fabs", url: "https://www.koreatimes.co.kr/world/20261014/japan-to-invest-up-to-21-billion-in-two-us-chip-factories-to-be-run-by-globalfoundries" },
         { name: "TradeZero: administration doubles its GlobalFoundries stake", url: "https://tradezero.com/blog/trump-administration-doubles-its-equity-stake-in-globalfoundries" }

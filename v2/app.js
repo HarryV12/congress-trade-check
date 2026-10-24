@@ -1304,7 +1304,7 @@
 
   // ---------- Market drops: why did the market fall? ----------
   let MOVES = null;
-  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=5&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
+  const loadMoves = () => MOVES ? Promise.resolve(MOVES) : loadScript(`../market_moves.js?v=6&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (MOVES = window.CTC_MOVES || null));
   let dropInd = "all", dropRange = "all", thRange = "1y";
   // the US stock market's clock (New York time): regular trading 9:30am to 4:00pm ET, Monday to Friday
   // (exchange holidays aren't known here, so a holiday shows as a normal weekday)
@@ -1690,9 +1690,9 @@
   let XPX = false;
   const loadAllPrices = () => loadPrices().then((P) => XPX ? P : loadScript("../extra_prices.js").then(() => { if (P && window.CTC_XPX) for (const [t, v] of Object.entries(window.CTC_XPX.px)) if (!P.px[t]) P.px[t] = v; XPX = true; return P; }));
   let AFTER = null, INVEST = null, PROD = null;
-  const loadAfter = () => AFTER ? Promise.resolve(AFTER) : loadScript(`../aftermath.js?h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (AFTER = window.CTC_AFTERMATH || null));
-  const loadInvest = () => INVEST ? Promise.resolve(INVEST) : loadScript(`../investments.js?h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (INVEST = window.CTC_INVEST || null));
-  const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("../production.js?v=1").then(() => (PROD = window.CTC_PROD || null));
+  const loadAfter = () => AFTER ? Promise.resolve(AFTER) : loadScript(`../aftermath.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (AFTER = window.CTC_AFTERMATH || null));
+  const loadInvest = () => INVEST ? Promise.resolve(INVEST) : loadScript(`../investments.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (INVEST = window.CTC_INVEST || null));
+  const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("../production.js?v=2").then(() => (PROD = window.CTC_PROD || null));
   const SPANS = { day: [1, "Today"], week: [5, "This week"], month: [21, "This month"] };
   let moverList = "sp", moverSpan = "day";
   const lastIdx = (x) => { if (!x) return -1; for (let i = x.length - 1; i >= 0; i--) if (x[i] != null) return i; return -1; };
@@ -1849,7 +1849,7 @@
     };
     app.innerHTML = `<h1>Aftermath</h1>
       <p class="lede">Normally steady, large companies whose shares have fallen 15% or more and stayed down for two months or longer, and what led to each fall.</p>
-      <div class="crit"><span>Steady before: yearly swings under ${Math.round(((A && A.steady_cut) || 0.28) * 100)}%</span><span>Fell 15%+ from a high at least 2 months ago</span><span>Still near the low</span><span>Worth $20B+</span></div>
+      <div class="crit">${S.some((s) => s.hand) ? `<span>Plus ${S.filter((s) => s.hand).map((s) => esc(s.name)).join(" and ")} as well-known picks</span>` : ""}<span>Steady before: yearly swings under ${Math.round(((A && A.steady_cut) || 0.28) * 100)}%</span><span>Fell 15%+ from a high at least 2 months ago</span><span>Still near the low</span><span>Worth $20B+</span></div>
       <div class="card section"><h2>How far each one fell <span class="muted">from its peak · click one</span></h2>
         ${S.map((s, k) => `<a class="af-bar" data-goto="af-${k}" href="#/aftermath"><span class="af-n"><b>${esc(s.name.replace(/ Common Stock$| Corporation.*$| Inc\..*$/, ""))}</b> <span class="muted small">${esc(s.cause || s.industry || "")}</span></span>
           <span class="af-track"><i style="width:${(Math.abs(s.drop) / mx * 100).toFixed(1)}%"></i></span><b class="mono down">${pct(s.drop, 1)}</b><span class="muted small">${s.days}d</span></a>`).join("")}</div>
@@ -1857,11 +1857,11 @@
         return `<a class="af-sm card" data-goto="af-${k}" href="#/aftermath"><b class="ell">${esc(s.name.split(" ").slice(0, 2).join(" "))}</b><span class="mono down">${pct(s.drop, 0)}</span>${spark(ser, Math.max(0, pk - 40), 160, 44, "var(--bad)")}</a>`; }).join("")}</div>
       ${S.map((s, k) => `<div class="card af-card section" id="af-${k}">
         <div class="af-head">${BRAND[s.tk] && BRAND[s.tk][1] ? logoBox(s.tk, "var(--chart)", 44) : `<span class="logo" style="width:44px;height:44px;background:var(--chart)"><b style="font-size:13px">${esc(s.tk.split(".")[0].slice(0, 4))}</b></span>`}
-          <div><h2>${esc(s.name.replace(/ Common Stock$/, ""))} <span class="muted small">${esc(s.tk)} · ${esc(s.industry || s.sector)}</span></h2><div class="af-cause">${esc(s.cause || "")}${s.clear === false ? ` <span class="pill-soft">no single cause</span>` : ""}</div></div></div>
+          <div><h2>${esc(s.name.replace(/ Common Stock$/, ""))} <span class="muted small">${esc(s.tk)} · ${esc(s.industry || s.sector)}</span></h2><div class="af-cause">${esc(s.cause || "")}${s.clear === false ? ` <span class="pill-soft">no single cause</span>` : ""}${s.hand ? ` <span class="pill-soft" title="Its daily swings were above the 'steady' line; included because it is a widely followed name">well-known pick · not 'steady' by our test</span>` : ""}</div></div></div>
         <div class="af-stats">
           <div><span class="lbl">Fell</span><b class="down">${pct(s.drop, 1)}</b><span class="muted small">since ${fmtDate(s.peak, { day: "numeric", month: "short" })}</span></div>
           <div><span class="lbl">How long</span><b>${s.days} days</b><span class="muted small">trading days from the peak</span></div>
-          <div><span class="lbl">Price</span><b class="mono">${s.peak_px} → ${s.now_px}</b><span class="muted small">${s.tk.includes(".") ? "home-market currency" : "US dollars"}</span></div>
+          <div><span class="lbl">Price</span><b class="mono">${(+s.peak_px).toLocaleString(undefined, { maximumFractionDigits: 2 })} → ${(+s.now_px).toLocaleString(undefined, { maximumFractionDigits: 2 })}</b><span class="muted small">${s.tk.includes(".") ? "home-market currency" : "US dollars"}</span></div>
           <div><span class="lbl">Same days</span><span class="cmp"><span>Stock</span><i class="neg" style="width:${Math.min(100, Math.abs(s.drop) / 0.35 * 100)}%"></i><b class="down">${pct(s.drop, 0)}</b></span>
             ${s.sector_move != null ? `<span class="cmp"><span>Sector</span><i class="${s.sector_move < 0 ? "neg" : "pos"}" style="width:${Math.min(100, Math.abs(s.sector_move) / 0.35 * 100)}%"></i><b class="${cls(s.sector_move)}">${pct(s.sector_move, 0)}</b></span>` : ""}
             <span class="cmp"><span>S&amp;P 500</span><i class="${s.spy < 0 ? "neg" : "pos"}" style="width:${Math.min(100, Math.abs(s.spy) / 0.35 * 100)}%"></i><b class="${cls(s.spy)}">${pct(s.spy, 0)}</b></span></div>
