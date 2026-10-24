@@ -1493,7 +1493,11 @@
           <div class="ana" data-ana="${key}|${w}"></div></div>
         ${e.what.length ? `<details class="srcs"><summary>Sources: ${e.what.length} news articles</summary><ul>${e.what.map(hl).join("")}</ul></details>` : ""}</div>`;
     };
-    const drawRecent = (key) => { const el = $("#recentCards"); if (!el) return; el.innerHTML = recentCard(key, "today") + recentCard(key, "now"); fillAnalysis(el); };
+    const drawRecent = (key) => {
+      const top = $("#recentCards"), inside = key !== "all" && $("#thRecent"), el = inside || top; if (!el) return;
+      if (top) { top.hidden = !!inside; if (inside) top.innerHTML = ""; }
+      el.innerHTML = recentCard(key, "today") + recentCard(key, "now"); fillAnalysis(el);
+    };
     const showAllDrops = () => { $$(".drops > .drop[hidden]").forEach((d) => { d.hidden = false; }); const b = $("#moreDrops"); if (b) b.parentElement.remove(); };
     if ($("#moreDrops")) $("#moreDrops").addEventListener("click", showAllDrops);
     // where things stand now, for the whole market or one industry: today's move, how far below the year's high, the
@@ -1620,6 +1624,7 @@
           <path d="${path(vb)}" fill="none" stroke="var(--chart)" stroke-width="2.2"/>
           <line class="cx" x1="0" x2="0" y1="14" y2="${Ht - 36}" stroke="var(--ink-2)" stroke-dasharray="3 3" visibility="hidden"/><circle class="cdot" r="4" fill="var(--chart)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`, `${t.name} against the S&P 500`)}<div class="tip" hidden></div></div>
         <div class="legend small"><span><i class="sw" style="background:var(--chart)"></i>${esc(t.name)} basket</span><span><i class="sw" style="background:#eb6834"></i>S&amp;P 500</span><span><i class="sw" style="background:var(--good)"></i>sharp jump</span><span><i class="sw" style="background:var(--bad)"></i>sharp fall</span><span class="tks">${t.tickers.map((x2) => tkLink(x2)).join(" ")}</span></div>
+        <div id="thRecent"></div>
         <h4 class="th-sub">Sharp moves in this period</h4>
         <div class="thmoves">${ev.map((e, k) => !every && k >= 6 ? "" : `<div class="thmove ${e.dir}" id="thm-${k}"><div class="tm-head"><span class="tm-big ${cls(e.move)}">${e.dir === "up" ? "▲" : "▼"} ${pct(e.move, 0).replace(/^[+−]/, "")}</span>
             <span><b>${fmtDate(e.start, { day: "numeric", month: "short", year: "numeric" })}${e.end !== e.start ? ` – ${fmtDate(e.end, { day: "numeric", month: "short" })}` : ""}</b><br><span class="muted small">S&amp;P 500 ${pct(e.spy)} over the same days</span></span></div>
@@ -1627,6 +1632,7 @@
           <div class="why-sum small"><p><b>What happened:</b> ${moveWhat(t, e)}</p>${e.summary ? `<p><b>Why:</b> ${esc(e.summary)}</p>` : ""}<div class="ana" data-ana="${key}|${k}"></div></div>
           ${e.what.length || e.why.length ? `<details class="srcs"><summary>Sources: ${e.what.length + e.why.length} news articles</summary><ul>${[...e.what, ...e.why].map(hl).join("")}</ul></details>` : ""}</div>`).join("") || `<p class="muted">No sharp moves in this period.</p>`}</div>${!every && ev.length > 6 ? `<div class="more"><button type="button" class="btn" id="thOlder">Show ${ev.length - 6} older moves</button></div>` : ""}`;
       fillAnalysis($("#thBody"));
+      drawRecent(key);  // the day and week cards, under the chart
       const older = $("#thOlder"); if (older) older.addEventListener("click", () => showTheme(key, true));
       // hover anywhere on the chart: that day's move, the week's, the S&P 500, the stocks that moved most that day,
       // and, inside a shaded band, that jump or fall with its first headline; click a band to read it below
@@ -1661,8 +1667,9 @@
     };
     const choose = (key) => {
       dropInd = key; $$("[data-ind]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.ind === key)));
-      drawNow(key); drawRecent(key);
+      drawNow(key);
       if (key === "all") overview(); else { $("#thTitle").innerHTML = `${esc(TH[key].name)} <span class="muted">sharp falls and jumps, whether or not the whole market moved</span>`; showTheme(key); }
+      drawRecent(key);
     };
     $$("[data-ind]").forEach((b) => b.addEventListener("click", () => choose(b.dataset.ind)));
     choose(TH[dropInd] ? dropInd : "all");
