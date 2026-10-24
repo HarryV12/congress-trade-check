@@ -1682,7 +1682,7 @@
   let XPX = false;
   const loadAllPrices = () => loadPrices().then((P) => XPX ? P : loadScript("../extra_prices.js").then(() => { if (P && window.CTC_XPX) for (const [t, v] of Object.entries(window.CTC_XPX.px)) if (!P.px[t]) P.px[t] = v; XPX = true; return P; }));
   let AFTER = null, INVEST = null, PROD = null;
-  const loadAfter = () => AFTER ? Promise.resolve(AFTER) : loadScript(`../aftermath.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (AFTER = window.CTC_AFTERMATH || null));
+  const loadAfter = () => AFTER ? Promise.resolve(AFTER) : loadScript(`../aftermath.js?v=3&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (AFTER = window.CTC_AFTERMATH || null));
   const loadInvest = () => INVEST ? Promise.resolve(INVEST) : loadScript(`../investments.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (INVEST = window.CTC_INVEST || null));
   const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("../production.js?v=4").then(() => (PROD = window.CTC_PROD || null));
   const SPANS = { day: [1, "Today"], week: [5, "This week"], month: [21, "This month"] };
@@ -1862,7 +1862,7 @@
         </div>
         <div class="chart">${chart(s)}</div>
         <div class="af-tl">${(s.events || []).map((e, j) => { const [g, c] = KIND[e.kind] || KIND.bad; return `<div class="af-ev"><span class="af-num" style="background:${c}">${j + 1}</span><span class="muted small">${fmtDate(e.date, { day: "numeric", month: "short" })}</span><span>${esc(e.text)}</span></div>`; }).join("")}</div>
-        ${s.summary ? `<p class="af-sum"><b>What led to it:</b> ${esc(s.summary)}</p>` : ""}
+        ${s.summary || s.why ? `<div class="why-sum af-why">${s.summary ? `<p><b>What led to it:</b> ${esc(s.summary)}</p>` : ""}${s.why ? `<p><b>Why:</b> ${esc(s.why)}</p>` : ""}</div>` : ""}
         ${s.news && s.news.length ? `<details class="srcs"><summary>Sources: ${s.news.length} news articles</summary><ul>${s.news.map((it) => `<li><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a> <span class="muted small">${esc(it.source)} · ${fmtDate(it.date, { day: "numeric", month: "short" })}</span></li>`).join("")}</ul></details>` : ""}
       </div>`).join("")}
       <p class="small muted">Prices are daily closes (Rolls-Royce in pence, Novo Nordisk in Danish kroner). "Steady" compares each stock's daily swings in the year before its peak with the rest of the S&amp;P 500. The timelines are written from news reports; where no single report explains a fall, the card says so.</p>`;

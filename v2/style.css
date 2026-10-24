@@ -686,3 +686,4 @@ details.mth[open] > summary::after { content: "−"; }
 .mth-credits { font-size: 14px; }
 .mth-table td:first-child { min-width: 240px; }
 .mth-table th.r { white-space: normal; min-width: 90px; }
+.af-why { margin-top: 14px; font-size: 15px; line-height: 1.6; } .af-why p + p { margin-top: 10px; }
