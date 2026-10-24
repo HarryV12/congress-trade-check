@@ -1692,7 +1692,7 @@
   let AFTER = null, INVEST = null, PROD = null;
   const loadAfter = () => AFTER ? Promise.resolve(AFTER) : loadScript(`../aftermath.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (AFTER = window.CTC_AFTERMATH || null));
   const loadInvest = () => INVEST ? Promise.resolve(INVEST) : loadScript(`../investments.js?v=2&h=${Math.floor(Date.now() / 3.6e6)}`).then(() => (INVEST = window.CTC_INVEST || null));
-  const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("../production.js?v=3").then(() => (PROD = window.CTC_PROD || null));
+  const loadProd = () => PROD ? Promise.resolve(PROD) : loadScript("../production.js?v=4").then(() => (PROD = window.CTC_PROD || null));
   const SPANS = { day: [1, "Today"], week: [5, "This week"], month: [21, "This month"] };
   let moverList = "sp", moverSpan = "day";
   const lastIdx = (x) => { if (!x) return -1; for (let i = x.length - 1; i >= 0; i--) if (x[i] != null) return i; return -1; };
@@ -1850,6 +1850,7 @@
     app.innerHTML = `<h1>Aftermath</h1>
       <p class="lede">Normally steady, large companies whose shares have fallen 15% or more and stayed down for two months or longer, and what led to each fall.</p>
       <div class="crit">${S.some((s) => s.hand) ? `<span>Plus ${S.filter((s) => s.hand).map((s) => esc(s.name)).join(" and ")} as well-known picks</span>` : ""}<span>Steady before: yearly swings under ${Math.round(((A && A.steady_cut) || 0.28) * 100)}%</span><span>Fell 15%+ from a high at least 2 months ago</span><span>Still near the low</span><span>Worth $20B+</span></div>
+      <div class="toolbar pin-top"><div class="seg" role="group" aria-label="Jump to a stock">${S.map((s, k) => `<button type="button" data-goto="af-${k}">${esc(s.tk === "PCG" ? "PG&E" : s.name.replace(/ Common Stock$| Corporation.*$| Inc\..*$| Co\.$|,? plc$| A\/S.*$| Holdings?.*$/i, ""))}</button>`).join("")}</div></div>
       <div class="card section"><h2>How far each one fell <span class="muted">from its peak · click one</span></h2>
         ${S.map((s, k) => `<a class="af-bar" data-goto="af-${k}" href="#/aftermath"><span class="af-n"><b>${esc(s.name.replace(/ Common Stock$| Corporation.*$| Inc\..*$/, ""))}</b> <span class="muted small">${esc(s.cause || s.industry || "")}</span></span>
           <span class="af-track"><i style="width:${(Math.abs(s.drop) / mx * 100).toFixed(1)}%"></i></span><b class="mono down">${pct(s.drop, 1)}</b><span class="muted small">${s.days}d</span></a>`).join("")}</div>
@@ -1873,6 +1874,7 @@
         ${s.news && s.news.length ? `<details class="srcs"><summary>Sources: ${s.news.length} news articles</summary><ul>${s.news.map((it) => `<li><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a> <span class="muted small">${esc(it.source)} · ${fmtDate(it.date, { day: "numeric", month: "short" })}</span></li>`).join("")}</ul></details>` : ""}
       </div>`).join("")}
       <p class="small muted">Prices are daily closes (Rolls-Royce in pence, Novo Nordisk in Danish kroner). "Steady" compares each stock's daily swings in the year before its peak with the rest of the S&amp;P 500. The timelines are written from news reports; where no single report explains a fall, the card says so.</p>`;
+    pinBar();
   }
 
   // ---------- Investments: who put money in, and the listed companies linked to it ----------
@@ -1914,7 +1916,7 @@
       <p class="lede">Big deals where governments, companies and well-known investors put money in, who else is involved, and how the linked listed stocks have moved since.</p>
       ${stakes.length ? `<div class="card"><h2>The government's stakes <span class="muted">what it paid vs what it's worth now</span></h2>${stakes.map((s) => `<div class="stk"><span class="stk-n"><b>${esc(s.d.center.name)}</b> <span class="muted small">${esc(s.f.name)}</span></span>
         <span class="stk-bars"><span class="stk-b cost" style="width:${(s.cost / smx * 100).toFixed(1)}%">${usd(s.cost)} paid</span><span class="stk-b now ${s.now >= s.cost ? "pos" : "neg"}" style="width:${(s.now / smx * 100).toFixed(1)}%">${usd(s.now)} now</span></span><b class="mono ${cls(s.now / s.cost - 1)}">${pct(s.now / s.cost - 1, 0)}</b></div>`).join("")}</div>` : ""}
-      <div class="inv-index section">${deals.map((d, k) => `<a class="pill-link" data-goto="inv-${k}" href="#/investments">${esc(d.center.name)}</a>`).join("")}</div>
+      <div class="toolbar pin-top section"><div class="seg" role="group" aria-label="Jump to a deal">${deals.map((d, k) => `<button type="button" data-goto="inv-${k}">${esc(d.center.name)}</button>`).join("")}</div></div>
       ${deals.map(diagram).join("")}
       <div class="card section"><h2>Where does this information come from?</h2><div class="srcgrid">
         <div><b>Government notices</b><span>Commerce/NIST and Energy Department announcements of CHIPS Act and loan deals, including letters of intent like Helion's.</span></div>
@@ -1933,11 +1935,12 @@
       $$("[data-out]", fl).forEach((b) => { const r = b.getBoundingClientRect(), x = r.left - r0.left, y = r.top - r0.top + r.height / 2; s2 += `<path d="M${hx + hb.width / 2},${hy} C${(x + hx) / 2},${hy} ${(x + hx) / 2},${y} ${x},${y}" fill="none" stroke="var(--line-strong)" stroke-width="1.6"/>`; });
       svg.innerHTML = s2;
     });
+    pinBar();
     drawLines(); window.addEventListener("resize", () => { if (location.hash === "#/investments") drawLines(); }, { passive: true });
   }
 
   // ---------- Production: where the world's key goods are made ----------
-  let prodItem = "chips", WORLD = null;
+  let prodItem = "chips", prodJump = false, WORLD = null;
   const loadWorld = () => WORLD ? Promise.resolve(WORLD) : Promise.all([loadScript("https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"), loadScript("https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js")])
     .then(() => fetch("https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json")).then((r) => r.json()).then((topo) => (WORLD = window.topojson.feature(topo, topo.objects.countries))).catch(() => null);
   async function pageProduction() {
@@ -1950,8 +1953,8 @@
     const share = (v) => isPct ? v / 100 : null;
     app.innerHTML = `<h1>Production</h1>
       <p class="lede">Where the things markets care about are made, and how much depends on a single country.</p>
-      <div class="card"><h2>The AI chip chain <span class="muted">each step, and the one place it depends on</span></h2><div class="chain">${D2.chain.map((c, k) => `<div class="ch-step"><span class="ch-n">${k + 1}</span><b>${esc(c.step)}</b><span class="ch-where">${esc(c.where)}</span><span class="small muted">${esc(c.who)}</span><span class="ch-share">${esc(c.share)}</span></div>`).join('<span class="ch-arrow">→</span>')}</div></div>
-      <div class="toolbar pr-tools">${D2.groups.map((g) => `<div class="seg" role="group" aria-label="${esc(g.name)}">${g.items.map((k) => `<button type="button" data-pi="${k}" aria-pressed="${k === prodItem}">${esc(D2.items[k].name)}</button>`).join("")}</div>`).join("")}</div>
+      <div class="toolbar pin-top pr-tools">${D2.groups.map((g) => `<div class="seg" role="group" aria-label="${esc(g.name)}">${g.items.map((k) => `<button type="button" data-pi="${k}" aria-pressed="${k === prodItem}">${esc(D2.items[k].name)}</button>`).join("")}</div>`).join("")}</div>
+      <div class="card"><h2>${prodItem === "chips" ? "The AI chip chain" : `${esc(it.name)}: the supply chain`} <span class="muted">each step, and where it depends on</span></h2><div class="chain">${(it.chain || []).map((c, k) => `<div class="ch-step"><span class="ch-n">${k + 1}</span><b>${esc(c.step)}</b><span class="ch-where">${esc(c.where)}</span><span class="small muted">${esc(c.who)}</span><span class="ch-share">${esc(c.share)}</span></div>`).join('<span class="ch-arrow">→</span>')}</div></div>
       <div class="card section"><div class="pr-head"><h2>${esc(it.name)}</h2><span class="muted small">${esc(it.unit)} · ${esc(it.year)} · world: ${esc(it.world)}</span></div><p class="small">${esc(it.why)}</p>
         <div class="pr-grid"><div class="pr-map" id="prMap">${W ? "" : `<p class="muted small">The world map couldn't load; the list shows the same figures.</p>`}</div>
           <div class="pr-list">${it.rows.map(([n, , v], k) => `<div class="pr-row"><span class="pr-rank">${k + 1}</span><b>${esc(n)}</b><span class="pr-bar"><i style="width:${(v / it.rows[0][2] * 100).toFixed(1)}%;opacity:${(1 - k * 0.07).toFixed(2)}"></i></span><span class="mono">${isPct ? `${v}%` : v.toLocaleString()}</span></div>`).join("")}
@@ -1959,7 +1962,10 @@
         <p class="small muted">Source: ${esc(it.source)} (${esc(it.year)}). Figures rounded.</p></div>
       <div class="card section"><h2>Who leads each one</h2><div class="pr-cards">${Object.entries(D2.items).map(([k, x]) => { const top = x.rows[0], tot = x.rows.reduce((a, r) => a + r[2], 0), sh = /^%/.test(x.unit) ? top[2] : null;
         return `<button type="button" class="pr-card${k === prodItem ? " on" : ""}" data-pi="${k}"><span class="muted small">${esc(x.name)}</span><b>${esc(top[0])}</b><span class="mono">${sh != null ? `${sh}%` : `${top[2].toLocaleString()}`}</span><span class="pr-mini"><i style="width:${sh != null ? sh : Math.round(top[2] / tot * 100)}%"></i></span></button>`; }).join("")}</div></div>`;
-    $$("[data-pi]").forEach((b) => b.addEventListener("click", () => { prodItem = b.dataset.pi; route(true); }));
+    $$("[data-pi]").forEach((b) => b.addEventListener("click", () => { prodItem = b.dataset.pi; prodJump = true; route(true); }));
+    pinBar();  // the page drew after the router ran: pin its choices now
+    // picked from the pinned bar further down: bring the new item's chain into view
+    const ch = $(".chain", app); if (prodJump && ch && ch.getBoundingClientRect().top < 0) ch.closest(".card").scrollIntoView({ block: "start" }); prodJump = false;
     if (W && window.d3) {
       const el = $("#prMap"), w = 760, h = 400, d3 = window.d3, proj = d3.geoNaturalEarth1().fitSize([w, h], { type: "Sphere" }), path = d3.geoPath(proj);
       const val = new Map(); for (const [, n, v] of it.rows) val.set(String(n).padStart(3, "0"), (val.get(String(n).padStart(3, "0")) || 0) + v);
