@@ -634,10 +634,13 @@ details.srcs > summary:hover { color: var(--accent); } details.srcs .news2 { mar
    Investments' box notes: 13px. Source tags and chart month labels: 11px.
    Data numbers, dates, short labels and heatmap tiles keep their sizes. */
 p.small, ul.small, ol.small, .small > li,
-h2 .muted, h5 .muted, .stat .sub,
+h2 .muted, .card h2 .muted, h5 .muted, .stat .sub, .spike .small, .banner, .why, .rfact p,
 .ab-news li, .ab-stat .small, .ab-donut .small, .nx-step .small, .sq ul, .srcgrid > div,
 .af-ev, .af-ev > span:nth-child(3), .af-stats > div > .muted.small:last-child, .af-n .muted.small, .af-sum,
 .mini-row .ell.small, .ch-step .small, details.srcs > ul, .inv-tiles .muted.small, .inv-sum { font-size: 15px; }
 .af-ev > span:nth-child(2) { font-size: 13px; }
 .fbox small { font-size: 13px; }
 .ab-src { font-size: 11px; line-height: 17px; }
+/* hype-check reasons: neutral text; red or green only as a thin edge */
+.why.pos, .why.neg { color: var(--ink-2); padding-left: 7px; border-left: 3px solid var(--good); }
+.why.neg { border-left-color: var(--bad); }
